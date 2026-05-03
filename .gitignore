@@ -1,0 +1,30 @@
+# Gradle
+.gradle/
+**/build/
+/local.properties
+/.idea/
+*.iml
+.cxx
+.externalNativeBuild
+/captures
+
+# OS
+.DS_Store
+
+# IntelliJ / Android Studio
+*.ipr
+*.iws
+out/
+
+# Beads (synced via beads-sync branch, not working branches)
+.beads/issues.jsonl
+.beads/interactions.jsonl
+.beads/embeddeddolt/
+.beads/backup/
+.beads/.local_version
+.dolt/
+*.db
+.beads-credential-key
+
+# Claude Code: local-only configuration must NEVER be committed
+.claude/settings.local.json
