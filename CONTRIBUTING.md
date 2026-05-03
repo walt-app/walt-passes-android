@@ -1,6 +1,6 @@
 # Contributing
 
-Walt-passes is an open-source carve-out from the closed-source [Walt](https://walt.is) Android wallet. Its purpose is **transparency-for-trust**: every security-and-privacy claim Walt makes about pass handling is implemented in code that lives here. That goal shapes what kinds of contributions fit.
+walt-passes-android is an open-source carve-out from the closed-source [Walt](https://walt.is) Android wallet. Its purpose is **transparency-for-trust**: every security-and-privacy claim Walt makes about pass handling is implemented in code that lives here. That goal shapes what kinds of contributions fit.
 
 ## What fits this repository
 
@@ -14,7 +14,7 @@ Walt-passes is an open-source carve-out from the closed-source [Walt](https://wa
 - Features that pull pass data off the device. There is no `webServiceURL` handling, no telemetry to issuers, no cloud sync. PRs that add network calls in `passes-core` or `passes-storage` will be declined.
 - NFC / HCE handling for passes. Passes never register a payment AID; the `nfc` PKPASS field is parsed-and-ignored. This is deliberate to avoid HCE conflicts with Walt's payment feature.
 - WebView-based rendering of pass content. HTML in back fields is rendered through an explicit subset and nothing else.
-- Generalizing the library beyond what Walt needs. Walt-passes is "Walt's open pass-handling kernel," not a general-purpose PKPASS library. Reuse by other apps is welcome as a side effect; the primary commitment is the audit trail.
+- Generalizing the library beyond what Walt needs. This is "Walt's open pass-handling kernel for Android," not a general-purpose PKPASS library. Reuse by other apps is welcome as a side effect; the primary commitment is the audit trail.
 
 If you are unsure whether a contribution fits, open an issue first to discuss.
 

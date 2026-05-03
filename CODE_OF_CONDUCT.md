@@ -2,7 +2,7 @@
 
 ## Why this document exists
 
-Walt-passes is a small, security-focused open-source project. This Code of Conduct describes how the project expects people to behave when they participate here. It is a working agreement, not a legal contract. Its purpose is to keep this a place where good technical work is possible.
+walt-passes-android is a small, security-focused open-source project. This Code of Conduct describes how the project expects people to behave when they participate here. It is a working agreement, not a legal contract. Its purpose is to keep this a place where good technical work is possible.
 
 ## What good participation looks like
 
