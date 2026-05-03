@@ -1,0 +1,15 @@
+# Configuration for the GitHub issue chooser. Issue templates live in
+# .github/ISSUE_TEMPLATE/*.md alongside this file.
+#
+# blank_issues_enabled stays true while no issue templates exist, so that
+# contributors are not blocked from filing reports. Switch to false once
+# real templates land.
+blank_issues_enabled: true
+
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/walt-app/walt-passes/security/advisories/new
+    about: Report privately via GitHub security advisories. See SECURITY.md for the full disclosure process.
+  - name: Email the maintainer
+    url: mailto:cole@walt.is
+    about: Use email if you cannot use GitHub private vulnerability reporting, or for anything else that does not fit a public issue.
