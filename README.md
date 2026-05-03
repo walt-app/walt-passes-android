@@ -52,7 +52,7 @@ Pre-alpha. Architecture and design phase. No releases yet.
 
 ## Security policy
 
-See [`SECURITY.md`](SECURITY.md) for vulnerability disclosure. The threat model lives in [`docs/threat-model.md`](docs/threat-model.md).
+See [`SECURITY.md`](SECURITY.md) for vulnerability disclosure.
 
 ## License
 
