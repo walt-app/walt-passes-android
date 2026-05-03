@@ -1,6 +1,6 @@
-# Walt Passes
+# Walt Passes (Android)
 
-> The open-sourced pass-handling implementation that ships in the [Walt](https://walt.is) wallet app.
+> The open-sourced pass-handling implementation that ships in the [Walt](https://walt.is) Android wallet app.
 
 ## Why this repository exists
 

@@ -1,6 +1,6 @@
-# Walt Passes
+# Walt Passes (Android)
 
-Open-source pass-handling kernel for the Walt wallet app. PKPASS parsing, signature verification, encrypted storage, and security-critical UI flows.
+Open-source pass-handling kernel for the Walt Android wallet app. PKPASS parsing, signature verification, encrypted storage, and security-critical UI flows.
 
 ## Repository Purpose
 

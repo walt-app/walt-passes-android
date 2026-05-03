@@ -8,7 +8,7 @@ blank_issues_enabled: true
 
 contact_links:
   - name: Report a security vulnerability
-    url: https://github.com/walt-app/walt-passes/security/advisories/new
+    url: https://github.com/walt-app/walt-passes-android/security/advisories/new
     about: Report privately via GitHub security advisories. See SECURITY.md for the full disclosure process.
   - name: Email the maintainer
     url: mailto:cole@walt.is

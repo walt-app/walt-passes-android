@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-If you think you have found a security issue in walt-passes, please email **cole@walt.is** instead of opening a public GitHub issue.
+If you think you have found a security issue in walt-passes-android, please email **cole@walt.is** instead of opening a public GitHub issue.
 
 Helpful things to include:
 
@@ -13,7 +13,7 @@ Helpful things to include:
 
 ## Scope
 
-Walt-passes is the open-source pass-handling kernel that ships inside the [Walt](https://walt.is) Android wallet. The most useful reports target one of:
+walt-passes-android is the open-source pass-handling kernel that ships inside the [Walt](https://walt.is) Android wallet. The most useful reports target one of:
 
 - The PKPASS parser (`passes-core`): ZIP, JSON, image, signature, manifest verification, `.strings` parsing, locale handling.
 - Pass data storage (`passes-storage`): encryption-at-rest, key management, deletion, backup exclusion.
@@ -43,4 +43,4 @@ A short list of intentional choices a reviewer might want to know up front. If t
 
 ## Supported versions
 
-Walt-passes is pre-alpha. Until a v1.0 release, only the latest commit on `main` is supported.
+walt-passes-android is pre-alpha. Until a v1.0 release, only the latest commit on `main` is supported.
