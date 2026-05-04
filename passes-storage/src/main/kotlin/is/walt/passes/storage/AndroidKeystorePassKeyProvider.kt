@@ -19,17 +19,14 @@ import javax.crypto.spec.GCMParameterSpec
 /**
  * Android-only `PassKeyProvider`. Owns the master AES-256 key in Android Keystore (StrongBox
  * preferred, TEE fallback, software last) and the AES-GCM-wrapped 32-byte database key it
- * produces. ADR 0002 D2.
+ * produces.
  *
  * The master key is non-exportable by Keystore design; the wrapping construction is the
  * bridge between "key never leaves hardware" and "SQLCipher needs raw bytes for its page-key
- * derivation." The unwrapped database key is held in process memory only as long as
- * [provideDatabaseKey] is being invoked; callers wrap it in a [DatabaseKey] which zeros its
- * internal buffer when [DatabaseKey.withBytes] returns.
+ * derivation." The unwrapped database key is held in process memory only inside the
+ * [DatabaseKey] returned here; [DatabaseKey.withBytes] zeros its internal buffer on return.
  *
- * The class is `public` so consumer Hilt modules can refer to its `create` factory by name;
- * its constructor is internal so the only construction path is `create(context)`, which runs
- * the key-provisioning flow and returns the typed `StorageResult`.
+ * The constructor is internal; the only construction path is [create].
  */
 public class AndroidKeystorePassKeyProvider internal constructor(
     private val masterKey: SecretKey,
@@ -57,8 +54,8 @@ public class AndroidKeystorePassKeyProvider internal constructor(
                 val envelope = wrap(raw)
                 if (!wrappedKeyStorage.write(envelope, keyBacking)) {
                     // Critical: do NOT proceed to open SQLCipher if the envelope did not
-                    // durably reach disk. Returning a key that exists only in process
-                    // memory would brick the DB on the next launch.
+                    // durably reach disk. A key that lives only in process memory would
+                    // brick the DB on the next launch.
                     raw.fill(0)
                     return StorageResult.Failure(StorageError.KeyUnavailable)
                 }

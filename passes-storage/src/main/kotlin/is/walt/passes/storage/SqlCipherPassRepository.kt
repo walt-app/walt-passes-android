@@ -3,11 +3,11 @@ package `is`.walt.passes.storage
 import android.content.Context
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.core.toKind
 import `is`.walt.passes.storage.internal.PassStore
 import `is`.walt.passes.storage.internal.SqlCipherDatabaseFactory
 import `is`.walt.passes.storage.internal.SqlCipherPassStore
 import `is`.walt.passes.storage.internal.toFailureKind
-import `is`.walt.passes.storage.internal.toSignatureStatusKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -20,14 +20,9 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Production [PassRepository]. Backed by SQLCipher via [SqlCipherPassStore]; the StateFlow,
- * delete sequencing, and telemetry sequencing live here so they can be exercised in
- * isolation against a fake [PassStore] (see test sources).
- *
- * The constructor is internal so the only construction path is [create], which provisions
- * the database key, opens SQLCipher, runs the schema DDL, and seeds the StateFlow from
- * disk. Hilt modules in walt-android's `core/data-passes` bind [PassRepository] to the
- * value returned by this factory.
+ * Production [PassRepository]. The StateFlow, delete sequencing, and telemetry sequencing
+ * live here so they can be exercised against an in-memory fake [PassStore]. The constructor
+ * is internal; [create] is the only construction path.
  */
 public class SqlCipherPassRepository internal constructor(
     private val store: PassStore,
@@ -51,7 +46,6 @@ public class SqlCipherPassRepository internal constructor(
         pass: Pass,
         signatureStatus: SignatureStatus,
     ): StorageResult<PassRecordId> = runIo {
-        if (closed.get()) return@runIo failure(StorageError.DatabaseLocked)
         val outcome = writeMutex.withLock {
             val o = store.upsert(pass, signatureStatus, clock())
             _passes.value = store.listSummaries()
@@ -59,28 +53,25 @@ public class SqlCipherPassRepository internal constructor(
         }
         telemetryGuard.onPassUpserted(
             type = pass.type,
-            signatureStatus = signatureStatus.toSignatureStatusKind(),
+            signatureStatus = signatureStatus.toKind(),
             wasReplacement = outcome.wasReplacement,
         )
         StorageResult.Success(outcome.recordId)
     }
 
     override suspend fun load(id: PassRecordId): StorageResult<StoredPass> = runIo {
-        if (closed.get()) return@runIo failure(StorageError.DatabaseLocked)
         val stored = store.loadById(id)
             ?: return@runIo failure(StorageError.IntegrityViolation(id))
         StorageResult.Success(stored)
     }
 
     override suspend fun summaryOf(id: PassRecordId): StorageResult<PassSummary> = runIo {
-        if (closed.get()) return@runIo failure(StorageError.DatabaseLocked)
         val summary = store.summaryById(id)
             ?: return@runIo failure(StorageError.IntegrityViolation(id))
         StorageResult.Success(summary)
     }
 
     override suspend fun delete(id: PassRecordId): StorageResult<Unit> = runIo {
-        if (closed.get()) return@runIo failure(StorageError.DatabaseLocked)
         val deleted = writeMutex.withLock {
             val outcome = store.delete(id) ?: return@withLock null
             _passes.value = _passes.value.filterNot { it.id == id }
@@ -89,7 +80,7 @@ public class SqlCipherPassRepository internal constructor(
 
         telemetryGuard.onPassDeleted(
             type = deleted.summary.type,
-            signatureStatus = deleted.summary.signatureStatus.toSignatureStatusKind(),
+            signatureStatus = deleted.summary.signatureStatus.toKind(),
         )
         StorageResult.Success(Unit)
     }
@@ -100,11 +91,6 @@ public class SqlCipherPassRepository internal constructor(
         }
     }
 
-    /**
-     * Single emission point for `StorageResult.Failure`. Every failure-returning code path
-     * routes through here so [StorageTelemetryGuard.onStorageFailure] fires once per
-     * Failure, with the structural arm and (for Unknown) the open-ended kind.
-     */
     private fun <T> failure(error: StorageError): StorageResult<T> {
         telemetryGuard.onStorageFailure(
             kind = error.toFailureKind(),
@@ -115,11 +101,12 @@ public class SqlCipherPassRepository internal constructor(
 
     private suspend inline fun <T> runIo(crossinline block: suspend () -> StorageResult<T>): StorageResult<T> =
         withContext(ioDispatcher) {
+            if (closed.get()) return@withContext failure(StorageError.DatabaseLocked)
             try {
                 block()
             } catch (e: CancellationException) {
-                // Honor structured cancellation. A swallow here would silently break callers
-                // that rely on coroutine cancellation to abort an in-flight load/save.
+                // Honor structured cancellation; swallowing would silently break callers
+                // that rely on it to abort an in-flight load/save.
                 throw e
             } catch (e: Throwable) {
                 failure(
@@ -134,9 +121,7 @@ public class SqlCipherPassRepository internal constructor(
     public companion object {
         /**
          * Provisions SQLCipher with the `keyProvider`'s database key, runs [Schema.DDL] on
-         * first open, and returns a [PassRepository] ready for use. The returned repository
-         * should outlive the wallet activity stack; consumers typically hold the binding
-         * inside a Hilt singleton scope and let process exit reclaim it.
+         * first open, and returns a [PassRepository] ready for use.
          */
         @JvmStatic
         public fun create(

@@ -27,11 +27,11 @@ import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
 
 /**
- * Robolectric-runner-backed verification of the StateFlow + delete sequencing contract from
- * ADR 0002 D6. The repository is constructed against an in-memory fake [PassStore] so we
- * exercise the public contract without touching SQLCipher native libraries.
+ * Robolectric-runner-backed verification of the StateFlow + delete sequencing contract.
+ * The repository is constructed against an in-memory fake [PassStore] so we exercise the
+ * public contract without touching SQLCipher native libraries.
  *
- * The properties locked here:
+ * Properties locked here:
  *
  *  1. The `passes` StateFlow seeds from `store.listSummaries()` at construction time.
  *  2. After `upsert`, the StateFlow reflects the new row (insert OR replace).
@@ -103,10 +103,8 @@ class PassRepositoryContractTest {
 
         assertThat(repo.passes.value).isEmpty()
 
-        // Sequencing: the StateFlow update happens BEFORE the telemetry event. We can verify
-        // this by inspecting the recorded transcript: telemetry was recorded after delete()
-        // returned, by which point the StateFlow value is already empty. The telemetry guard
-        // is not invoked from inside the store, so a pre-state-update event would be a bug.
+        // Sequencing: telemetry fires after the StateFlow update. The recorded transcript
+        // observes only the post-delete() state, by which point the value is already empty.
         assertThat(telemetry.events).containsExactly(
             "init:Software",
             "delete:BoardingPass:AppleVerified",
@@ -129,8 +127,6 @@ class PassRepositoryContractTest {
 
         check(result is StorageResult.Failure)
         check(result.error is StorageError.IntegrityViolation)
-        // No delete event (the row didn't go anywhere); ONE storage-failure event so the
-        // observability discipline survives the early return path.
         assertThat(telemetry.events).containsExactly(
             "init:StrongBox",
             "failure:IntegrityViolation:n/a",
@@ -165,8 +161,7 @@ class PassRepositoryContractTest {
     @Test
     fun deleteIsIrreversibleNoUndoArmOnPublicSurface() {
         // Compile-time lock: the only mutating method on PassRepository for an existing row
-        // is `delete(id)`. There is no `undelete`, `restore`, `softDelete`, or `archive` on
-        // the contract. Adding one would force a re-read of ADR 0002 D6.
+        // is `delete(id)`. No `undelete`, `restore`, `softDelete`, or `archive` arms exist.
         val methods = PassRepository::class.java.declaredMethods.map { it.name }.toSet()
         assertThat(methods).doesNotContain("undelete")
         assertThat(methods).doesNotContain("restore")

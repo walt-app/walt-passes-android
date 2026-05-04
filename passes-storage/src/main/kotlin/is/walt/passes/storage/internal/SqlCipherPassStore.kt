@@ -10,6 +10,8 @@ import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.core.SignatureStatusKind
+import `is`.walt.passes.core.toKind
 import `is`.walt.passes.storage.MigrationFailureKind
 import `is`.walt.passes.storage.PassRecordId
 import `is`.walt.passes.storage.PassSummary
@@ -20,11 +22,9 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase
 
 /**
  * SQLCipher-backed implementation of [PassStore]. Owns the `SQLiteDatabase` handle for the
- * lifetime of the `PassRepository`. Concurrency is single-writer: all callers go through the
- * repository's IO dispatcher, which we treat as a serialization point. SQLite WAL mode
- * tolerates concurrent readers, but the repository does not currently exploit that — all
- * reads are also routed through the same dispatcher to keep the StateFlow + telemetry
- * sequencing deterministic (D6).
+ * lifetime of the repository. Concurrency is single-writer: all callers go through the
+ * repository's IO dispatcher. Reads share the same dispatcher to keep the StateFlow +
+ * telemetry sequencing deterministic.
  */
 internal class SqlCipherPassStore(
     private val db: SQLiteDatabase,
@@ -34,10 +34,7 @@ internal class SqlCipherPassStore(
     override fun listSummaries(): List<PassSummary> {
         val out = ArrayList<PassSummary>()
         db.rawQuery(
-            "SELECT id, type, serial_number, organization_name, description, " +
-                "expiration_epoch_ms, voided, signature_status_kind, " +
-                "created_at_epoch_ms, updated_at_epoch_ms " +
-                "FROM ${Schema.Tables.PASSES} ORDER BY created_at_epoch_ms DESC",
+            "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} ORDER BY created_at_epoch_ms DESC",
             emptyArray(),
         ).use { c ->
             while (c.moveToNext()) {
@@ -50,10 +47,7 @@ internal class SqlCipherPassStore(
 
     override fun loadById(id: PassRecordId): StoredPass? {
         val (summary, blob) = db.rawQuery(
-            "SELECT id, type, serial_number, organization_name, description, " +
-                "expiration_epoch_ms, voided, signature_status_kind, " +
-                "created_at_epoch_ms, updated_at_epoch_ms, pass_json " +
-                "FROM ${Schema.Tables.PASSES} WHERE id = ?",
+            "SELECT $SUMMARY_COLUMNS, pass_json FROM ${Schema.Tables.PASSES} WHERE id = ?",
             arrayOf(id.value.toString()),
         ).use { c ->
             if (!c.moveToNext()) return null
@@ -78,10 +72,7 @@ internal class SqlCipherPassStore(
 
     override fun summaryById(id: PassRecordId): PassSummary? {
         return db.rawQuery(
-            "SELECT id, type, serial_number, organization_name, description, " +
-                "expiration_epoch_ms, voided, signature_status_kind, " +
-                "created_at_epoch_ms, updated_at_epoch_ms " +
-                "FROM ${Schema.Tables.PASSES} WHERE id = ?",
+            "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} WHERE id = ?",
             arrayOf(id.value.toString()),
         ).use { c ->
             if (!c.moveToNext()) null else c.toSummaryOrNull()
@@ -95,20 +86,16 @@ internal class SqlCipherPassStore(
     ): UpsertOutcome {
         db.beginTransaction()
         try {
-            val existingId: Long? = db.rawQuery(
+            val existing: Pair<Long, Long>? = db.rawQuery(
                 "SELECT id, created_at_epoch_ms FROM ${Schema.Tables.PASSES} " +
                     "WHERE type = ? AND serial_number = ? AND organization_name = ?",
                 arrayOf(pass.type.name, pass.serialNumber, pass.organizationName),
-            ).use { c -> if (c.moveToNext()) c.getLong(0) else null }
+            ).use { c -> if (c.moveToNext()) c.getLong(0) to c.getLong(1) else null }
 
-            val createdAt: Long = existingId?.let { id ->
-                db.rawQuery(
-                    "SELECT created_at_epoch_ms FROM ${Schema.Tables.PASSES} WHERE id = ?",
-                    arrayOf(id.toString()),
-                ).use { c -> if (c.moveToNext()) c.getLong(0) else nowEpochMs }
-            } ?: nowEpochMs
+            val existingId: Long? = existing?.first
+            val createdAt: Long = existing?.second ?: nowEpochMs
 
-            val signatureKind = signatureStatus.kindName()
+            val signatureKind = signatureStatus.toKind().name
             val passJson = PassJsonCodec.encode(pass)
 
             val rowId: Long = if (existingId != null) {
@@ -195,7 +182,7 @@ internal class SqlCipherPassStore(
         val summary = summaryById(id) ?: return null
         db.beginTransaction()
         try {
-            // ON DELETE CASCADE on pass_images and pass_locales handles the children.
+            // ON DELETE CASCADE on pass_images and pass_locales drops the children.
             db.delete(Schema.Tables.PASSES, "id = ?", arrayOf(id.value.toString()))
             db.setTransactionSuccessful()
         } finally {
@@ -240,47 +227,49 @@ internal class SqlCipherPassStore(
     /**
      * Materializes a [PassSummary] from the cursor row, or returns null after emitting
      * `onMigrationRowDropped(UnknownEnumValue)` if the row references an enum value this
-     * build does not understand. ADR 0002 D4: failed-to-decode rows are dropped, not raised.
+     * build does not understand. Failed-to-decode rows are dropped, not raised.
      */
     private fun Cursor.toSummaryOrNull(): PassSummary? {
-        val typeName = getString(getColumnIndexOrThrow("type"))
-        val type = PassType.entries.firstOrNull { it.name == typeName } ?: run {
+        val idIdx = getColumnIndexOrThrow("id")
+        val typeIdx = getColumnIndexOrThrow("type")
+        val serialIdx = getColumnIndexOrThrow("serial_number")
+        val orgIdx = getColumnIndexOrThrow("organization_name")
+        val descIdx = getColumnIndexOrThrow("description")
+        val expIdx = getColumnIndexOrThrow("expiration_epoch_ms")
+        val voidedIdx = getColumnIndexOrThrow("voided")
+        val sigIdx = getColumnIndexOrThrow("signature_status_kind")
+        val createdIdx = getColumnIndexOrThrow("created_at_epoch_ms")
+        val updatedIdx = getColumnIndexOrThrow("updated_at_epoch_ms")
+
+        val type = PassType.entries.firstOrNull { it.name == getString(typeIdx) } ?: run {
             telemetryGuard.onMigrationRowDropped(MigrationFailureKind.UnknownEnumValue)
             return null
         }
-        val signatureKind = getString(getColumnIndexOrThrow("signature_status_kind"))
-        val signatureStatus = signatureStatusFromKind(signatureKind) ?: run {
-            telemetryGuard.onMigrationRowDropped(MigrationFailureKind.UnknownEnumValue)
-            return null
-        }
+        val signatureStatus = runCatching { SignatureStatusKind.valueOf(getString(sigIdx)) }
+            .getOrNull()
+            ?.toSignatureStatus()
+            ?: run {
+                telemetryGuard.onMigrationRowDropped(MigrationFailureKind.UnknownEnumValue)
+                return null
+            }
         return PassSummary(
-            id = PassRecordId(getLong(getColumnIndexOrThrow("id"))),
+            id = PassRecordId(getLong(idIdx)),
             type = type,
-            serialNumber = getString(getColumnIndexOrThrow("serial_number")),
-            organizationName = getString(getColumnIndexOrThrow("organization_name")),
-            description = getString(getColumnIndexOrThrow("description")),
-            expirationDate = getColumnIndexOrThrow("expiration_epoch_ms").let { idx ->
-                if (isNull(idx)) null else PassInstant(getLong(idx))
-            },
-            voided = getInt(getColumnIndexOrThrow("voided")) != 0,
+            serialNumber = getString(serialIdx),
+            organizationName = getString(orgIdx),
+            description = getString(descIdx),
+            expirationDate = if (isNull(expIdx)) null else PassInstant(getLong(expIdx)),
+            voided = getInt(voidedIdx) != 0,
             signatureStatus = signatureStatus,
-            createdAt = PassInstant(getLong(getColumnIndexOrThrow("created_at_epoch_ms"))),
-            updatedAt = PassInstant(getLong(getColumnIndexOrThrow("updated_at_epoch_ms"))),
+            createdAt = PassInstant(getLong(createdIdx)),
+            updatedAt = PassInstant(getLong(updatedIdx)),
         )
     }
 
-    private fun signatureStatusFromKind(name: String): SignatureStatus? = when (name) {
-        "Unsigned" -> SignatureStatus.Unsigned
-        "SelfSigned" -> SignatureStatus.SelfSigned
-        "AppleVerified" -> SignatureStatus.AppleVerified
-        "CertChainIncomplete" -> SignatureStatus.CertChainIncomplete
-        else -> null
-    }
-
-    private fun SignatureStatus.kindName(): String = when (this) {
-        SignatureStatus.Unsigned -> "Unsigned"
-        SignatureStatus.SelfSigned -> "SelfSigned"
-        SignatureStatus.AppleVerified -> "AppleVerified"
-        SignatureStatus.CertChainIncomplete -> "CertChainIncomplete"
+    private companion object {
+        const val SUMMARY_COLUMNS: String =
+            "id, type, serial_number, organization_name, description, " +
+                "expiration_epoch_ms, voided, signature_status_kind, " +
+                "created_at_epoch_ms, updated_at_epoch_ms"
     }
 }

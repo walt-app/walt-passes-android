@@ -1,19 +1,23 @@
 package `is`.walt.passes.storage.internal
 
 import `is`.walt.passes.core.SignatureStatus
-import `is`.walt.passes.storage.SignatureStatusKind
+import `is`.walt.passes.core.SignatureStatusKind
 import `is`.walt.passes.storage.StorageError
 import `is`.walt.passes.storage.StorageFailureKind
 
-/** Mirrors the `passes-core` sealed interface arms onto the storage telemetry enum. */
-internal fun SignatureStatus.toSignatureStatusKind(): SignatureStatusKind = when (this) {
-    SignatureStatus.Unsigned -> SignatureStatusKind.Unsigned
-    SignatureStatus.SelfSigned -> SignatureStatusKind.SelfSigned
-    SignatureStatus.AppleVerified -> SignatureStatusKind.AppleVerified
-    SignatureStatus.CertChainIncomplete -> SignatureStatusKind.CertChainIncomplete
+/**
+ * Inverse of `passes-core`'s `SignatureStatus.toKind()`. Used when re-hydrating
+ * `signature_status_kind` from a cursor: the on-disk vocabulary is the [SignatureStatusKind]
+ * `name`, so unknown names route through the migration-row-dropped path before this is
+ * reached.
+ */
+internal fun SignatureStatusKind.toSignatureStatus(): SignatureStatus = when (this) {
+    SignatureStatusKind.Unsigned -> SignatureStatus.Unsigned
+    SignatureStatusKind.SelfSigned -> SignatureStatus.SelfSigned
+    SignatureStatusKind.AppleVerified -> SignatureStatus.AppleVerified
+    SignatureStatusKind.CertChainIncomplete -> SignatureStatus.CertChainIncomplete
 }
 
-/** Stable telemetry projection of [StorageError]. New error arms require new enum arms. */
 internal fun StorageError.toFailureKind(): StorageFailureKind = when (this) {
     StorageError.KeyUnavailable -> StorageFailureKind.KeyUnavailable
     StorageError.KeyUnwrapFailed -> StorageFailureKind.KeyUnwrapFailed

@@ -11,10 +11,9 @@ import java.io.File
 
 /**
  * Opens (or creates on first use) the `walt_passes.db` SQLCipher file with the supplied
- * [DatabaseKey], applies the SQLCipher v4 compatibility pragma per ADR 0002, runs
- * [Schema.DDL] under a single transaction on first use, and enables `PRAGMA foreign_keys=ON`
- * so the `ON DELETE CASCADE` chains for `pass_images` and `pass_locales` actually fire
- * (SQLite/SQLCipher default this off).
+ * [DatabaseKey], pins the SQLCipher v4 page format, runs [Schema.DDL] under a single
+ * transaction on first use, and enables `PRAGMA foreign_keys=ON` so the `ON DELETE CASCADE`
+ * chains for `pass_images` and `pass_locales` actually fire (SQLite/SQLCipher default this off).
  *
  * The native libraries are loaded lazily via `System.loadLibrary("sqlcipher")`, which is
  * idempotent on subsequent calls.
@@ -43,27 +42,25 @@ internal object SqlCipherDatabaseFactory {
         dbFile.parentFile?.mkdirs()
 
         val db: SQLiteDatabase = databaseKey.withBytes { rawKey ->
-            // SQLCipher takes the 32 bytes directly via the byte[] password overload; the
-            // withBytes scope zeros our local copy on return. SQLCipher's internal page-key
-            // derivation buffer survives for the lifetime of the open connection, which is
-            // bounded by SqlCipherPassStore.close().
+            // The withBytes scope zeros our local copy on return; SQLCipher's internal
+            // page-key derivation buffer survives for the lifetime of the open connection,
+            // which is bounded by SqlCipherPassStore.close().
             SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null)
         }
 
-        // ADR 0002: pin SQLCipher v4 page format. Defensive against a future SQLCipher
-        // major-version default change; v4 is the format the wallet's on-disk DBs will be
-        // in for the foreseeable future. Issued before any other DDL/DML so the page format
-        // is locked before tables get created.
+        // Pin SQLCipher v4 page format defensively against a future major-version default
+        // change. Issued before any other DDL/DML so the page format is locked before
+        // tables get created.
         db.execSQL("PRAGMA cipher_compatibility = 4")
         db.execSQL("PRAGMA foreign_keys = ON")
 
-        // Detect schema version on disk before mutating anything. ADR D7: a build that
-        // sees a newer-than-it-understands schema must surface Unsupported, not silently
-        // run its (older) DDL.
         val onDiskVersion: Int? = readSchemaVersionIfPresent(db)
-        if (onDiskVersion != null && onDiskVersion > Schema.VERSION) {
-            db.close()
-            return StorageResult.Failure(StorageError.Unsupported(onDiskVersion))
+        when {
+            onDiskVersion != null && onDiskVersion > Schema.VERSION -> {
+                db.close()
+                return StorageResult.Failure(StorageError.Unsupported(onDiskVersion))
+            }
+            onDiskVersion == Schema.VERSION -> return StorageResult.Success(db)
         }
 
         db.beginTransaction()

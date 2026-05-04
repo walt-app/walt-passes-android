@@ -16,13 +16,13 @@ import kotlinx.serialization.json.Json
 
 /**
  * Kotlinx-serialized projection of `Pass` minus its image-bytes map and locale tables, which
- * `passes-storage` persists as separate normalized rows (see ADR 0002 D3). The on-disk
- * `pass_json` BLOB column carries this surrogate; the renderer reconstructs the same `Pass`
- * value the parser produced, without re-running PKCS#7 verification.
+ * `passes-storage` persists as separate normalized rows. The on-disk `pass_json` BLOB column
+ * carries this surrogate; the renderer reconstructs the same `Pass` value the parser
+ * produced, without re-running PKCS#7 verification.
  *
- * `passes-core` does not annotate its public types as `@Serializable` because it is KMP-aimed
- * and we do not want kotlinx-serialization on its public surface. So this module owns its own
- * surrogate and the `Pass <-> PassJson` conversion.
+ * `passes-core` deliberately does not annotate its public types as `@Serializable` (KMP-aimed,
+ * keeps kotlinx-serialization off its public surface), so this module owns its own surrogate
+ * and the `Pass <-> PassJson` conversion.
  */
 internal object PassJsonCodec {
     private val json: Json = Json {
