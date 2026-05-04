@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Empty library manifest. passes-ui is a UI library; it declares no permissions, no
+  components, and contributes no manifest-merged metadata to the consumer. The
+  namespace is set in passes-ui/build.gradle.kts.
+-->
+<manifest />
