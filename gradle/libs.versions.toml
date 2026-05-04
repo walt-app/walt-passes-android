@@ -5,6 +5,8 @@ kotlinxSerialization = "1.7.3"
 kotlinxCoroutines = "1.9.0"
 junit = "4.13.2"
 truth = "1.4.5"
+detekt = "1.23.8"
+ktlint = "12.1.1"
 
 # Android + Compose toolchain (matches walt-android consumer to avoid drift).
 androidxCoreKtx = "1.17.0"
@@ -19,6 +21,13 @@ androidxStartup = "1.2.0"
 xerial = "3.46.0.0"
 
 [libraries]
+# Gradle plugins (consumed by build-logic convention plugins).
+android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }
+kotlin-gradlePlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
+compose-gradlePlugin = { group = "org.jetbrains.kotlin", name = "compose-compiler-gradle-plugin", version.ref = "kotlin" }
+detekt-gradlePlugin = { group = "io.gitlab.arturbosch.detekt", name = "detekt-gradle-plugin", version.ref = "detekt" }
+ktlint-gradlePlugin = { group = "org.jlleitschuh.gradle.ktlint", name = "org.jlleitschuh.gradle.ktlint.gradle.plugin", version.ref = "ktlint" }
+
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "kotlinxSerialization" }
 kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-core", version.ref = "kotlinxCoroutines" }
@@ -68,3 +77,12 @@ kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
+detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+ktlint = { id = "org.jlleitschuh.gradle.ktlint", version.ref = "ktlint" }
+
+# Convention plugins served from build-logic. Versionless because they live in the
+# composite build, not a published artifact.
+walt-passes-kotlin-library = { id = "is.walt.passes.kotlin.library", version = "unspecified" }
+walt-passes-android-library = { id = "is.walt.passes.android.library", version = "unspecified" }
+walt-passes-android-compose = { id = "is.walt.passes.android.compose", version = "unspecified" }
+walt-passes-quality = { id = "is.walt.passes.quality", version = "unspecified" }
