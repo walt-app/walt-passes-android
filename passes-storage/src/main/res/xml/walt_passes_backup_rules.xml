@@ -15,4 +15,11 @@
     <exclude domain="database" path="walt_passes.db-journal" />
     <exclude domain="database" path="walt_passes.db-wal" />
     <exclude domain="database" path="walt_passes.db-shm" />
+    <!--
+      The wrapped DB-key envelope (AES-GCM ciphertext under a non-exportable Keystore
+      master). Backed-up envelope is undecryptable on a restored device, but the trust
+      claim "pass-related at-rest data is excluded from cloud backup" covers the
+      envelope file alongside the encrypted DB.
+    -->
+    <exclude domain="sharedpref" path="is.walt.passes.storage.key_envelope.xml" />
 </full-backup-content>

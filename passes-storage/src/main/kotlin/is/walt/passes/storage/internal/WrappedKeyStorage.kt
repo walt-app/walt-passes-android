@@ -15,9 +15,12 @@ import `is`.walt.passes.storage.KeyBacking
  * so plain SharedPreferences is acceptable storage; the threat model is "physical recovery
  * of disk bytes," and the wrapping defends against that without help from the prefs file.
  *
- * The envelope is excluded from Auto Backup via the same `walt_passes_backup_rules.xml` /
- * `walt_passes_data_extraction_rules.xml` files (the SharedPreferences file is opted out
- * by domain).
+ * The envelope's SharedPreferences file is opted out of Auto Backup and device-to-device
+ * transfer via explicit `<exclude domain="sharedpref" .../>` entries in both
+ * `walt_passes_backup_rules.xml` and `walt_passes_data_extraction_rules.xml`. (Backed-up
+ * envelope ciphertext would be undecryptable on a restored device anyway, since the
+ * Keystore master is non-exportable, but the trust claim covers the envelope file
+ * alongside the encrypted DB.)
  */
 internal interface WrappedKeyStorage {
     fun read(): WrappedKeyEnvelope?

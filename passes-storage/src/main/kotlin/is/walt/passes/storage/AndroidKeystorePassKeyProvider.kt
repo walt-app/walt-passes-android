@@ -35,6 +35,7 @@ public class AndroidKeystorePassKeyProvider internal constructor(
     private val masterKey: SecretKey,
     override val keyBacking: KeyBacking,
     private val wrappedKeyStorage: WrappedKeyStorage,
+    private val databaseFileExists: () -> Boolean,
 ) : PassKeyProvider {
 
     override fun provideDatabaseKey(): StorageResult<DatabaseKey> {
@@ -44,12 +45,20 @@ public class AndroidKeystorePassKeyProvider internal constructor(
                 val raw = unwrap(existing)
                 StorageResult.Success(DatabaseKey(raw))
             } else {
+                // Envelope is missing. If the encrypted DB still exists on disk, the prior
+                // DB key is unrecoverable: generating a fresh one would silently surface
+                // later as DatabaseCorrupt when SQLCipher rejects the wrong key. Surface
+                // KeyUnavailable so the wallet can guide the user through "secure storage
+                // was reset; re-import passes" instead.
+                if (databaseFileExists()) {
+                    return StorageResult.Failure(StorageError.KeyUnavailable)
+                }
                 val raw = ByteArray(32).also { SecureRandom().nextBytes(it) }
                 val envelope = wrap(raw)
                 if (!wrappedKeyStorage.write(envelope, keyBacking)) {
                     // Critical: do NOT proceed to open SQLCipher if the envelope did not
                     // durably reach disk. Returning a key that exists only in process
-                    // memory would brick the DB on the next launch (ADR review #1).
+                    // memory would brick the DB on the next launch.
                     raw.fill(0)
                     return StorageResult.Failure(StorageError.KeyUnavailable)
                 }
@@ -94,11 +103,17 @@ public class AndroidKeystorePassKeyProvider internal constructor(
          * (Keystore wiped, lock-screen credential removed on a setup that bound keys to it).
          */
         @JvmStatic
-        public fun create(context: Context): StorageResult<AndroidKeystorePassKeyProvider> =
-            createInternal(WrappedKeyStorage.sharedPreferences(context))
+        public fun create(context: Context): StorageResult<AndroidKeystorePassKeyProvider> {
+            val dbFile = context.applicationContext.getDatabasePath(Schema.DATABASE_NAME)
+            return createInternal(
+                wrappedKeyStorage = WrappedKeyStorage.sharedPreferences(context),
+                databaseFileExists = { dbFile.exists() },
+            )
+        }
 
         internal fun createInternal(
             wrappedKeyStorage: WrappedKeyStorage,
+            databaseFileExists: () -> Boolean,
         ): StorageResult<AndroidKeystorePassKeyProvider> {
             return try {
                 val (key, backing) = getOrCreateMasterKey()
@@ -107,6 +122,7 @@ public class AndroidKeystorePassKeyProvider internal constructor(
                         masterKey = key,
                         keyBacking = backing,
                         wrappedKeyStorage = wrappedKeyStorage,
+                        databaseFileExists = databaseFileExists,
                     ),
                 )
             } catch (e: java.security.KeyStoreException) {
@@ -126,6 +142,22 @@ public class AndroidKeystorePassKeyProvider internal constructor(
         }
 
         private fun generateMasterKey(): SecretKey {
+            // StrongBox is best-effort. P preferred (API 28+); on devices that advertise the
+            // feature but actually fail, fall back to TEE. The library never refuses to run
+            // on emulators or Software-only Keystore implementations: doing so would brick
+            // the wallet during development.
+            val canRequestStrongBox = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            return try {
+                generateWithSpec(strongBoxBacked = canRequestStrongBox)
+            } catch (e: StrongBoxUnavailableException) {
+                // KeyGenerator state after a failed init() is undefined per the Keystore
+                // contract; use a fresh instance for the fallback so we are not relying on
+                // implementation-defined recovery behavior.
+                generateWithSpec(strongBoxBacked = false)
+            }
+        }
+
+        private fun generateWithSpec(strongBoxBacked: Boolean): SecretKey {
             val builder = KeyGenParameterSpec.Builder(
                 MASTER_KEY_ALIAS,
                 KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
@@ -133,31 +165,12 @@ public class AndroidKeystorePassKeyProvider internal constructor(
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
                 .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
                 .setKeySize(256)
-
-            // StrongBox is best-effort. P preferred (API 28+); on devices that advertise the
-            // feature but actually fail, fall back to TEE. The library never refuses to run
-            // on emulators or Software-only Keystore implementations: doing so would brick
-            // the wallet during development.
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            if (strongBoxBacked && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 builder.setIsStrongBoxBacked(true)
             }
-
             val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-            return try {
-                gen.init(builder.build())
-                gen.generateKey()
-            } catch (e: StrongBoxUnavailableException) {
-                val fallback = KeyGenParameterSpec.Builder(
-                    MASTER_KEY_ALIAS,
-                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT,
-                )
-                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                    .setKeySize(256)
-                    .build()
-                gen.init(fallback)
-                gen.generateKey()
-            }
+            gen.init(builder.build())
+            return gen.generateKey()
         }
 
         private fun detectBacking(key: SecretKey): KeyBacking {
