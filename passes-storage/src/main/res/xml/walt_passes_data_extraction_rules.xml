@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Data extraction rules for API 31+ (Android 12 and later). ADR 0002 D5.
+
+  Covers both cloud backup and device-to-device transfer. The walt_passes.db SQLCipher
+  file (and its WAL/journal sidecars) is excluded from both surfaces. Pass data is
+  not portable across devices through the system transfer flow; users re-import passes
+  on a new device, which keeps the Keystore-wrapped key custody story intact.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" path="walt_passes.db" />
+        <exclude domain="database" path="walt_passes.db-journal" />
+        <exclude domain="database" path="walt_passes.db-wal" />
+        <exclude domain="database" path="walt_passes.db-shm" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" path="walt_passes.db" />
+        <exclude domain="database" path="walt_passes.db-journal" />
+        <exclude domain="database" path="walt_passes.db-wal" />
+        <exclude domain="database" path="walt_passes.db-shm" />
+    </device-transfer>
+</data-extraction-rules>

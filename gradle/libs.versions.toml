@@ -14,6 +14,9 @@ zxing = "3.5.3"
 robolectric = "4.14.1"
 androidxJunit = "1.3.0"
 androidxEspressoCore = "3.7.0"
+sqlcipher = "4.5.4"
+androidxStartup = "1.2.0"
+xerial = "3.46.0.0"
 
 [libraries]
 kotlin-reflect = { module = "org.jetbrains.kotlin:kotlin-reflect", version.ref = "kotlin" }
@@ -47,6 +50,16 @@ robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "
 # Instrumentation
 androidx-test-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxJunit" }
 androidx-test-espresso-core = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "androidxEspressoCore" }
+
+# SQLCipher (Android-only) — encrypted SQLite at rest.
+sqlcipher-android = { group = "net.zetetic", name = "android-database-sqlcipher", version.ref = "sqlcipher" }
+androidx-startup-runtime = { group = "androidx.startup", name = "startup-runtime", version.ref = "androidxStartup" }
+# SQLCipher's SQLiteDatabase implements androidx.sqlite's SupportSQLiteDatabase as of 4.5.x;
+# this brings that supertype onto the compile classpath so Kotlin can resolve the hierarchy.
+androidx-sqlite = { group = "androidx.sqlite", name = "sqlite", version = "2.5.2" }
+
+# JVM-side schema-DDL test driver.
+xerial-sqlite-jdbc = { group = "org.xerial", name = "sqlite-jdbc", version.ref = "xerial" }
 
 [plugins]
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
