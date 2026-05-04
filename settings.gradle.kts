@@ -15,4 +15,5 @@ dependencyResolutionManagement {
 rootProject.name = "walt-passes-android"
 
 include(":passes-core")
-// passes-storage and passes-ui modules will be added by their respective architecture beads.
+include(":passes-storage")
+// passes-ui module will be added by its architecture bead.
