@@ -28,3 +28,4 @@ out/
 
 # Claude Code: local-only configuration must NEVER be committed
 .claude/settings.local.json
+CLAUDE.local.md
