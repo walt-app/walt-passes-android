@@ -8,10 +8,6 @@ This repository exists for **transparency-for-trust**, not library-for-reuse. Wa
 
 The trust claim: every security-and-privacy-critical behavior Walt makes about pass handling is implemented in code that lives in this repository. Walt-android does not parallel-implement any trust-claim-bearing logic; it wraps and themes what is here.
 
-## Worktree Rule
-
-Each worktree has its **own copy** of all files. Write to your **active worktree's** files, not via the parent's symlinks.
-
 ## Architecture Rules
 
 - Three Gradle modules:
@@ -32,12 +28,6 @@ Each worktree has its **own copy** of all files. Write to your **active worktree
 - `kotlinx.serialization` for JSON
 - BouncyCastle (JVM) for PKCS#7 / X.509
 
-## Reference Repository (read-only, local-only)
-
-walt-android lives at `../../android/android-main/`. It is closed source and **not** part of this repository. Read-only access is granted via `.claude/settings.local.json` (which is gitignored). Use that path to consult walt-android conventions when designing the consumer-side wrapper modules (`core/data-passes`, `feature/passes`).
-
-Do not commit any walt-android paths or contents into this repository.
-
 ## Beads
 
 ```bash
@@ -46,16 +36,14 @@ bd update wpass-xxx --claim  # Start work
 bd close wpass-xxx --reason "Completed and tested"
 ```
 
-The parent epic `wlt-0tn` lives in walt-android's beads database. Work in this repo references it via the external project mechanism. See `.beads/config.yaml` for the cross-repo configuration.
-
 ## Decisions and Memories
 
-Brainstorming-phase decisions are captured as `bd remember` entries:
+Brainstorming-phase decisions are captured as `bd remember` entries in this repo's beads database (mirrored from walt-android on 2026-05-04):
 
-- `decision-wlt-0tn-q1` through `decision-wlt-0tn-q5` (in walt-android's beads database)
-- `foss-pkpass-signature-policy-field-survey` (empirical FOSS signature-policy survey, in walt-android's beads database)
+- `decision-wlt-0tn-q1` through `decision-wlt-0tn-q5`
+- `foss-pkpass-signature-policy-field-survey` (empirical FOSS signature-policy survey)
 
-Search them with `bd memories <keyword>` from inside walt-android. As decisions accrue inside this repo, they get persisted similarly.
+Search with `bd memories <keyword>`.
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
