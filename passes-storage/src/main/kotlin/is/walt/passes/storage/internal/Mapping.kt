@@ -18,6 +18,11 @@ internal fun SignatureStatusKind.toSignatureStatus(): SignatureStatus = when (th
     SignatureStatusKind.CertChainIncomplete -> SignatureStatus.CertChainIncomplete
 }
 
+/**
+ * Stable telemetry projection of [StorageError]. The exhaustive `when` is the load-bearing
+ * drift detector: a new error arm without a matching enum entry is a compile error, not a
+ * silent observability gap.
+ */
 internal fun StorageError.toFailureKind(): StorageFailureKind = when (this) {
     StorageError.KeyUnavailable -> StorageFailureKind.KeyUnavailable
     StorageError.KeyUnwrapFailed -> StorageFailureKind.KeyUnwrapFailed

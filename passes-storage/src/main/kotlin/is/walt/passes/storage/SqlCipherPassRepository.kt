@@ -91,6 +91,11 @@ public class SqlCipherPassRepository internal constructor(
         }
     }
 
+    /**
+     * Single emission point for `StorageResult.Failure`. Every failure-returning code path
+     * routes through here so `onStorageFailure` fires exactly once per Failure with the
+     * structural arm and (for [StorageError.Unknown]) the open-ended kind.
+     */
     private fun <T> failure(error: StorageError): StorageResult<T> {
         telemetryGuard.onStorageFailure(
             kind = error.toFailureKind(),
