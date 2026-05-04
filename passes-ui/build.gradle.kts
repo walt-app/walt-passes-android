@@ -65,6 +65,7 @@ dependencies {
     // so the public-API surface and basic composition exercise stay on the JVM CI host.
     testImplementation(libs.junit)
     testImplementation(libs.truth)
+    testImplementation(libs.kotlin.reflect)
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.compose.ui.test.junit4)
     testImplementation(composeBom)

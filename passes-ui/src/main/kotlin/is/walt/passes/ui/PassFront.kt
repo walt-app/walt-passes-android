@@ -306,8 +306,12 @@ private fun SignatureStatus.toBand(): SignatureBand = when (this) {
 
 private fun ColorValue?.toComposeOrDefault(default: Color): Color {
     val v = this ?: return default
-    val r = (v.rgb shr 16) and 0xFF
-    val g = (v.rgb shr 8) and 0xFF
-    val b = v.rgb and 0xFF
+    // Mask via Long to avoid sign-extension surprises if the stored Int ever has a
+    // bit set above the documented 24-bit range. The pass-core parser contract is
+    // 24-bit RGB, but the type itself is `Int`, so this is belt-and-suspenders.
+    val packed = v.rgb.toLong() and 0xFFFFFFL
+    val r = ((packed shr 16) and 0xFF).toInt()
+    val g = ((packed shr 8) and 0xFF).toInt()
+    val b = (packed and 0xFF).toInt()
     return Color(red = r, green = g, blue = b)
 }

@@ -15,6 +15,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import `is`.walt.passes.core.ImageBytes
 import `is`.walt.passes.core.ImageRole
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.nio.ByteBuffer
 
@@ -24,14 +26,23 @@ import java.nio.ByteBuffer
  * allocates a backing bitmap, so a hostile pass archive cannot OOM the host process via
  * a multi-gigabyte PNG.
  *
+ * Residual risk: `OnHeaderDecodedListener` does not bound the transient memory the
+ * platform decoder uses while parsing the file header itself. For pathological inputs
+ * (e.g. PNGs with very large ancillary chunks), header parsing can allocate proportional
+ * memory before the listener fires. `ImageDecoder` is the safest decode primitive
+ * Android offers, but it is not a hard guarantee against all decompression-bomb shapes.
+ * `BoundedImage` rejects the bitmap once dimensions are known; the implementation bead's
+ * follow-on work is an instrumentation test that exercises the residual-risk surface.
+ *
  * The implementation deliberately does NOT use Coil's default loader: bounds enforcement
  * is the trust claim, and a third-party loader would have to be re-audited for that
  * property on every dependency upgrade. The decoder pipeline here is the only path
  * `passes-ui` ever uses to produce a bitmap from an `ImageBytes`.
  *
- * Decode failures (including bounds violations) render as an empty placeholder and fire
- * [UiTelemetryGuard.onImageDecodeRejected] with the categorized reason. The composable
- * never throws.
+ * Decode runs on `Dispatchers.IO`, so a multi-megapixel image does not stutter the
+ * host's UI thread. Decode failures (including bounds violations) render as an empty
+ * placeholder and fire [UiTelemetryGuard.onImageDecodeRejected] with the categorized
+ * reason. The composable never throws.
  */
 @Composable
 public fun BoundedImage(
@@ -46,7 +57,9 @@ public fun BoundedImage(
     var rejection by remember(bytes, bounds) { mutableStateOf<ImageDecodeRejection?>(null) }
 
     LaunchedEffect(bytes, bounds) {
-        val (decoded, reason) = decodeBoundedBitmap(bytes.bytes, bounds)
+        val (decoded, reason) = withContext(Dispatchers.IO) {
+            decodeBoundedBitmap(bytes.bytes, bounds)
+        }
         bitmap = decoded
         rejection = reason
         reason?.let { telemetry.onImageDecodeRejected(it) }
@@ -98,9 +111,14 @@ internal fun decodeBoundedBitmap(
             bitmap to null
         }
     } catch (e: IOException) {
-        null to ImageDecodeRejection.Malformed
+        // Genuine I/O / parse failure with no bounds rejection in flight.
+        null to (rejection ?: ImageDecodeRejection.Malformed)
     } catch (e: IllegalArgumentException) {
-        null to ImageDecodeRejection.Malformed
+        // setTargetSize(1, 1) inside the listener can throw IAE for formats that
+        // refuse arbitrary sizing (e.g. some strip-encoded variants). When that
+        // happens, bounds rejection ALREADY fired in the listener — preserve that
+        // reason rather than reclassifying as Malformed.
+        null to (rejection ?: ImageDecodeRejection.Malformed)
     } catch (e: RuntimeException) {
         null to (rejection ?: ImageDecodeRejection.Other)
     }

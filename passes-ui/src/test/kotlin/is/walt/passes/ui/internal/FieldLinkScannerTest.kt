@@ -96,4 +96,38 @@ class FieldLinkScannerTest {
         val spans = FieldLinkScanner.scan("https://example.com", source)
         assertThat(spans.single().intent.sourceField).isEqualTo(source)
     }
+
+    /**
+     * Tripwire for ReDoS / catastrophic-backtracking in the phone-number regex. The
+     * phone pattern uses a quantified character class with optional digit boundary;
+     * a hostile back-field could in principle force quadratic-or-worse backtracking.
+     * This test feeds a 4 KB digit-soup field that has no valid match anchor, with a
+     * generous 500 ms budget. Real linear-ish behavior completes in under a few ms;
+     * exponential pathology would blow this budget by orders of magnitude.
+     */
+    @Test
+    fun phoneScanCompletesQuicklyOnPathologicalInput() {
+        val pathological = buildString {
+            repeat(4096) { append((it % 10).digitToChar()) }
+        }
+        val start = System.nanoTime()
+        FieldLinkScanner.scan(pathological, source)
+        val elapsedMs = (System.nanoTime() - start) / 1_000_000
+        assertThat(elapsedMs).isLessThan(500L)
+    }
+
+    @Test
+    fun mixedAlphaDigitSoupCompletesQuickly() {
+        val pathological = buildString {
+            repeat(2048) {
+                append((it % 10).digitToChar())
+                append(' ')
+                append('-')
+            }
+        }
+        val start = System.nanoTime()
+        FieldLinkScanner.scan(pathological, source)
+        val elapsedMs = (System.nanoTime() - start) / 1_000_000
+        assertThat(elapsedMs).isLessThan(500L)
+    }
 }
