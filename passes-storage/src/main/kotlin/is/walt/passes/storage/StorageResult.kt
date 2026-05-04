@@ -1,0 +1,78 @@
+package `is`.walt.passes.storage
+
+/**
+ * The result type for every [PassRepository] call. Mirrors the `Result<T> over exceptions`
+ * convention from CLAUDE.md and gives the consumer a typed partition of the failure space:
+ * key custody failures must be distinguishable from concurrent-open failures from
+ * transient-DB failures, because the appropriate UI response differs.
+ */
+public sealed interface StorageResult<out T> {
+    public data class Success<T>(public val value: T) : StorageResult<T>
+    public data class Failure(public val error: StorageError) : StorageResult<Nothing>
+}
+
+/**
+ * Storage failure modes. The arms are deliberately coarse: the consumer needs enough
+ * resolution to render the right user-facing message, not enough to second-guess the
+ * library's internal handling.
+ */
+public sealed interface StorageError {
+    /**
+     * The Keystore master alias has been removed (factory reset partial, app-data clear,
+     * Android upgrade dropped the entry, lock-screen credential deleted on a setup that
+     * required user-authentication-bound keys). The wrapped DB key cannot be unwrapped;
+     * the existing database is unrecoverable. The UI should surface this as
+     * "secure storage was reset by the system" and offer to re-import passes.
+     */
+    public data object KeyUnavailable : StorageError
+
+    /**
+     * The Keystore master alias is present but unwrap of [`schema_meta.wrapped_db_key`]
+     * failed (GCM tag mismatch, IV mismatch, alias rotated). This is a security-relevant
+     * signal distinct from [KeyUnavailable]; the database file may have been replaced
+     * out-of-band.
+     */
+    public data object KeyUnwrapFailed : StorageError
+
+    /**
+     * Another process holds an exclusive lock on the database file. Transient; the caller
+     * may retry.
+     */
+    public data object DatabaseLocked : StorageError
+
+    /**
+     * A row failed to deserialize at load time and was dropped (e.g. schema-migration
+     * partial failure for that row). The repository continues to serve other rows.
+     */
+    public data class IntegrityViolation(public val recordId: PassRecordId) : StorageError
+
+    /**
+     * The schema version on disk is newer than this build of `passes-storage` understands.
+     * This happens when a user downgrades the wallet app. The DB is read-only-protected
+     * until a forward-compatible build runs again.
+     */
+    public data class Unsupported(public val onDiskSchemaVersion: Int) : StorageError
+
+    /**
+     * Catch-all for failures that do not warrant a typed arm. Carries a stable [kind] for
+     * the telemetry guard; the [cause] is `Throwable?` so the caller can log internally,
+     * but [kind] is what flows through telemetry.
+     */
+    public data class Unknown(
+        public val kind: UnknownStorageFailureKind,
+        public val cause: Throwable? = null,
+    ) : StorageError
+}
+
+/**
+ * Stable telemetry-friendly enumeration of the open-ended failure space. New arms here
+ * are an API addition; new strings are not. Mirrors the `passes-core` discipline of
+ * routing telemetry through enums rather than free-form strings.
+ */
+public enum class UnknownStorageFailureKind {
+    DiskFull,
+    PermissionDenied,
+    DatabaseCorrupt,
+    SerializationFailure,
+    Other,
+}
