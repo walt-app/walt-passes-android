@@ -114,7 +114,7 @@ class PassRepositoryContractTest {
     }
 
     @Test
-    fun deleteOfUnknownIdReturnsIntegrityViolationAndEmitsNoDeleteEvent() = runTest {
+    fun deleteOfUnknownIdReturnsIntegrityViolationAndEmitsFailureNotDeleteEvent() = runTest {
         val store = FakePassStore()
         val telemetry = RecordingGuard()
         val repo = SqlCipherPassRepository(
@@ -129,7 +129,37 @@ class PassRepositoryContractTest {
 
         check(result is StorageResult.Failure)
         check(result.error is StorageError.IntegrityViolation)
-        assertThat(telemetry.events).containsExactly("init:StrongBox")
+        // No delete event (the row didn't go anywhere); ONE storage-failure event so the
+        // observability discipline survives the early return path.
+        assertThat(telemetry.events).containsExactly(
+            "init:StrongBox",
+            "failure:IntegrityViolation:n/a",
+        ).inOrder()
+    }
+
+    @Test
+    fun closeMakesSubsequentCallsReturnDatabaseLockedAndEmitsFailure() = runTest {
+        val store = FakePassStore(initial = listOf(sampleSummary(id = 1L)))
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 1L },
+            keyBacking = KeyBacking.Tee,
+        )
+        repo.close()
+        // close() is idempotent.
+        repo.close()
+        assertThat(store.closeCount).isEqualTo(1)
+
+        val result = repo.summaryOf(PassRecordId(1L))
+        check(result is StorageResult.Failure)
+        check(result.error == StorageError.DatabaseLocked)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "failure:DatabaseLocked:n/a",
+        ).inOrder()
     }
 
     @Test
@@ -217,7 +247,12 @@ class PassRepositoryContractTest {
             return DeleteOutcome(summary)
         }
 
-        override fun close() = Unit
+        var closeCount: Int = 0
+            private set
+
+        override fun close() {
+            closeCount++
+        }
     }
 
     private class RecordingGuard : StorageTelemetryGuard {

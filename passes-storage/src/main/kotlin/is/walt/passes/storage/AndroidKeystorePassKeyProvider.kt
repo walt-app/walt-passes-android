@@ -46,7 +46,13 @@ public class AndroidKeystorePassKeyProvider internal constructor(
             } else {
                 val raw = ByteArray(32).also { SecureRandom().nextBytes(it) }
                 val envelope = wrap(raw)
-                wrappedKeyStorage.write(envelope, keyBacking)
+                if (!wrappedKeyStorage.write(envelope, keyBacking)) {
+                    // Critical: do NOT proceed to open SQLCipher if the envelope did not
+                    // durably reach disk. Returning a key that exists only in process
+                    // memory would brick the DB on the next launch (ADR review #1).
+                    raw.fill(0)
+                    return StorageResult.Failure(StorageError.KeyUnavailable)
+                }
                 StorageResult.Success(DatabaseKey(raw))
             }
         } catch (e: javax.crypto.AEADBadTagException) {

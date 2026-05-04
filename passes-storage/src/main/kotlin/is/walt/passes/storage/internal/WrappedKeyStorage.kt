@@ -21,7 +21,14 @@ import `is`.walt.passes.storage.KeyBacking
  */
 internal interface WrappedKeyStorage {
     fun read(): WrappedKeyEnvelope?
-    fun write(envelope: WrappedKeyEnvelope, backing: KeyBacking)
+
+    /**
+     * Persists [envelope] synchronously and durably. Returns true on success, false if the
+     * underlying storage rejected the write. Callers MUST treat a false return as a hard
+     * failure: the brick scenario from the ADR class-of-bugs notes is "DB encrypted with a
+     * key whose envelope never made it to disk".
+     */
+    fun write(envelope: WrappedKeyEnvelope, backing: KeyBacking): Boolean
 
     companion object {
         fun sharedPreferences(context: Context): WrappedKeyStorage =
@@ -70,13 +77,18 @@ private class SharedPrefsWrappedKeyStorage(
         )
     }
 
-    override fun write(envelope: WrappedKeyEnvelope, backing: KeyBacking) {
-        prefs.edit()
+    override fun write(envelope: WrappedKeyEnvelope, backing: KeyBacking): Boolean {
+        // Synchronous write. The envelope MUST be on disk before we hand the unwrapped
+        // database key to SQLCipher: a crash between an async apply() and the disk flush
+        // would leave the SQLCipher pages encrypted with a key whose envelope was never
+        // persisted, bricking the wallet's at-rest data on next launch. commit() blocks
+        // until the SharedPreferences XML is fsync'd.
+        return prefs.edit()
             .putString(KEY_CIPHERTEXT, Base64.encodeToString(envelope.ciphertext, Base64.NO_WRAP))
             .putString(KEY_IV, Base64.encodeToString(envelope.iv, Base64.NO_WRAP))
             .putString(KEY_ALIAS, envelope.keyAlias)
             .putString(KEY_BACKING, backing.name)
-            .apply()
+            .commit()
     }
 
     private companion object {

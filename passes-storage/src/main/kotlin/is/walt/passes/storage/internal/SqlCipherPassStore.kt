@@ -10,11 +10,13 @@ import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.storage.MigrationFailureKind
 import `is`.walt.passes.storage.PassRecordId
 import `is`.walt.passes.storage.PassSummary
 import `is`.walt.passes.storage.Schema
+import `is`.walt.passes.storage.StorageTelemetryGuard
 import `is`.walt.passes.storage.StoredPass
-import net.sqlcipher.database.SQLiteDatabase
+import net.zetetic.database.sqlcipher.SQLiteDatabase
 
 /**
  * SQLCipher-backed implementation of [PassStore]. Owns the `SQLiteDatabase` handle for the
@@ -26,6 +28,7 @@ import net.sqlcipher.database.SQLiteDatabase
  */
 internal class SqlCipherPassStore(
     private val db: SQLiteDatabase,
+    private val telemetryGuard: StorageTelemetryGuard,
 ) : PassStore {
 
     override fun listSummaries(): List<PassSummary> {
@@ -38,7 +41,8 @@ internal class SqlCipherPassStore(
             emptyArray(),
         ).use { c ->
             while (c.moveToNext()) {
-                out += c.toSummary()
+                val summary = c.toSummaryOrNull() ?: continue
+                out += summary
             }
         }
         return out
@@ -53,7 +57,7 @@ internal class SqlCipherPassStore(
             arrayOf(id.value.toString()),
         ).use { c ->
             if (!c.moveToNext()) return null
-            val s = c.toSummary()
+            val s = c.toSummaryOrNull() ?: return null
             val passJson = c.getBlob(c.getColumnIndexOrThrow("pass_json"))
             s to passJson
         }
@@ -80,7 +84,7 @@ internal class SqlCipherPassStore(
                 "FROM ${Schema.Tables.PASSES} WHERE id = ?",
             arrayOf(id.value.toString()),
         ).use { c ->
-            if (!c.moveToNext()) null else c.toSummary()
+            if (!c.moveToNext()) null else c.toSummaryOrNull()
         }
     }
 
@@ -233,27 +237,44 @@ internal class SqlCipherPassStore(
         return out
     }
 
-    private fun Cursor.toSummary(): PassSummary = PassSummary(
-        id = PassRecordId(getLong(getColumnIndexOrThrow("id"))),
-        type = PassType.valueOf(getString(getColumnIndexOrThrow("type"))),
-        serialNumber = getString(getColumnIndexOrThrow("serial_number")),
-        organizationName = getString(getColumnIndexOrThrow("organization_name")),
-        description = getString(getColumnIndexOrThrow("description")),
-        expirationDate = getColumnIndexOrThrow("expiration_epoch_ms").let { idx ->
-            if (isNull(idx)) null else PassInstant(getLong(idx))
-        },
-        voided = getInt(getColumnIndexOrThrow("voided")) != 0,
-        signatureStatus = signatureStatusFromKind(getString(getColumnIndexOrThrow("signature_status_kind"))),
-        createdAt = PassInstant(getLong(getColumnIndexOrThrow("created_at_epoch_ms"))),
-        updatedAt = PassInstant(getLong(getColumnIndexOrThrow("updated_at_epoch_ms"))),
-    )
+    /**
+     * Materializes a [PassSummary] from the cursor row, or returns null after emitting
+     * `onMigrationRowDropped(UnknownEnumValue)` if the row references an enum value this
+     * build does not understand. ADR 0002 D4: failed-to-decode rows are dropped, not raised.
+     */
+    private fun Cursor.toSummaryOrNull(): PassSummary? {
+        val typeName = getString(getColumnIndexOrThrow("type"))
+        val type = PassType.entries.firstOrNull { it.name == typeName } ?: run {
+            telemetryGuard.onMigrationRowDropped(MigrationFailureKind.UnknownEnumValue)
+            return null
+        }
+        val signatureKind = getString(getColumnIndexOrThrow("signature_status_kind"))
+        val signatureStatus = signatureStatusFromKind(signatureKind) ?: run {
+            telemetryGuard.onMigrationRowDropped(MigrationFailureKind.UnknownEnumValue)
+            return null
+        }
+        return PassSummary(
+            id = PassRecordId(getLong(getColumnIndexOrThrow("id"))),
+            type = type,
+            serialNumber = getString(getColumnIndexOrThrow("serial_number")),
+            organizationName = getString(getColumnIndexOrThrow("organization_name")),
+            description = getString(getColumnIndexOrThrow("description")),
+            expirationDate = getColumnIndexOrThrow("expiration_epoch_ms").let { idx ->
+                if (isNull(idx)) null else PassInstant(getLong(idx))
+            },
+            voided = getInt(getColumnIndexOrThrow("voided")) != 0,
+            signatureStatus = signatureStatus,
+            createdAt = PassInstant(getLong(getColumnIndexOrThrow("created_at_epoch_ms"))),
+            updatedAt = PassInstant(getLong(getColumnIndexOrThrow("updated_at_epoch_ms"))),
+        )
+    }
 
-    private fun signatureStatusFromKind(name: String): SignatureStatus = when (name) {
+    private fun signatureStatusFromKind(name: String): SignatureStatus? = when (name) {
         "Unsigned" -> SignatureStatus.Unsigned
         "SelfSigned" -> SignatureStatus.SelfSigned
         "AppleVerified" -> SignatureStatus.AppleVerified
         "CertChainIncomplete" -> SignatureStatus.CertChainIncomplete
-        else -> error("unknown signature_status_kind '$name'")
+        else -> null
     }
 
     private fun SignatureStatus.kindName(): String = when (this) {

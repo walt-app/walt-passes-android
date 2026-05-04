@@ -29,7 +29,11 @@ Rationale: a per-pass key scheme would add complexity (key directory, per-row un
 
 ### D2. The database key is wrapped, not derived
 
-The DB key is generated once at first open as 32 random bytes from `SecureRandom`, then wrapped (AES-256-GCM) with a master key resident in Android Keystore. The wrapped blob and its IV are stored in the `schema_meta` table. On subsequent opens, the wrapped blob is unwrapped via Keystore and the resulting raw bytes are passed to SQLCipher's `PRAGMA key`.
+The DB key is generated once at first open as 32 random bytes from `SecureRandom`, then wrapped (AES-256-GCM) with a master key resident in Android Keystore. The wrapped blob and its IV are persisted in a private SharedPreferences file (`is.walt.passes.storage.key_envelope`) outside the SQLCipher database itself. On subsequent opens, the wrapped blob is unwrapped via Keystore and the resulting raw bytes are passed to SQLCipher's `PRAGMA key`.
+
+The envelope MUST live outside the encrypted database it unlocks: storing it inside `schema_meta` would create a chicken-and-egg (you would need the DB key to read schema_meta, but the schema_meta entry IS the DB key). The earlier draft of this ADR placed the envelope in `schema_meta`; the implementation bead corrected this to a SharedPreferences file. The envelope is itself ciphertext under a Keystore-resident, non-exportable master, so the SharedPreferences file's lack of file-level encryption does not weaken the trust claim. The same `walt_passes_backup_rules.xml` / `walt_passes_data_extraction_rules.xml` rules exclude this preferences file from cloud backup and device-to-device transfer (the SharedPreferences domain is opted out alongside the database).
+
+The envelope is written synchronously (`commit()`, not async `apply()`) before the unwrapped DB key is handed to SQLCipher. A crash between an async write and the disk flush would leave SQLCipher pages encrypted with a key whose envelope was never persisted, irreversibly bricking the at-rest data on next launch.
 
 Why wrapped, not Keystore-derived directly: Android Keystore does not export raw symmetric key bytes for AES keys (the keys are non-exportable by design). SQLCipher requires a raw 32-byte key to derive its page key via PBKDF2. Wrapping is the bridge: the master key never leaves Keystore (so hardware-backing applies), and the unwrapped DB key is held in process memory only as long as the database is open.
 
@@ -133,13 +137,14 @@ Rationale: matches CLAUDE.md's `Result<T> over exceptions` rule and gives the co
 Public-API types of `passes-storage`:
 
 - `PassRepository` interface
-- `PassKeyProvider` interface (the Keystore-backed implementation is an internal class produced by `AndroidKeystorePassKeyProvider.create(context)`)
+- `PassKeyProvider` interface (the Keystore-backed implementation is the `AndroidKeystorePassKeyProvider` class, public-but-only-constructable-via-`create(context)`)
 - `StorageResult`, `StorageError` sealed interfaces
 - `StoredPass`, `PassSummary` data classes
 - `StorageTelemetryGuard` interface and its event types
 - `KeyBacking` enum
+- `BackupRulesAssertion.assertBackupRulesApplied(context)` helper, so consumer instrumentation tests can verify the manifest-merge in CI
 
-Internal-only: SQLCipher cursor handling, PRAGMA invocation, manifest assertion helpers, the `AndroidKeystorePassKeyProvider` class body.
+Internal-only: SQLCipher cursor handling, PRAGMA invocation, the `AndroidKeystorePassKeyProvider` class body, the `SqlCipherPassRepository` class body. (An earlier draft listed manifest-assertion helpers as internal-only; the implementation bead promoted `BackupRulesAssertion` to the public surface so the trust claim "rules are applied" is checkable from the consumer's instrumentation test suite.)
 
 Rationale: walt-android's `core/data-passes` wraps `PassRepository` behind a Hilt-provided binding; if `passes-storage` leaks `SQLiteDatabase` or `Cursor` into the public API, walt-android picks up an incidental dependency on those types and the contract gets harder to swap (e.g. for an in-memory test double). Keeping the surface narrow keeps the contract testable on the JVM with a fake `PassKeyProvider` and an in-memory SQLite.
 
@@ -155,21 +160,22 @@ sequenceDiagram
 
     UI->>Repo: open()
     Repo->>KP: provideDatabaseKey()
-    KP->>DB: read schema_meta(wrapped_db_key, iv, alias)
+    KP->>KP: read SharedPreferences(envelope)
     alt first launch
         KP->>KS: getOrCreateMasterKey(alias, StrongBox preferred)
         KS-->>KP: SecretKey handle (non-exportable)
         KP->>KP: dbKey = SecureRandom 32 bytes
         KP->>KS: AES-256-GCM wrap(dbKey)
         KS-->>KP: wrappedBlob, iv
-        KP->>DB: write schema_meta entries
+        KP->>KP: SharedPreferences.commit(envelope)  // synchronous, fsync-bounded
     else subsequent launches
         KP->>KS: AES-256-GCM unwrap(wrappedBlob, iv)
         KS-->>KP: dbKey (raw 32 bytes, in-process)
     end
     KP-->>Repo: dbKey
-    Repo->>DB: PRAGMA key = x'<hex(dbKey)>'
+    Repo->>DB: openOrCreateDatabase(path, dbKey)
     Repo->>DB: PRAGMA cipher_compatibility = 4
+    Repo->>DB: PRAGMA foreign_keys = ON
     Repo->>Repo: zero out dbKey from local buffers
     Note over Repo,DB: Repo holds an open SQLiteDatabase handle;<br/>raw key bytes live only inside SQLCipher's internal page-key derivation buffer.
 ```
