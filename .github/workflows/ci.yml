@@ -29,10 +29,17 @@ jobs:
           java-version: "17"
           distribution: "temurin"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3
-        with:
-          packages: "platforms;android-36 build-tools;36.0.0"
+      # Use the Android SDK preinstalled on ubuntu-latest. Top up the
+      # specific platform / build-tools the modules need via sdkmanager. We
+      # cannot use android-actions/setup-android because the publisher org
+      # is not on the repo's verified-actions allowlist.
+      - name: Top up Android SDK packages
+        run: |
+          set -eu
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-36" \
+            "build-tools;36.0.0"
+          echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@4c125117fe7c5aed11272ec4213f602f012f89f2 # v5
