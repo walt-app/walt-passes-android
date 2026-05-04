@@ -77,10 +77,10 @@ fails fast.
 public fun PassFront(
     pass: Pass,
     signatureStatus: SignatureStatus,
-    locale: PassLocale = PassLocale("en"),
-    nowEpochMillis: Long = System.currentTimeMillis(),
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
+    locale: PassLocale = PassLocale("en"),
+    nowEpochMillis: Long = System.currentTimeMillis(),
 )
 ```
 
@@ -99,12 +99,12 @@ public fun PassFront(
 @Composable
 public fun PassBack(
     pass: Pass,
-    locale: PassLocale = PassLocale("en"),
     onUrlIntent: (B3UrlIntent) -> Unit,
     onPhoneIntent: (PhoneIntent) -> Unit,
     onEmailIntent: (EmailIntent) -> Unit,
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
+    locale: PassLocale = PassLocale("en"),
 )
 ```
 
@@ -174,8 +174,8 @@ sheet AND calls `onConfirm`; dismissal closes WITHOUT firing `onConfirm`.
 @Composable
 public fun ExpiredOverlay(
     state: ExpiredOverlayState,
-    locale: PassLocale = PassLocale("en"),
     modifier: Modifier = Modifier,
+    locale: PassLocale = PassLocale("en"),
 )
 ```
 
@@ -197,9 +197,9 @@ public fun BoundedImage(
     bytes: ImageBytes,
     role: ImageRole,
     contentDescription: String?,
-    bounds: ImageRenderBounds = ImageRenderBounds.Default,
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
+    bounds: ImageRenderBounds = ImageRenderBounds.Default,
 )
 ```
 

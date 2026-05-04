@@ -19,13 +19,37 @@ import `is`.walt.passes.ui.SourceField
  * The string the user sees in the confirmation sheet is the same string this scanner
  * pulled out of the pass.
  *
- * Intentionally conservative: prefers false negatives over false positives. A URL
- * without an `http`/`https` scheme is not detected as a URL; a phone number requires
- * at least seven digits and a leading `+` or parenthesized area code; an email
- * requires an `@` with non-empty local and domain parts.
+ * Intentionally conservative: prefers false negatives over false positives.
+ *
+ * - A URL without an `http`/`https` scheme is not detected as a URL.
+ * - The URL character class is RFC 3986's reserved + unreserved + percent-encoded ASCII
+ *   only. Unicode characters in URLs MUST be percent-encoded (`%E2%80%AE` for U+202E,
+ *   `xn--` Punycode for IDN hosts) to be detected; raw bidi / format / control
+ *   characters cause the URL to be rejected outright. This defends against the bidi
+ *   spoofing class — e.g. `https://attacker.example/‮gpj.elgoog//:sptth` rendering
+ *   visually as a Google asset URL while `Uri.parse` resolves to `attacker.example`.
+ *   Tested in `FieldLinkScannerTest`.
+ * - A phone number requires at least seven digits and is constrained to ASCII digits,
+ *   spaces, hyphens, and parentheses.
+ * - An email requires an `@` with non-empty ASCII local and domain parts.
+ *
+ * Belt-and-suspenders: every match is post-filtered through [containsRenderingHazard],
+ * which discards any match containing a Unicode formatting (Cf) or control (Cc)
+ * codepoint. This is redundant for phone and email under the current regexes but
+ * locks the property so a future regex relaxation does not silently re-open a
+ * spoofing path.
  */
 internal object FieldLinkScanner {
 
+    // Permissive on the boundary chars (whitespace + brackets + quotes), then the
+    // post-filter (`containsRenderingHazard`) rejects matches containing Cf/Cc
+    // characters. The two-stage approach matters: a hostile URL containing
+    // U+202E (Right-to-Left Override) would partial-match under a tighter regex
+    // (stopping at the override and accepting the safe prefix), leaving a partial
+    // URL detected. Capturing the full string here lets the filter discard the
+    // entire match, so the back-field surfaces no link at all rather than a
+    // truncated one whose display is no longer the hostile reorder yet still
+    // differs from what the field text shows.
     private val urlRegex = Regex("""https?://[^\s<>"'()]+""")
     private val emailRegex = Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""")
 
@@ -36,6 +60,21 @@ internal object FieldLinkScanner {
         Regex("""(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)""")
 
     fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
+        // Field-level rejection: if ANY part of this field contains a Unicode
+        // formatting (Cf) or control (Cc) codepoint, surface NO tappable links from
+        // it. Even a clean URL adjacent to a hostile one becomes non-tappable; the
+        // user must copy by hand.
+        //
+        // This is broader than per-match rejection but the right posture for the
+        // trust model: an untrusted pass author who can plant ANY rendering hazard
+        // in a field has demonstrated intent to deceive, and any other "link" in
+        // that field is suspect by association — even if its match substring is
+        // ASCII-clean, the visible context the user reads in the back-field surface
+        // is not. Cutting the entire field off the auto-link path forces a manual
+        // intent (long-press to copy, paste into a browser) where the user has to
+        // see the verbatim string outside any directional reordering.
+        if (containsRenderingHazard(fieldValue)) return emptyList()
+
         val spans = mutableListOf<LinkSpan>()
 
         for (match in urlRegex.findAll(fieldValue)) {
@@ -69,6 +108,21 @@ internal object FieldLinkScanner {
         }
 
         return spans.sortedBy { it.start }
+    }
+
+    /**
+     * True if [s] contains any Unicode Cf (Format) or Cc (Control) codepoint. These
+     * include bidi controls (U+202A-U+202E, U+2066-U+2069, U+200E/U+200F, U+061C),
+     * zero-width characters (U+200B-U+200D, U+FEFF), and raw control bytes (U+0000-U+001F,
+     * U+007F-U+009F). All of them can change the rendered glyph order or visibility of
+     * a string without changing its byte content, breaking the "displayed string equals
+     * actionable string" trust claim.
+     *
+     * The check is character-by-character, O(n), and runs only against already-matched
+     * link substrings so the cost is bounded by the number of links per pass.
+     */
+    internal fun containsRenderingHazard(s: String): Boolean = s.any { c ->
+        c.category == CharCategory.FORMAT || c.isISOControl()
     }
 
     private fun overlapsExisting(

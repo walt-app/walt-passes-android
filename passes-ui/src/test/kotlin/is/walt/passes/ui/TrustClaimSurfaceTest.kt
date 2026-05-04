@@ -168,8 +168,13 @@ class TrustClaimSurfaceTest {
                 )
             }
         }
-        // Sheet shows the verbatim URL and the show-telemetry has fired.
-        composeRule.onNodeWithText("https://example.com/help").assertIsDisplayed()
+        // Sheet shows the verbatim URL (substring match because the actual displayed
+        // text is wrapped in FSI/PDI bidi isolates — see the dedicated isolation tests
+        // below for that property) and the show-telemetry has fired.
+        composeRule.onNodeWithText(
+            "https://example.com/help",
+            substring = true,
+        ).assertIsDisplayed()
         composeRule.waitForIdle()
 
         assertThat(telemetry.events).contains("shown:Url:BoardingPass")
@@ -194,7 +199,7 @@ class TrustClaimSurfaceTest {
                 )
             }
         }
-        composeRule.onNodeWithText("+1 (555) 123-4567").assertIsDisplayed()
+        composeRule.onNodeWithText("+1 (555) 123-4567", substring = true).assertIsDisplayed()
         composeRule.waitForIdle()
         assertThat(telemetry.events).contains("shown:Phone:EventTicket")
     }
@@ -216,9 +221,60 @@ class TrustClaimSurfaceTest {
                 )
             }
         }
-        composeRule.onNodeWithText("support@example.com").assertIsDisplayed()
+        composeRule.onNodeWithText("support@example.com", substring = true).assertIsDisplayed()
         composeRule.waitForIdle()
         assertThat(telemetry.events).contains("shown:Email:Coupon")
+    }
+
+    @Test
+    fun securitySheetUrlIsBidiIsolated() {
+        // Defense-in-depth: even after the scanner rejects bidi-bearing matches, the
+        // sheet wraps the displayed URL in U+2068...U+2069 (FSI/PDI) so any residual
+        // directional context from surrounding chrome cannot reorder the URL glyphs.
+        val intent = B3UrlIntent(
+            url = "https://example.com/help",
+            sourceField = SourceField("support", "Support", "Acme"),
+        )
+        composeRule.setContent {
+            ThemedHost {
+                B3UrlConfirmSheet(
+                    intent = intent,
+                    passType = PassType.BoardingPass,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+        // The displayed text is FSI + url + PDI. Look up by the full isolated form.
+        val isolatedUrl = "⁨https://example.com/help⁩"
+        composeRule.onNodeWithText(isolatedUrl).assertIsDisplayed()
+    }
+
+    @Test
+    fun securitySheetIsolatesOrganizationName() {
+        // The organization name comes from the parsed pass and is rendered in the
+        // sheet's body line. A bidi character in the org name must not reorder
+        // surrounding chrome text. Test by verifying the org name displays inside
+        // the FSI/PDI fence.
+        val intent = B3UrlIntent(
+            url = "https://example.com",
+            sourceField = SourceField("support", "Support", "Acme Corp"),
+        )
+        composeRule.setContent {
+            ThemedHost {
+                B3UrlConfirmSheet(
+                    intent = intent,
+                    passType = PassType.BoardingPass,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText(
+            "⁨Acme Corp⁩ — ⁨Support⁩",
+        ).assertIsDisplayed()
     }
 
     @Test

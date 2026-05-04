@@ -49,9 +49,9 @@ public fun BoundedImage(
     bytes: ImageBytes,
     @Suppress("UNUSED_PARAMETER") role: ImageRole,
     contentDescription: String?,
-    bounds: ImageRenderBounds = ImageRenderBounds.Default,
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
+    bounds: ImageRenderBounds = ImageRenderBounds.Default,
 ) {
     var bitmap by remember(bytes, bounds) { mutableStateOf<Bitmap?>(null) }
     var rejection by remember(bytes, bounds) { mutableStateOf<ImageDecodeRejection?>(null) }

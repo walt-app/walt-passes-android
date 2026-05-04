@@ -52,10 +52,10 @@ import `is`.walt.passes.ui.theme.toComposeColor
 public fun PassFront(
     pass: Pass,
     signatureStatus: SignatureStatus,
-    @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"),
-    nowEpochMillis: Long = System.currentTimeMillis(),
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
+    @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"),
+    nowEpochMillis: Long = System.currentTimeMillis(),
 ) {
     val band = signatureStatus.toBand()
     val expired = remember(pass, nowEpochMillis) {

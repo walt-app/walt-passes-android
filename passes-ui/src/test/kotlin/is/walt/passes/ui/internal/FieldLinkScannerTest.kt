@@ -5,6 +5,7 @@ import `is`.walt.passes.ui.EmailIntent
 import `is`.walt.passes.ui.PhoneIntent
 import `is`.walt.passes.ui.SourceField
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
 
 class FieldLinkScannerTest {
@@ -129,5 +130,138 @@ class FieldLinkScannerTest {
         FieldLinkScanner.scan(pathological, source)
         val elapsedMs = (System.nanoTime() - start) / 1_000_000
         assertThat(elapsedMs).isLessThan(500L)
+    }
+
+    // -- Bidi / formatting-control rejection ------------------------------------
+    //
+    // The auditor scenario: an adversary embeds U+202E (Right-to-Left Override) in a
+    // URL so the sheet renders one host visually while `Uri.parse` resolves another.
+    // The scanner MUST refuse to detect such URLs as URLs, and the value handed into
+    // `B3UrlIntent.url` MUST be byte-identical to the substring that matched the
+    // regex (no silent Cf-stripping, which would itself violate the
+    // "displayed string equals actionable string" claim by changing the bytes the
+    // host opens versus what the user saw).
+
+    @Test
+    fun urlContainingRightToLeftOverrideIsRejected() {
+        val attack = "https://attacker.example/‮gpj.elgoog//:sptth"
+        val spans = FieldLinkScanner.scan(attack, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun urlContainingZeroWidthSpaceIsRejected() {
+        val attack = "https://goog​le.com/path"
+        val spans = FieldLinkScanner.scan(attack, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun urlContainingLeftToRightMarkIsRejected() {
+        val attack = "https://example.com/‎path"
+        val spans = FieldLinkScanner.scan(attack, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun urlContainingArabicLetterMarkIsRejected() {
+        val attack = "https://example.com/؜path"
+        val spans = FieldLinkScanner.scan(attack, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun urlContainingControlCharIsRejected() {
+        val attack = "https://example.com/beep"
+        val spans = FieldLinkScanner.scan(attack, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun emailContainingBidiCharIsRejected() {
+        // Email's character class is already ASCII-only so the regex itself excludes
+        // bidi chars, but lock the property via the post-filter so a future regex
+        // relaxation cannot regress.
+        val attack = "support‮@example.com"
+        val spans = FieldLinkScanner.scan(attack, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun phoneContainingBidiCharIsRejected() {
+        // Phone is similarly ASCII-only; same lock.
+        val attack = "+1 555‮ 123 4567"
+        val spans = FieldLinkScanner.scan(attack, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun cleanAdjacentToBidiHostileSurfacesNothingFromTheField() {
+        // Field-level rejection: if any rendering hazard appears anywhere in the
+        // field, ALL detection is dropped. The user is forced to act manually
+        // outside the auto-link path. The clean URL is collateral damage; the
+        // alternative (still surfacing the clean one) leaves the user reading the
+        // bidi-reordered field and tapping a link with no clear association.
+        val mixed = "Visit https://example.com or https://attacker.example/‮gpj.elgoog//:sptth"
+        val spans = FieldLinkScanner.scan(mixed, source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun urlBytesAreVerbatimNoCfStripping() {
+        // A clean URL passes through unchanged. The explicit byte-equality check
+        // guards the trust claim that the displayed string equals the actionable
+        // string — if the scanner ever sanitizes inputs (e.g. by stripping Cf
+        // characters), the displayed and actioned strings would diverge.
+        val clean = "https://example.com/path?q=1"
+        val spans = FieldLinkScanner.scan(clean, source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.url).isEqualTo(clean)
+    }
+
+    @Test
+    fun percentEncodedBidiInUrlIsAccepted() {
+        // %E2%80%AE is the percent-encoding of U+202E. After percent-decoding, the
+        // URL would contain a bidi char; pre-decoding, the bytes are pure ASCII and
+        // safe to render. This is the legitimate way for a pass author to include
+        // non-ASCII data in a URL — the renderer never sees the decoded form.
+        val url = "https://example.com/%E2%80%AEsomething"
+        val spans = FieldLinkScanner.scan(url, source)
+        assertThat(spans).hasSize(1)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.url).isEqualTo(url)
+    }
+
+    @Test
+    fun containsRenderingHazardCoversFormatAndControlCategories() {
+        // Direct check on the helper so the categorization is locked even if regexes
+        // change. The category enum is the source of truth.
+        listOf(
+            "‮", // Right-to-Left Override (Cf)
+            "‭", // Left-to-Right Override (Cf)
+            "⁦", // Left-to-Right Isolate (Cf)
+            "⁧", // Right-to-Left Isolate (Cf)
+            "⁨", // First Strong Isolate (Cf)
+            "⁩", // Pop Directional Isolate (Cf)
+            "​", // Zero Width Space (Cf)
+            "‎", // Left-to-Right Mark (Cf)
+            "‏", // Right-to-Left Mark (Cf)
+            "؜", // Arabic Letter Mark (Cf)
+            "﻿", // Zero-Width No-Break Space / BOM (Cf)
+            " ", // NUL (Cc)
+            "", // BEL (Cc)
+            "", // ESC (Cc)
+        ).forEach { hazard ->
+            val codepoint = "U+%04X".format(hazard.first().code)
+            assertWithMessage("$codepoint must be flagged as rendering hazard")
+                .that(FieldLinkScanner.containsRenderingHazard("safe$hazard"))
+                .isTrue()
+        }
+    }
+
+    @Test
+    fun containsRenderingHazardAcceptsPlainAscii() {
+        assertThat(FieldLinkScanner.containsRenderingHazard("https://example.com/path"))
+            .isFalse()
     }
 }

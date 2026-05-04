@@ -39,12 +39,12 @@ import `is`.walt.passes.ui.internal.LinkSpan
 @Composable
 public fun PassBack(
     pass: Pass,
-    @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"),
     onUrlIntent: (B3UrlIntent) -> Unit,
     onPhoneIntent: (PhoneIntent) -> Unit,
     onEmailIntent: (EmailIntent) -> Unit,
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
+    @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"),
 ) {
     LaunchedEffect(pass) { telemetry.onPassBackOpened(pass.type) }
 

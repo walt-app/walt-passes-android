@@ -29,8 +29,8 @@ import `is`.walt.passes.ui.theme.toComposeColor
 @Composable
 public fun ExpiredOverlay(
     state: ExpiredOverlayState,
-    @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"),
     modifier: Modifier = Modifier,
+    @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"),
 ) {
     if (state is ExpiredOverlayState.None) return
 

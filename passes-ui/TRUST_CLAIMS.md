@@ -38,7 +38,7 @@ status, and the status cannot be rebound by the host.
 sheet rises that shows: the issuer's `organizationName`, the source field's label,
 the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
 
-**Trust claim.** Two parts.
+**Trust claim.** Three parts.
 
 1. *No URL leaves the device without the user seeing the verbatim target.* The host
    does not open `Intent.ACTION_VIEW` for a pass-derived URL except inside the
@@ -46,16 +46,39 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
 2. *The displayed URL is identical to the URL that opens.* The sheet does not show
    `example.com` and open `attacker.example`. The string in [B3UrlIntent.url] IS the
    string the host hands to its `Intent`.
+3. *The displayed URL is rendered as it was typed.* The sheet defends against the
+   Unicode-bidi class of attacks, where a pass author embeds U+202E
+   (Right-to-Left Override), zero-width marks, or other formatting/control
+   characters in a URL so the visual rendering of the string differs from the
+   bytes that resolve via `Uri.parse`. Two layers:
+   - **Detection-stage rejection.** `FieldLinkScanner.containsRenderingHazard`
+     rejects any field whose value contains a Unicode Cf (format) or Cc (control)
+     codepoint. The rejection is field-level: a clean URL adjacent to a hostile
+     one in the same field becomes non-tappable too, since the surrounding
+     context is untrustworthy.
+   - **Rendering-stage isolation.** The sheet wraps every user-controlled string —
+     the URL, the issuer's organization name, and the source field's label — in
+     U+2068 / U+2069 (FSI / PDI) bidi isolates. Within the isolate, the Unicode
+     Bidirectional Algorithm cannot reorder glyphs across the boundary, so any
+     residual directional context from chrome cannot reorder the displayed target
+     and any directional content within cannot leak outward.
 
 **How tested.**
 
 - `PublicApiSurfaceTest` pins the three arms of `SecurityIntent`.
-- The implementation bead's tests assert that the `B3UrlIntent` callback fires
-  exactly once per tap and that no `ACTION_VIEW` intent is dispatched in the
-  test harness without the user crossing through the sheet.
-- A copy-paste audit (manual + linter rule planned in the implementation bead's
-  follow-up) checks that `B3UrlIntent.url` is the only string read inside the
-  confirm callback's outbound-intent construction.
+- `FieldLinkScannerTest` includes 11 bidi-spoofing cases: U+202E,
+  U+200B (zero-width space), U+200E (LTR mark), U+061C (Arabic Letter Mark),
+  ASCII control bytes, the same hazards in phone and email positions, and a
+  "clean URL adjacent to hostile URL" case that asserts the entire field
+  surfaces no links. Plus `urlBytesAreVerbatimNoCfStripping` (a clean URL passes
+  through byte-equal — no silent sanitization) and the categorization helper
+  test covering Cf and Cc enumerable points.
+- `TrustClaimSurfaceTest.securitySheetUrlIsBidiIsolated` and
+  `securitySheetIsolatesOrganizationName` verify the sheet's rendered text is
+  bracketed by FSI / PDI.
+- The implementation bead's instrumentation tests will assert that no
+  `ACTION_VIEW` intent is dispatched in the test harness without the user
+  crossing through the sheet.
 
 ## 3. Phone confirmation
 
