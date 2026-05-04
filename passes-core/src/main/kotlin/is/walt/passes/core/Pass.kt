@@ -21,9 +21,25 @@ public data class Pass(
     public val frontFields: PassFields,
     public val backFields: List<PassField>,
     public val barcode: Barcode?,
-    public val images: Map<ImageRole, ByteArray>,
+    public val images: Map<ImageRole, ImageBytes>,
     public val locales: Map<PassLocale, LocalizedStrings>,
 )
+
+/**
+ * Wrapper around the raw bytes of a single pass image. Exists only to give [Pass] a sane
+ * `equals`: a bare `Map<ImageRole, ByteArray>` would inherit `ByteArray`'s reference
+ * equality, so two passes with byte-identical images would compare unequal. That would
+ * silently break any consumer doing distinct-until-changed style diffing on `Pass`.
+ *
+ * The wrapper is opaque on purpose: callers that need to render the image hand the bytes
+ * to a decoder; they should not be doing arithmetic on the array.
+ */
+public class ImageBytes(public val bytes: ByteArray) {
+    override fun equals(other: Any?): Boolean =
+        this === other || (other is ImageBytes && bytes.contentEquals(other.bytes))
+
+    override fun hashCode(): Int = bytes.contentHashCode()
+}
 
 /**
  * The five PKPASS pass styles. Subtype labels (e.g. `boardingPass.transitType`) are surfaced

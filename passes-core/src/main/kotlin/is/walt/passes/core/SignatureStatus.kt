@@ -32,3 +32,15 @@ public sealed interface SignatureStatus {
      */
     public data object CertChainIncomplete : SignatureStatus
 }
+
+/**
+ * Telemetry-safe flattening. The exhaustive `when` here is the load-bearing drift detector:
+ * adding a [SignatureStatus] arm without extending [SignatureStatusKind] is a compile error,
+ * not a silent observability gap.
+ */
+public fun SignatureStatus.toKind(): SignatureStatusKind = when (this) {
+    SignatureStatus.Unsigned -> SignatureStatusKind.Unsigned
+    SignatureStatus.SelfSigned -> SignatureStatusKind.SelfSigned
+    SignatureStatus.AppleVerified -> SignatureStatusKind.AppleVerified
+    SignatureStatus.CertChainIncomplete -> SignatureStatusKind.CertChainIncomplete
+}

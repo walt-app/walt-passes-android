@@ -73,3 +73,21 @@ public sealed interface UnsupportedReason {
 
     public data object EncryptedArchive : UnsupportedReason
 }
+
+/**
+ * Telemetry-safe flattening of failure outcomes. [ParseResult.Success] returns `null` —
+ * success is not a failure event. The exhaustive `when` is the drift detector: adding a
+ * [ParseResult] arm without extending [ParseFailureKind] is a compile error. Resource-limit
+ * hits are pulled out of [ParseResult.Malformed] into their own bucket because operationally
+ * they are the most useful failure to alert on (they signal a too-tight [ParserConfig], not
+ * an attack payload).
+ */
+public fun ParseResult.toFailureKind(): ParseFailureKind? = when (this) {
+    is ParseResult.Success -> null
+    is ParseResult.Tampered -> ParseFailureKind.Tampered
+    is ParseResult.Malformed -> when (reason) {
+        is MalformedReason.ResourceLimitExceeded -> ParseFailureKind.ResourceLimitExceeded
+        else -> ParseFailureKind.Malformed
+    }
+    is ParseResult.Unsupported -> ParseFailureKind.Unsupported
+}

@@ -44,3 +44,22 @@ public data class ParserConfig(
         )
     }
 }
+
+/**
+ * The configured ceiling for this resource limit, expressed in the unit the parser actually
+ * compares against (bytes for size limits, count for everything else). Returned as `Long`
+ * so the caller can compare without overflow concerns on archive sizes.
+ *
+ * The exhaustive `when` is the drift detector: adding a [ResourceLimit] arm without giving
+ * it a [ParserConfig] field is a compile error here, so an enum value can never silently
+ * lack a backing limit.
+ */
+public fun ResourceLimit.limitFrom(config: ParserConfig): Long = when (this) {
+    ResourceLimit.ArchiveSize -> config.maxArchiveBytes
+    ResourceLimit.EntryCount -> config.maxEntries.toLong()
+    ResourceLimit.EntrySize -> config.maxEntryBytes
+    ResourceLimit.JsonDepth -> config.maxJsonDepth.toLong()
+    ResourceLimit.JsonStringSize -> config.maxJsonStringBytes.toLong()
+    ResourceLimit.ImagePixelCount -> config.maxImagePixelCount.toLong()
+    ResourceLimit.LocaleCount -> config.maxLocaleCount.toLong()
+}
