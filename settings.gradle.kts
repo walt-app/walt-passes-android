@@ -1,7 +1,18 @@
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        mavenCentral()
+    }
+}
+
 rootProject.name = "walt-passes-android"
 
-// Modules will be added as architecture work concludes.
-// Planned (see CLAUDE.md): passes-core, passes-storage, passes-ui.
-// include(":passes-core")
-// include(":passes-storage")
-// include(":passes-ui")
+include(":passes-core")
+// passes-storage and passes-ui modules will be added by their respective architecture beads.
