@@ -1,0 +1,20 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{kt,kts}]
+# `is.walt.passes.*` uses Kotlin's reserved word `is` as a package segment, which is
+# legal Kotlin (with backticks at use-sites) and matches the `is.walt.*` namespace
+# walt-android publishes under. Disable ktlint's package-name rule so the namespace
+# stays consistent across the trust-claim boundary.
+ktlint_standard_package-name = disabled
+ij_kotlin_imports_layout = *,java.**,javax.**,kotlin.**,^
+
+[*.md]
+trim_trailing_whitespace = false

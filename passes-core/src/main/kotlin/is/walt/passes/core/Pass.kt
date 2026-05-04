@@ -35,8 +35,7 @@ public data class Pass(
  * to a decoder; they should not be doing arithmetic on the array.
  */
 public class ImageBytes(public val bytes: ByteArray) {
-    override fun equals(other: Any?): Boolean =
-        this === other || (other is ImageBytes && bytes.contentEquals(other.bytes))
+    override fun equals(other: Any?): Boolean = this === other || other is ImageBytes && bytes.contentEquals(other.bytes)
 
     override fun hashCode(): Int = bytes.contentHashCode()
 }
@@ -111,12 +110,24 @@ public enum class BarcodeFormat {
  * the parser preserves whichever variants the archive provides without upscaling.
  */
 public enum class ImageRole {
-    Logo, LogoRetina, LogoSuperRetina,
-    Icon, IconRetina, IconSuperRetina,
-    Strip, StripRetina, StripSuperRetina,
-    Background, BackgroundRetina, BackgroundSuperRetina,
-    Thumbnail, ThumbnailRetina, ThumbnailSuperRetina,
-    Footer, FooterRetina, FooterSuperRetina,
+    Logo,
+    LogoRetina,
+    LogoSuperRetina,
+    Icon,
+    IconRetina,
+    IconSuperRetina,
+    Strip,
+    StripRetina,
+    StripSuperRetina,
+    Background,
+    BackgroundRetina,
+    BackgroundSuperRetina,
+    Thumbnail,
+    ThumbnailRetina,
+    ThumbnailSuperRetina,
+    Footer,
+    FooterRetina,
+    FooterSuperRetina,
 }
 
 /** Contents of a single `<locale>.lproj/pass.strings` file. */

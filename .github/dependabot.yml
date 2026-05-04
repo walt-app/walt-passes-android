@@ -1,0 +1,101 @@
+version: 2
+updates:
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "automated"
+    # passes-android is the trust-claim repo. Major-version bumps to AGP, Kotlin,
+    # AndroidX core, SQLCipher, BouncyCastle, and Compose all warrant manual review;
+    # let dependabot handle minor/patch and surface majors as separate PRs.
+    ignore:
+      - dependency-name: "com.android.tools.build:gradle"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "org.jetbrains.kotlin:*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "androidx.core:core-ktx"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "net.zetetic:sqlcipher-android"
+        update-types: ["version-update:semver-major"]
+    groups:
+      kotlin-and-agp:
+        patterns:
+          - "org.jetbrains.kotlin:*"
+          - "com.android.tools.build:*"
+        update-types:
+          - "minor"
+          - "patch"
+      compose:
+        patterns:
+          - "androidx.compose.*:*"
+          - "androidx.compose.material3:*"
+        update-types:
+          - "minor"
+          - "patch"
+      androidx:
+        patterns:
+          - "androidx.*"
+        update-types:
+          - "minor"
+          - "patch"
+      testing:
+        patterns:
+          - "junit:*"
+          - "com.google.truth:*"
+          - "org.jetbrains.kotlinx:kotlinx-coroutines-test"
+          - "org.robolectric:*"
+          - "org.xerial:*"
+        update-types:
+          - "minor"
+          - "patch"
+      quality:
+        patterns:
+          - "io.gitlab.arturbosch.detekt:*"
+          - "org.jlleitschuh.gradle:*"
+        update-types:
+          - "minor"
+          - "patch"
+      other:
+        patterns:
+          - "*"
+        update-types:
+          - "patch"
+    commit-message:
+      prefix: "deps"
+      include: "scope"
+
+  # build-logic is a separate composite build with its own Gradle plugin classpath.
+  - package-ecosystem: "gradle"
+    directory: "/build-logic"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "build-logic"
+      - "automated"
+    commit-message:
+      prefix: "deps(build-logic)"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+      timezone: "America/Los_Angeles"
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "automated"
+    commit-message:
+      prefix: "ci"

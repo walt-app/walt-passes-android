@@ -82,12 +82,14 @@ public sealed interface UnsupportedReason {
  * they are the most useful failure to alert on (they signal a too-tight [ParserConfig], not
  * an attack payload).
  */
-public fun ParseResult.toFailureKind(): ParseFailureKind? = when (this) {
-    is ParseResult.Success -> null
-    is ParseResult.Tampered -> ParseFailureKind.Tampered
-    is ParseResult.Malformed -> when (reason) {
-        is MalformedReason.ResourceLimitExceeded -> ParseFailureKind.ResourceLimitExceeded
-        else -> ParseFailureKind.Malformed
+public fun ParseResult.toFailureKind(): ParseFailureKind? =
+    when (this) {
+        is ParseResult.Success -> null
+        is ParseResult.Tampered -> ParseFailureKind.Tampered
+        is ParseResult.Malformed ->
+            when (reason) {
+                is MalformedReason.ResourceLimitExceeded -> ParseFailureKind.ResourceLimitExceeded
+                else -> ParseFailureKind.Malformed
+            }
+        is ParseResult.Unsupported -> ParseFailureKind.Unsupported
     }
-    is ParseResult.Unsupported -> ParseFailureKind.Unsupported
-}

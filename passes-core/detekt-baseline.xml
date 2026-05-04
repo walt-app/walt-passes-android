@@ -1,0 +1,8 @@
+<?xml version="1.0" ?>
+<SmellBaseline>
+  <ManuallySuppressedIssues/>
+  <CurrentIssues>
+    <ID>LongMethod:PublicApiSurfaceTest.kt$PublicApiSurfaceTest$@Test fun passConstructorIsExercisedWithEveryShape()</ID>
+    <ID>MaxLineLength:Pass.kt$ImageBytes$override fun equals(other: Any?): Boolean</ID>
+  </CurrentIssues>
+</SmellBaseline>

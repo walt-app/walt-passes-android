@@ -1,19 +1,7 @@
 plugins {
-    alias(libs.plugins.kotlin.jvm)
+    alias(libs.plugins.walt.passes.kotlin.library)
+    alias(libs.plugins.walt.passes.quality)
     alias(libs.plugins.kotlin.serialization)
-}
-
-java {
-    toolchain {
-        languageVersion.set(JavaLanguageVersion.of(17))
-    }
-}
-
-kotlin {
-    explicitApi()
-    compilerOptions {
-        freeCompilerArgs.addAll("-Xjvm-default=all")
-    }
 }
 
 dependencies {

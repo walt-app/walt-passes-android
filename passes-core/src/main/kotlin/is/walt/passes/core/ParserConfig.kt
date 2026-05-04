@@ -38,10 +38,11 @@ public data class ParserConfig(
          * and for an opt-in stricter ingestion mode; not the default per
          * decision-wlt-0tn-q1.
          */
-        public val Strict: ParserConfig = ParserConfig(
-            acceptUnsignedArchives = false,
-            acceptSelfSignedCertificates = false,
-        )
+        public val Strict: ParserConfig =
+            ParserConfig(
+                acceptUnsignedArchives = false,
+                acceptSelfSignedCertificates = false,
+            )
     }
 }
 
@@ -54,12 +55,13 @@ public data class ParserConfig(
  * it a [ParserConfig] field is a compile error here, so an enum value can never silently
  * lack a backing limit.
  */
-public fun ResourceLimit.limitFrom(config: ParserConfig): Long = when (this) {
-    ResourceLimit.ArchiveSize -> config.maxArchiveBytes
-    ResourceLimit.EntryCount -> config.maxEntries.toLong()
-    ResourceLimit.EntrySize -> config.maxEntryBytes
-    ResourceLimit.JsonDepth -> config.maxJsonDepth.toLong()
-    ResourceLimit.JsonStringSize -> config.maxJsonStringBytes.toLong()
-    ResourceLimit.ImagePixelCount -> config.maxImagePixelCount.toLong()
-    ResourceLimit.LocaleCount -> config.maxLocaleCount.toLong()
-}
+public fun ResourceLimit.limitFrom(config: ParserConfig): Long =
+    when (this) {
+        ResourceLimit.ArchiveSize -> config.maxArchiveBytes
+        ResourceLimit.EntryCount -> config.maxEntries.toLong()
+        ResourceLimit.EntrySize -> config.maxEntryBytes
+        ResourceLimit.JsonDepth -> config.maxJsonDepth.toLong()
+        ResourceLimit.JsonStringSize -> config.maxJsonStringBytes.toLong()
+        ResourceLimit.ImagePixelCount -> config.maxImagePixelCount.toLong()
+        ResourceLimit.LocaleCount -> config.maxLocaleCount.toLong()
+    }

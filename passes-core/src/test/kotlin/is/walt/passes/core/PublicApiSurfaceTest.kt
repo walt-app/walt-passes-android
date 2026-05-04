@@ -34,12 +34,13 @@ class PublicApiSurfaceTest {
     @Test
     fun parseResultArmsAreReachableViaWhen() {
         val result: ParseResult = ParseResult.Malformed(MalformedReason.NotAZipArchive)
-        val branch = when (result) {
-            is ParseResult.Success -> "success"
-            is ParseResult.Tampered -> "tampered"
-            is ParseResult.Malformed -> "malformed"
-            is ParseResult.Unsupported -> "unsupported"
-        }
+        val branch =
+            when (result) {
+                is ParseResult.Success -> "success"
+                is ParseResult.Tampered -> "tampered"
+                is ParseResult.Malformed -> "malformed"
+                is ParseResult.Unsupported -> "unsupported"
+            }
         assertThat(branch).isEqualTo("malformed")
     }
 
@@ -51,12 +52,13 @@ class PublicApiSurfaceTest {
      */
     @Test
     fun signatureStatusBijectsToKind() {
-        val statuses: List<SignatureStatus> = listOf(
-            SignatureStatus.Unsigned,
-            SignatureStatus.SelfSigned,
-            SignatureStatus.AppleVerified,
-            SignatureStatus.CertChainIncomplete,
-        )
+        val statuses: List<SignatureStatus> =
+            listOf(
+                SignatureStatus.Unsigned,
+                SignatureStatus.SelfSigned,
+                SignatureStatus.AppleVerified,
+                SignatureStatus.CertChainIncomplete,
+            )
         val kindsFromStatuses = statuses.map { it.toKind() }.toSet()
         assertThat(kindsFromStatuses).containsExactlyElementsIn(SignatureStatusKind.entries)
     }
@@ -72,13 +74,14 @@ class PublicApiSurfaceTest {
         val nonResourceMalformed: ParseResult = ParseResult.Malformed(MalformedReason.MissingPassJson)
         val resourceMalformed: ParseResult =
             ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.ArchiveSize))
-        val results: List<ParseResult> = listOf(
-            ParseResult.Success(samplePass(), SignatureStatus.AppleVerified),
-            ParseResult.Tampered(TamperReason.ManifestSignatureMismatch),
-            nonResourceMalformed,
-            resourceMalformed,
-            ParseResult.Unsupported(UnsupportedReason.EncryptedArchive),
-        )
+        val results: List<ParseResult> =
+            listOf(
+                ParseResult.Success(samplePass(), SignatureStatus.AppleVerified),
+                ParseResult.Tampered(TamperReason.ManifestSignatureMismatch),
+                nonResourceMalformed,
+                resourceMalformed,
+                ParseResult.Unsupported(UnsupportedReason.EncryptedArchive),
+            )
         val kinds = results.map { it.toFailureKind() }
         assertThat(kinds).containsExactly(
             null,
@@ -111,34 +114,37 @@ class PublicApiSurfaceTest {
      */
     @Test
     fun tamperReasonArmsAreAllConstructible() {
-        val reasons: List<TamperReason> = listOf(
-            TamperReason.ManifestSignatureMismatch,
-            TamperReason.FileHashMismatch,
-            TamperReason.SignatureCryptoFailure,
-        )
+        val reasons: List<TamperReason> =
+            listOf(
+                TamperReason.ManifestSignatureMismatch,
+                TamperReason.FileHashMismatch,
+                TamperReason.SignatureCryptoFailure,
+            )
         assertThat(reasons.toSet()).hasSize(reasons.size)
     }
 
     @Test
     fun malformedReasonArmsAreAllConstructible() {
-        val reasons: List<MalformedReason> = listOf(
-            MalformedReason.NotAZipArchive,
-            MalformedReason.MissingPassJson,
-            MalformedReason.MissingManifest,
-            MalformedReason.InvalidPassJson,
-            MalformedReason.InvalidManifest,
-            MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonDepth),
-        )
+        val reasons: List<MalformedReason> =
+            listOf(
+                MalformedReason.NotAZipArchive,
+                MalformedReason.MissingPassJson,
+                MalformedReason.MissingManifest,
+                MalformedReason.InvalidPassJson,
+                MalformedReason.InvalidManifest,
+                MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonDepth),
+            )
         assertThat(reasons.toSet()).hasSize(reasons.size)
     }
 
     @Test
     fun unsupportedReasonArmsAreAllConstructible() {
-        val reasons: List<UnsupportedReason> = listOf(
-            UnsupportedReason.FormatVersion(2),
-            UnsupportedReason.UnknownPassStyle("nfcPass"),
-            UnsupportedReason.EncryptedArchive,
-        )
+        val reasons: List<UnsupportedReason> =
+            listOf(
+                UnsupportedReason.FormatVersion(2),
+                UnsupportedReason.UnknownPassStyle("nfcPass"),
+                UnsupportedReason.EncryptedArchive,
+            )
         assertThat(reasons.toSet()).hasSize(reasons.size)
     }
 
@@ -177,65 +183,74 @@ class PublicApiSurfaceTest {
      */
     @Test
     fun passConstructorIsExercisedWithEveryShape() {
-        val field = PassField(
-            key = "destination",
-            label = "Destination",
-            value = "SFO",
-            textAlignment = TextAlignment.Natural,
-        )
-        val pass = Pass(
-            type = PassType.BoardingPass,
-            serialNumber = "ABC-123",
-            description = "Boarding pass for flight 42",
-            organizationName = "Example Air",
-            expirationDate = PassInstant(epochMillis = 1_800_000_000_000L),
-            voided = false,
-            colors = PassColors(
-                foreground = ColorValue(0xFFFFFF),
-                background = ColorValue(0x000000),
-                label = ColorValue(0xCCCCCC),
-            ),
-            frontFields = PassFields(
-                header = listOf(field.copy(key = "h", textAlignment = TextAlignment.Left)),
-                primary = listOf(field.copy(key = "p", textAlignment = TextAlignment.Center)),
-                secondary = listOf(field.copy(key = "s", textAlignment = TextAlignment.Right)),
-                auxiliary = listOf(field.copy(key = "a")),
-            ),
-            backFields = listOf(field.copy(key = "b")),
-            barcode = Barcode(
-                format = BarcodeFormat.QR,
-                message = "FLIGHT42",
-                messageEncoding = "iso-8859-1",
-                altText = "FLIGHT42",
-            ),
-            images = mapOf(
-                ImageRole.Logo to ImageBytes(byteArrayOf(0x89.toByte(), 0x50)),
-                ImageRole.Icon to ImageBytes(byteArrayOf(0x89.toByte(), 0x50)),
-            ),
-            locales = mapOf(
-                PassLocale("en-US") to LocalizedStrings(mapOf("destination" to "Destination")),
-                PassLocale("de") to LocalizedStrings(mapOf("destination" to "Ziel")),
-            ),
-        )
+        val field =
+            PassField(
+                key = "destination",
+                label = "Destination",
+                value = "SFO",
+                textAlignment = TextAlignment.Natural,
+            )
+        val pass =
+            Pass(
+                type = PassType.BoardingPass,
+                serialNumber = "ABC-123",
+                description = "Boarding pass for flight 42",
+                organizationName = "Example Air",
+                expirationDate = PassInstant(epochMillis = 1_800_000_000_000L),
+                voided = false,
+                colors =
+                    PassColors(
+                        foreground = ColorValue(0xFFFFFF),
+                        background = ColorValue(0x000000),
+                        label = ColorValue(0xCCCCCC),
+                    ),
+                frontFields =
+                    PassFields(
+                        header = listOf(field.copy(key = "h", textAlignment = TextAlignment.Left)),
+                        primary = listOf(field.copy(key = "p", textAlignment = TextAlignment.Center)),
+                        secondary = listOf(field.copy(key = "s", textAlignment = TextAlignment.Right)),
+                        auxiliary = listOf(field.copy(key = "a")),
+                    ),
+                backFields = listOf(field.copy(key = "b")),
+                barcode =
+                    Barcode(
+                        format = BarcodeFormat.QR,
+                        message = "FLIGHT42",
+                        messageEncoding = "iso-8859-1",
+                        altText = "FLIGHT42",
+                    ),
+                images =
+                    mapOf(
+                        ImageRole.Logo to ImageBytes(byteArrayOf(0x89.toByte(), 0x50)),
+                        ImageRole.Icon to ImageBytes(byteArrayOf(0x89.toByte(), 0x50)),
+                    ),
+                locales =
+                    mapOf(
+                        PassLocale("en-US") to LocalizedStrings(mapOf("destination" to "Destination")),
+                        PassLocale("de") to LocalizedStrings(mapOf("destination" to "Ziel")),
+                    ),
+            )
 
         assertThat(pass.type).isEqualTo(PassType.BoardingPass)
         assertThat(pass.locales).hasSize(2)
         // All five PassTypes referenced so removal breaks compilation, not just the one we instantiated.
-        val allTypes = setOf(
-            PassType.BoardingPass,
-            PassType.EventTicket,
-            PassType.Coupon,
-            PassType.StoreCard,
-            PassType.Generic,
-        )
+        val allTypes =
+            setOf(
+                PassType.BoardingPass,
+                PassType.EventTicket,
+                PassType.Coupon,
+                PassType.StoreCard,
+                PassType.Generic,
+            )
         assertThat(allTypes).hasSize(PassType.entries.size)
         // Ditto for BarcodeFormat.
-        val allFormats = setOf(
-            BarcodeFormat.QR,
-            BarcodeFormat.PDF417,
-            BarcodeFormat.Aztec,
-            BarcodeFormat.Code128,
-        )
+        val allFormats =
+            setOf(
+                BarcodeFormat.QR,
+                BarcodeFormat.PDF417,
+                BarcodeFormat.Aztec,
+                BarcodeFormat.Code128,
+            )
         assertThat(allFormats).hasSize(BarcodeFormat.entries.size)
     }
 
@@ -257,18 +272,19 @@ class PublicApiSurfaceTest {
         assertThat(a).isNotEqualTo(different)
     }
 
-    private fun samplePass(imageBytes: ByteArray = byteArrayOf(0)): Pass = Pass(
-        type = PassType.Generic,
-        serialNumber = "S",
-        description = "D",
-        organizationName = "O",
-        expirationDate = null,
-        voided = false,
-        colors = PassColors(foreground = null, background = null, label = null),
-        frontFields = PassFields(),
-        backFields = emptyList(),
-        barcode = null,
-        images = mapOf(ImageRole.Icon to ImageBytes(imageBytes)),
-        locales = emptyMap(),
-    )
+    private fun samplePass(imageBytes: ByteArray = byteArrayOf(0)): Pass =
+        Pass(
+            type = PassType.Generic,
+            serialNumber = "S",
+            description = "D",
+            organizationName = "O",
+            expirationDate = null,
+            voided = false,
+            colors = PassColors(foreground = null, background = null, label = null),
+            frontFields = PassFields(),
+            backFields = emptyList(),
+            barcode = null,
+            images = mapOf(ImageRole.Icon to ImageBytes(imageBytes)),
+            locales = emptyMap(),
+        )
 }
