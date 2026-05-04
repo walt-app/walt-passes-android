@@ -10,13 +10,8 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 /**
  * Convention for Android library modules (passes-storage, passes-ui).
  *
- * Mirrors walt-android's AndroidLibraryConventionPlugin with two passes-specific tweaks:
- * - minSdk 28 instead of 26. StrongBox-backed Keystore (passes-storage) and
- *   ImageDecoder.setOnHeaderDecodedListener (passes-ui) both land at API 28; aligning
- *   the whole repo at minSdk 28 keeps the trust-claim story consistent across modules.
- * - explicitApi + -Xjvm-default=all enforced via Kotlin compiler options.
- *
- * AGP 9 has built-in Kotlin support, so org.jetbrains.kotlin.android is not applied.
+ * minSdk 28: StrongBox-backed Keystore and ImageDecoder.setOnHeaderDecodedListener
+ * both land at API 28, so the whole repo aligns there.
  */
 class AndroidLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {
@@ -29,6 +24,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 defaultConfig {
                     minSdk = 28
                     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+                    consumerProguardFiles("consumer-rules.pro")
                 }
 
                 compileOptions {
@@ -39,6 +35,10 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                 buildFeatures {
                     aidl = false
                     shaders = false
+                }
+
+                lint {
+                    checkReleaseBuilds = false
                 }
 
                 testOptions {

@@ -6,10 +6,6 @@ plugins {
 
 android {
     namespace = "is.walt.passes.ui"
-
-    defaultConfig {
-        consumerProguardFiles("consumer-rules.pro")
-    }
 }
 
 dependencies {
@@ -19,7 +15,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
 
     val composeBom = platform(libs.androidx.compose.bom)
-    implementation(composeBom)
     api(composeBom)
 
     api(libs.androidx.compose.ui)
@@ -32,8 +27,6 @@ dependencies {
 
     implementation(libs.zxing.core)
 
-    // JVM-side tests: pure-Kotlin contract checks + Robolectric-backed Compose smoke tests
-    // so the public-API surface and basic composition exercise stay on the JVM CI host.
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlin.reflect)

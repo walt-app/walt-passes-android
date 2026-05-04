@@ -10,15 +10,7 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 /**
  * Convention for pure Kotlin/JVM library modules (passes-core).
  *
- * Mirrors walt-android's KotlinLibraryConventionPlugin and adds the two trust-claim-relevant
- * defaults the passes repo enforces everywhere: explicit API mode and -Xjvm-default=all.
- *
- * Usage:
- * ```
- * plugins {
- *     alias(libs.plugins.walt.passes.kotlin.library)
- * }
- * ```
+ * Enforces explicit API mode and `-Xjvm-default=all` for the trust-claim surface.
  */
 class KotlinLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {

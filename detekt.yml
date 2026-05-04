@@ -437,6 +437,3 @@ style:
     active: true
   WildcardImport:
     active: false # Allow wildcard imports for Compose
-
-formatting:
-  active: false # Using ktlint for formatting checks

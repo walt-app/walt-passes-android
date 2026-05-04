@@ -2,23 +2,13 @@ import io.gitlab.arturbosch.detekt.Detekt
 import io.gitlab.arturbosch.detekt.extensions.DetektExtension
 import org.gradle.api.Plugin
 import org.gradle.api.Project
-import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.kotlin.dsl.configure
-import org.gradle.kotlin.dsl.dependencies
 import org.gradle.kotlin.dsl.withType
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jlleitschuh.gradle.ktlint.KtlintExtension
 import org.jlleitschuh.gradle.ktlint.reporter.ReporterType
 
-/**
- * Convention for code quality tools (detekt + ktlint), mirroring walt-android.
- *
- * Usage:
- * ```
- * plugins {
- *     alias(libs.plugins.walt.passes.quality)
- * }
- * ```
- */
+/** Convention for code quality tools (detekt + ktlint). */
 class QualityConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) {
         with(target) {
@@ -31,8 +21,6 @@ class QualityConventionPlugin : Plugin<Project> {
                 config.setFrom(files("$rootDir/detekt.yml"))
                 buildUponDefaultConfig = true
                 allRules = false
-                // Per-module baseline pins existing findings so detekt only fails on
-                // *new* violations introduced going forward. File is checked in.
                 val baselineFile = file("detekt-baseline.xml")
                 if (baselineFile.exists()) {
                     baseline = baselineFile
@@ -40,14 +28,7 @@ class QualityConventionPlugin : Plugin<Project> {
             }
 
             tasks.withType<Detekt>().configureEach {
-                jvmTarget = "17"
-            }
-
-            val libs = extensions.getByType(
-                VersionCatalogsExtension::class.java,
-            ).named("libs")
-            dependencies {
-                add("detektPlugins", libs.findLibrary("detekt-formatting").get())
+                jvmTarget = JvmTarget.JVM_17.target
             }
 
             extensions.configure<KtlintExtension> {
