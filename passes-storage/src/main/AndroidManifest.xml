@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  passes-storage library manifest. Contributes backup-exclusion rules to the consumer's
+  merged manifest per ADR 0002 D5. The library deliberately does NOT set
+  android:allowBackup="false" — that is a process-wide setting and walt-android may
+  legitimately back up other (non-pass) data. Pass-database exclusion is delivered by
+  the rules files referenced below; consumers can verify the merge with
+  `BackupRulesAssertion.assertBackupRulesApplied(context)`.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <application
+        android:fullBackupContent="@xml/walt_passes_backup_rules"
+        android:dataExtractionRules="@xml/walt_passes_data_extraction_rules"
+        tools:targetApi="31" />
+
+</manifest>

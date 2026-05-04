@@ -1,6 +1,14 @@
 package `is`.walt.passes.storage
 
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.core.SignatureStatusKind as CoreSignatureStatusKind
+
+/**
+ * Re-exports `passes-core`'s [SignatureStatusKind][CoreSignatureStatusKind] under the
+ * storage package so consumers binding [StorageTelemetryGuard] do not need a second import.
+ * The arms are authoritative in `passes-core`; storage MUST NOT shadow or fork them.
+ */
+public typealias SignatureStatusKind = CoreSignatureStatusKind
 
 /**
  * The storage-side counterpart to `passes-core`'s `TelemetryGuard`. Carries the same
@@ -30,7 +38,7 @@ public interface StorageTelemetryGuard {
     )
 
     /**
-     * A pass row was deleted (D6). Emitted after the transaction commits and after the
+     * A pass row was deleted. Emitted after the transaction commits and after the
      * StateFlow is updated.
      */
     public fun onPassDeleted(type: PassType, signatureStatus: SignatureStatusKind)
@@ -51,18 +59,6 @@ public interface StorageTelemetryGuard {
         kind: StorageFailureKind,
         unknownKind: UnknownStorageFailureKind?,
     )
-}
-
-/**
- * Flattened enum mirror of `passes-core`'s `SignatureStatus` arms, suitable for crossing
- * a metric backend that wants string dimensions. New arms here MUST mirror new arms in
- * `SignatureStatus`.
- */
-public enum class SignatureStatusKind {
-    Unsigned,
-    SelfSigned,
-    AppleVerified,
-    CertChainIncomplete,
 }
 
 /**

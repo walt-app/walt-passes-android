@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup exclusions for API 23-30. ADR 0002 D5.
+
+  The walt_passes.db SQLCipher file (and SQLite's WAL/journal sidecars) is excluded
+  from cloud Auto Backup. Even though the file is page-encrypted with a Keystore-wrapped
+  key that the backup blob cannot decrypt, exclusion is the load-bearing control: cloud
+  blobs of opaque ciphertext still represent a future-decryption risk if the key store
+  on a restored device ever lines up by accident.
+
+  The trust claim "pass data is excluded from cloud backup" is delivered by these rules.
+-->
+<full-backup-content>
+    <exclude domain="database" path="walt_passes.db" />
+    <exclude domain="database" path="walt_passes.db-journal" />
+    <exclude domain="database" path="walt_passes.db-wal" />
+    <exclude domain="database" path="walt_passes.db-shm" />
+    <!--
+      The wrapped DB-key envelope (AES-GCM ciphertext under a non-exportable Keystore
+      master). Backed-up envelope is undecryptable on a restored device, but the trust
+      claim "pass-related at-rest data is excluded from cloud backup" covers the
+      envelope file alongside the encrypted DB.
+    -->
+    <exclude domain="sharedpref" path="is.walt.passes.storage.key_envelope.xml" />
+</full-backup-content>

@@ -53,6 +53,18 @@ public interface PassRepository {
      * Confirmation UI is the caller's responsibility; the repository trusts the call.
      */
     public suspend fun delete(id: PassRecordId): StorageResult<Unit>
+
+    /**
+     * Releases the underlying database connection. Idempotent: calling [close] more than
+     * once is a no-op, and method calls after [close] return [StorageError.DatabaseLocked]
+     * rather than throwing. Intended for consumer paths where the repository's lifetime is
+     * shorter than the process (logout, multi-user switching, instrumentation tear-down).
+     *
+     * The default Hilt-singleton wiring in walt-android does not call [close]; the process
+     * exit reclaims the handle. This method exists so the contract permits explicit
+     * teardown rather than relying on process lifetime alone.
+     */
+    public fun close()
 }
 
 /**
