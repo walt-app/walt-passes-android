@@ -7,6 +7,7 @@ junit = "4.13.2"
 truth = "1.4.5"
 detekt = "1.23.8"
 ktlint = "12.1.1"
+bouncycastle = "1.79"
 
 # Android + Compose toolchain (matches walt-android consumer to avoid drift).
 androidxCoreKtx = "1.17.0"
@@ -36,6 +37,12 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "kotlinxCoroutines" }
 junit = { module = "junit:junit", version.ref = "junit" }
 truth = { module = "com.google.truth:truth", version.ref = "truth" }
+
+# BouncyCastle (JVM, JDK 1.8+) — PKCS#7 / CMS signature verification, X.509
+# chain building. Used by passes-core; the BC provider is registered explicitly
+# (Provider("BC")) so verification does not depend on platform default providers.
+bouncycastle-bcprov = { module = "org.bouncycastle:bcprov-jdk18on", version.ref = "bouncycastle" }
+bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref = "bouncycastle" }
 
 # Android core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCoreKtx" }

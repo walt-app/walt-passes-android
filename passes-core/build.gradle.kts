@@ -6,6 +6,8 @@ plugins {
 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
+    implementation(libs.bouncycastle.bcprov)
+    implementation(libs.bouncycastle.bcpkix)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
