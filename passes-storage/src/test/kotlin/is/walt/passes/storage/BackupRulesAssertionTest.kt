@@ -152,11 +152,34 @@ class BackupRulesAssertionTest {
         val xml = "<wrong-root><exclude domain=\"database\" path=\"x\" /></wrong-root>"
         try {
             parse(xml)
-            error("expected BackupRulesParseException")
-        } catch (expected: BackupRulesParseException) {
+            error("expected BackupRulesXmlParser.ParseException")
+        } catch (expected: BackupRulesXmlParser.ParseException) {
             assertThat(expected.message).contains("unexpected root element")
             assertThat(expected.message).contains("wrong-root")
         }
+    }
+
+    @Test
+    fun duplicateSectionsAreUnioned() {
+        // Defensive: a malformed document repeating <cloud-backup> must not mask a
+        // missing entry in the first block by its presence in the second.
+        val xml = """
+            <data-extraction-rules>
+                <cloud-backup>
+                    <exclude domain="database" path="walt_passes.db" />
+                </cloud-backup>
+                <cloud-backup>
+                    <exclude domain="database" path="walt_passes.db-journal" />
+                </cloud-backup>
+            </data-extraction-rules>
+        """.trimIndent()
+
+        val parsed = parse(xml)
+
+        assertThat(parsed.getValue(Section.CloudBackup)).containsExactly(
+            RequiredExclude("database", "walt_passes.db"),
+            RequiredExclude("database", "walt_passes.db-journal"),
+        )
     }
 
     @Test
@@ -175,6 +198,33 @@ class BackupRulesAssertionTest {
 
     @Test
     fun endToEndAgainstLibraryOwnRulesReturnsApplied() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        // The test must exercise the parser path, not the allowBackup=false short-circuit.
+        // If the library's manifest is ever changed to flip this flag, this assertion
+        // surfaces the change rather than the test silently passing for the wrong reason.
+        assertThat(context.applicationInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP)
+            .isNotEqualTo(0)
+
+        val publicOutcome = BackupRulesAssertion.assertBackupRulesApplied(context)
+        // Cross-check: the public entry point and the test seam must agree on the same
+        // unmutated context. Catches divergence between Context.applicationInfo and
+        // packageManager.getApplicationInfo(packageName) under any future Robolectric
+        // configuration.
+        val seamOutcome = BackupRulesAssertion.assertBackupRulesApplied(
+            context.applicationInfo,
+            context.resources,
+        )
+
+        assertThat(publicOutcome).isEqualTo(Outcome.Applied)
+        assertThat(seamOutcome).isEqualTo(publicOutcome)
+    }
+
+    @Test
+    @Config(sdk = [30])
+    fun endToEndOnPreSReturnsAppliedFromFullBackupContentAlone() {
+        // Pre-S devices use full-backup-content, not data-extraction-rules. This test
+        // pins that the legacy path of the trust claim works end-to-end on Android 11
+        // and earlier, where ApplicationInfo.dataExtractionRulesRes does not exist.
         val context = ApplicationProvider.getApplicationContext<Context>()
         val outcome = BackupRulesAssertion.assertBackupRulesApplied(context)
         assertThat(outcome).isEqualTo(Outcome.Applied)
@@ -236,6 +286,11 @@ class BackupRulesAssertionTest {
         ).inOrder()
     }
 
+    /**
+     * Same project convention as [outcomeArmsAreReachableViaWhen] (and
+     * `PublicApiSurfaceTest`): pin the enum surface so additions or removals require a
+     * compile-time conversation here.
+     */
     @Test
     fun sectionEnumeratesTheThreeKnownSectionsWithXmlElementNames() {
         assertThat(Section.entries.map { it.name }).containsExactly(
@@ -252,7 +307,7 @@ class BackupRulesAssertionTest {
         val factory = XmlPullParserFactory.newInstance().apply { isNamespaceAware = false }
         val parser = factory.newPullParser()
         parser.setInput(StringReader(xml))
-        return parseRulesXml(parser)
+        return BackupRulesXmlParser.parseRulesXml(parser)
     }
 
     private fun cloneApplicationInfo(source: ApplicationInfo): ApplicationInfo {

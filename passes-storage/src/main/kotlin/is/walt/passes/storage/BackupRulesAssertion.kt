@@ -133,14 +133,13 @@ public object BackupRulesAssertion {
         }
     }
 
-    private fun reduce(fullBackup: ValidationResult, dxr: ValidationResult): Outcome = when {
-        fullBackup is ValidationResult.Unreadable -> fullBackup.outcome
-        dxr is ValidationResult.Unreadable -> dxr.outcome
-        else -> {
-            val problems = (fullBackup as ValidationResult.Ok).problems +
-                (dxr as ValidationResult.Ok).problems
-            if (problems.isEmpty()) Outcome.Applied else Outcome.MissingExcludes(problems)
-        }
+    private fun reduce(fullBackup: ValidationResult, dxr: ValidationResult): Outcome {
+        val unreadable = fullBackup as? ValidationResult.Unreadable
+            ?: dxr as? ValidationResult.Unreadable
+        if (unreadable != null) return unreadable.outcome
+        val problems = (fullBackup as ValidationResult.Ok).problems +
+            (dxr as ValidationResult.Ok).problems
+        return if (problems.isEmpty()) Outcome.Applied else Outcome.MissingExcludes(problems)
     }
 
     private data class ResourceIds(val fullBackup: Int, val dxr: Int)
@@ -195,8 +194,8 @@ public object BackupRulesAssertion {
             return ParseAttempt.Failed(e.message ?: "resource not found")
         }
         return try {
-            ParseAttempt.Success(parseRulesXml(parser))
-        } catch (e: BackupRulesParseException) {
+            ParseAttempt.Success(BackupRulesXmlParser.parseRulesXml(parser))
+        } catch (e: BackupRulesXmlParser.ParseException) {
             ParseAttempt.Failed(e.message ?: "malformed rules document")
         } catch (e: XmlPullParserException) {
             ParseAttempt.Failed(e.message ?: "xml parse error")
