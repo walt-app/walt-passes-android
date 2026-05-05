@@ -10,6 +10,13 @@ package `is`.walt.passes.core
  * against the input stream length before unzipping; [maxEntries] is checked while iterating
  * the central directory; [maxJsonDepth] is enforced inside the JSON reader.
  *
+ * [maxJsonStringBytes] is intentionally cross-format: it bounds individual string
+ * values in `pass.json` *and* individual values in `<locale>.lproj/pass.strings`. The
+ * two formats share an attack surface (a single oversized string deferring allocation
+ * to a downstream consumer), so a single ceiling is the right knob; introducing a
+ * separate `maxStringsValueBytes` would be a knob without a turner. Tighten this value
+ * and both parsers tighten with it.
+ *
  * Use [Strict] for tests and audit tooling that should reject anything not Apple-signed.
  */
 public data class ParserConfig(

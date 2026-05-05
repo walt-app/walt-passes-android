@@ -132,6 +132,7 @@ class PublicApiSurfaceTest {
                 MalformedReason.MissingManifest,
                 MalformedReason.InvalidPassJson,
                 MalformedReason.InvalidManifest,
+                MalformedReason.InvalidStrings,
                 MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonDepth),
             )
         assertThat(reasons.toSet()).hasSize(reasons.size)
