@@ -1,5 +1,6 @@
 package `is`.walt.passes.storage
 
+import android.os.Build
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
@@ -74,6 +75,27 @@ class AutoBackupBmgrTest {
 
     @Test
     fun passesDataExcludedFromBackupBlob() {
+        // On API 31+ BackupManagerService kills the package's process after a full backup
+        // completes (PerformFullTransportBackupTask.tearDownAgentAndKill -> killApplicationProcess).
+        // Because the test APK is both the test runner AND the package being backed up, the
+        // post-backup SIGKILL takes out AndroidJUnitRunner before any in-process assertion
+        // can run; the kill arrives within ~70ms of the canary landing in the local-transport
+        // blob, so even tightening the poll interval cannot reliably observe the blob first.
+        // Returning early from the test method does not help: the JVM-level SIGKILL takes
+        // out every subsequent test too.
+        //
+        // The trust claim on API 31+ is carried by BackupRulesAssertionInstrumentationTest,
+        // which walks the merged rules XML directly without invoking bmgr (and so without
+        // triggering the post-backup kill). This test stays as the API-28 lever for the same
+        // claim, which exercises the full bmgr -> local-transport -> blob path end-to-end.
+        assumeTrue(
+            "AutoBackupBmgrTest is only exercisable on API < ${Build.VERSION_CODES.S}; on " +
+                "API 31+ BackupManagerService kills the package's process after a full " +
+                "backup, and our test APK is the package being backed up. The trust-claim " +
+                "assertion at this API level is carried by BackupRulesAssertionInstrumentationTest.",
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.S,
+        )
+
         precreatePassesDatabaseInTestApp()
         val canary = dropCanary()
 
