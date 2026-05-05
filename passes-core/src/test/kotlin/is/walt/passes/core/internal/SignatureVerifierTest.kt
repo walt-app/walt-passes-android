@@ -36,7 +36,7 @@ import java.util.Date
  * [SignatureVerifyResult] is being exercised. The test "Apple" trust anchor is a
  * synthesized CA — Apple's real WWDR private key is unavailable, so the production
  * `verifySignature(sigBytes, manifestBytes, config)` entrypoint is exercised
- * indirectly through [verifySignatureAgainst], which lets the test substitute its
+ * indirectly through [verifySignatureAgainstAnchorsForTesting], which lets the test substitute its
  * own anchor for the bundled set.
  *
  * The wider "the bundled Apple anchors load and chain shape" assertion lives in
@@ -54,10 +54,37 @@ class SignatureVerifierTest {
         val signature = sign(manifest, leafCert, leafKey.private, listOf(leafCert, rootCert))
 
         val result =
-            verifySignatureAgainst(
+            verifySignatureAgainstAnchorsForTesting(
                 signatureBytes = signature,
                 manifestBytes = manifest,
                 config = ParserConfig(),
+                trustAnchors = setOf(TrustAnchor(rootCert, null)),
+                knownIntermediates = emptySet(),
+            )
+
+        assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    @Test
+    fun strictAcceptsAppleVerified() {
+        // Lock the classifier branch ordering: ParserConfig.Strict must NOT block a
+        // chain that reaches a bundled anchor — strict mode rejects unsigned and
+        // self-signed inputs only. Without this test, a future reorder of the four-
+        // arm `when` in classifyChain that puts the strict-rejection branch ahead of
+        // chainReachesAnchor would silently fail every Apple-signed pass under
+        // strict mode.
+        val rootKey = newRsaKeyPair()
+        val rootCert = selfSign(rootKey, "CN=Test Apple Root")
+        val leafKey = newRsaKeyPair()
+        val leafCert = signLeafWith(leafKey.public, rootKey, rootCert, "CN=Test Apple Leaf")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature = sign(manifest, leafCert, leafKey.private, listOf(leafCert, rootCert))
+
+        val result =
+            verifySignatureAgainstAnchorsForTesting(
+                signatureBytes = signature,
+                manifestBytes = manifest,
+                config = ParserConfig.Strict,
                 trustAnchors = setOf(TrustAnchor(rootCert, null)),
                 knownIntermediates = emptySet(),
             )
@@ -93,7 +120,7 @@ class SignatureVerifierTest {
         val signature = sign(manifest, leaf, leafKey.private, listOf(leaf, intermediate))
 
         val result =
-            verifySignatureAgainst(
+            verifySignatureAgainstAnchorsForTesting(
                 signatureBytes = signature,
                 manifestBytes = manifest,
                 config = ParserConfig(),
@@ -128,7 +155,7 @@ class SignatureVerifierTest {
         val signature = sign(manifest, leaf, leafKey.private, listOf(leaf, intermediate))
 
         val result =
-            verifySignatureAgainst(
+            verifySignatureAgainstAnchorsForTesting(
                 signatureBytes = signature,
                 manifestBytes = manifest,
                 config = ParserConfig.Strict,
@@ -198,7 +225,7 @@ class SignatureVerifierTest {
         val signature = sign(manifest, leaf, leafKey.private, listOf(leaf, root))
 
         val result =
-            verifySignatureAgainst(
+            verifySignatureAgainstAnchorsForTesting(
                 signature,
                 manifest,
                 ParserConfig(),
@@ -223,7 +250,7 @@ class SignatureVerifierTest {
         val signature = sign(manifest, leaf, leafKey.private, listOf(leaf))
 
         val result =
-            verifySignatureAgainst(
+            verifySignatureAgainstAnchorsForTesting(
                 signature,
                 manifest,
                 ParserConfig(),
@@ -241,7 +268,7 @@ class SignatureVerifierTest {
     ): SignatureVerifyResult {
         val anchorKey = newRsaKeyPair()
         val anchor = selfSign(anchorKey, "CN=Unrelated Anchor")
-        return verifySignatureAgainst(
+        return verifySignatureAgainstAnchorsForTesting(
             signature,
             manifest,
             config,

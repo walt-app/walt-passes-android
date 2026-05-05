@@ -83,9 +83,11 @@ internal fun verifySignature(
     // Anchor lookups MUST live inside the runCatching: AppleTrustAnchors.trustAnchors()
     // calls into resource I/O and CertificateFactory.generateCertificate, both of which
     // can throw if the JAR is repackaged (proguard/R8 stripping, shaded classpath, a
-    // corrupted .cer file). Lazy-cached results re-throw on every subsequent call too,
-    // so a single misconfigured build would crash every parse for the lifetime of the
-    // JVM. Treating the loader as part of the verification operation collapses that
+    // corrupted .cer file). Kotlin's default `by lazy` (LazyThreadSafetyMode.SYNCHRONIZED)
+    // does NOT cache the exception: each call retries the initializer and re-throws on
+    // failure. The end-user effect is the same (every parse fails until the JAR is
+    // rebuilt), but the mechanic is "retry and re-throw," not "first call poisons the
+    // cache." Treating the loader as part of the verification operation collapses that
     // failure mode onto the documented Failed(SignatureCryptoFailure) arm.
     return runCatching {
         val ctx =
@@ -99,12 +101,19 @@ internal fun verifySignature(
 }
 
 /**
- * Test seam. Production callers go through [verifySignature]; tests inject their own
- * trust anchors so a synthesized CA can stand in for Apple's WWDR root. Otherwise
- * identical to the production path: the BC provider is registered exactly once
- * lazily on first call, exceptions are caught, and the policy mapping is the same.
+ * **Test seam — DO NOT call from production code.** Apple's WWDR private key is
+ * unavailable to tests, so the synthesized chains every test builds need a stand-in
+ * trust anchor. Production callers MUST go through [verifySignature]; passing
+ * [emptySet] anchors here silently downgrades every Apple-signed input to
+ * [SignatureStatus.SelfSigned] / [SignatureStatus.CertChainIncomplete] (lenient) or
+ * [TamperReason.SignatureCryptoFailure] (strict) — a trust-degradation footgun no
+ * test in this suite would catch, since the suite itself routes through here. The
+ * `ForTesting` suffix is the conventional flag.
+ *
+ * Otherwise identical to the production path: the BC provider is registered on
+ * first call, exceptions are caught, and the policy mapping is the same.
  */
-internal fun verifySignatureAgainst(
+internal fun verifySignatureAgainstAnchorsForTesting(
     signatureBytes: ByteArray,
     manifestBytes: ByteArray,
     config: ParserConfig,
