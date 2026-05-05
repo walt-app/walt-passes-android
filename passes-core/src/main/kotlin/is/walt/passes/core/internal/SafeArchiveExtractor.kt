@@ -163,25 +163,35 @@ private fun validateAndRead(
     entries: MutableMap<String, ByteArray>,
     config: ParserConfig,
 ): ExtractResult.Failure? {
-    val rejection: MalformedReason? =
+    val rejection =
         pathTraversalReason(name)
-            ?: if (!hasAllowedName(name)) {
-                MalformedReason.NotAZipArchive
-            } else {
-                null
-                    ?: if (entries.containsKey(name)) {
-                        MalformedReason.NotAZipArchive
-                    } else {
-                        null
-                            ?: if (entries.size >= config.maxEntries) {
-                                MalformedReason.ResourceLimitExceeded(ResourceLimit.EntryCount)
-                            } else {
-                                null
-                            }
-                    }
-            }
+            ?: extensionReason(name)
+            ?: duplicateEntryReason(entries, name)
+            ?: entryCountReason(entries, config)
     return rejection?.let { ExtractResult.Failure(it) }
         ?: readEntryAndStore(zis, name, entries, config.maxEntryBytes)
+}
+
+private fun extensionReason(name: String): MalformedReason? {
+    return if (hasAllowedName(name)) null else MalformedReason.NotAZipArchive
+}
+
+private fun duplicateEntryReason(
+    entries: Map<String, ByteArray>,
+    name: String,
+): MalformedReason? {
+    return if (entries.containsKey(name)) MalformedReason.NotAZipArchive else null
+}
+
+private fun entryCountReason(
+    entries: Map<String, ByteArray>,
+    config: ParserConfig,
+): MalformedReason? {
+    return if (entries.size >= config.maxEntries) {
+        MalformedReason.ResourceLimitExceeded(ResourceLimit.EntryCount)
+    } else {
+        null
+    }
 }
 
 private fun pathTraversalReason(name: String): MalformedReason? {
@@ -225,18 +235,13 @@ private fun readEntryBytes(
     val output = ByteArrayOutputStream()
     val buffer = ByteArray(READ_BUFFER_SIZE)
     var totalRead = 0L
-    var exceeded = false
-    while (!exceeded) {
+    while (true) {
         val n = zis.read(buffer)
-        if (n == -1) break
+        if (n == -1) return output.toByteArray()
         totalRead += n
-        if (totalRead > maxEntryBytes) {
-            exceeded = true
-        } else {
-            output.write(buffer, 0, n)
-        }
+        if (totalRead > maxEntryBytes) return null
+        output.write(buffer, 0, n)
     }
-    return if (exceeded) null else output.toByteArray()
 }
 
 /**
