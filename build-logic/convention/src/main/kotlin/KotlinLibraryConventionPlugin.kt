@@ -20,6 +20,9 @@ class KotlinLibraryConventionPlugin : Plugin<Project> {
                 apply("java-library")
             }
 
+            group = providers.gradleProperty("walt.passes.group").get()
+            version = providers.gradleProperty("walt.passes.version").get()
+
             extensions.configure<JavaPluginExtension> {
                 sourceCompatibility = JavaVersion.VERSION_17
                 targetCompatibility = JavaVersion.VERSION_17

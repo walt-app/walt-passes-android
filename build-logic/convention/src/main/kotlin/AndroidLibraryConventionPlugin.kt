@@ -18,6 +18,9 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
         with(target) {
             pluginManager.apply("com.android.library")
 
+            group = providers.gradleProperty("walt.passes.group").get()
+            version = providers.gradleProperty("walt.passes.version").get()
+
             extensions.configure<LibraryExtension> {
                 compileSdk = 36
 
