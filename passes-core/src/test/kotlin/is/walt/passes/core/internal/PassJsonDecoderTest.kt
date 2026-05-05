@@ -551,6 +551,22 @@ class PassJsonDecoderTest {
     }
 
     @Test
+    fun strayLeadingClosersDoNotInflateInFlightDepth() {
+        // Regression test for the depth-clamp invariant (`0 <= depth <= maxDepth`).
+        // Without clamping, leading `}}` would drive depth to -2, then the
+        // following 3 `{` would only peak at +1 — meaning JsonDepthExceeded would
+        // never fire, and the payload would surface only as InvalidJson when
+        // kotlinx rejects the mismatch. With clamping, depth stays 0 through the
+        // leading closers, then climbs 1, 2, 3 — tripping JsonDepthExceeded at the
+        // third opener (depth 3 > maxDepth 2). The clamp keeps the budget honest
+        // regardless of what kotlinx does downstream.
+        val cfg = ParserConfig(maxJsonDepth = 2)
+        val payload = "}}{{{}}".toByteArray()
+        val result = decodePassJson(mapOf("pass.json" to payload), cfg)
+        assertFailedWith(result, PassJsonFailure.JsonDepthExceeded)
+    }
+
+    @Test
     fun escapedQuoteInsideStringDoesNotTerminateString() {
         // Regression: the tokenizer must treat \" as a continued string, otherwise it
         // resets stringByteCount mid-string and silently lets oversized payloads through.

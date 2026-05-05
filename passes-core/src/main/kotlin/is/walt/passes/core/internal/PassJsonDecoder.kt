@@ -107,44 +107,52 @@ private fun assemblePass(
     root: JsonObject,
     style: StyleResolution.Found,
 ): Pass? {
+    val expiration = parseExpiration(root[FIELD_EXPIRATION_DATE])
+    val requireds = readRequiredFields(root)
+    if (requireds == null || expiration is ExpirationParse.Malformed) return null
+    return Pass(
+        type = style.type,
+        serialNumber = requireds.serial,
+        description = requireds.description,
+        organizationName = requireds.organization,
+        expirationDate = (expiration as? ExpirationParse.Ok)?.instant,
+        voided = (root[FIELD_VOIDED] as? JsonPrimitive)?.booleanOrNull ?: false,
+        colors =
+            PassColors(
+                foreground = parseColor(root.stringFieldOrNull(FIELD_FOREGROUND_COLOR)),
+                background = parseColor(root.stringFieldOrNull(FIELD_BACKGROUND_COLOR)),
+                label = parseColor(root.stringFieldOrNull(FIELD_LABEL_COLOR)),
+            ),
+        frontFields =
+            PassFields(
+                header = parseFieldList(style.node[FIELD_HEADER_FIELDS]),
+                primary = parseFieldList(style.node[FIELD_PRIMARY_FIELDS]),
+                secondary = parseFieldList(style.node[FIELD_SECONDARY_FIELDS]),
+                auxiliary = parseFieldList(style.node[FIELD_AUXILIARY_FIELDS]),
+            ),
+        backFields = parseFieldList(style.node[FIELD_BACK_FIELDS]),
+        barcode = parseBarcode(root),
+        images = emptyMap(),
+        locales = emptyMap(),
+    )
+}
+
+private fun readRequiredFields(root: JsonObject): RequiredFields? {
     val serial = root.stringFieldOrNull(FIELD_SERIAL_NUMBER)
     val description = root.stringFieldOrNull(FIELD_DESCRIPTION)
     val organization = root.stringFieldOrNull(FIELD_ORGANIZATION_NAME)
-    val expiration = parseExpiration(root[FIELD_EXPIRATION_DATE])
-    if (expiration is ExpirationParse.Malformed) return null
-    // Three-condition guard kept under detekt's complexity threshold by splitting the
-    // expiration check above; the smart-cast branch below is single-expression so
-    // ReturnCount stays at 2.
     return if (serial != null && description != null && organization != null) {
-        Pass(
-            type = style.type,
-            serialNumber = serial,
-            description = description,
-            organizationName = organization,
-            expirationDate = (expiration as? ExpirationParse.Ok)?.instant,
-            voided = (root[FIELD_VOIDED] as? JsonPrimitive)?.booleanOrNull ?: false,
-            colors =
-                PassColors(
-                    foreground = parseColor(root.stringFieldOrNull(FIELD_FOREGROUND_COLOR)),
-                    background = parseColor(root.stringFieldOrNull(FIELD_BACKGROUND_COLOR)),
-                    label = parseColor(root.stringFieldOrNull(FIELD_LABEL_COLOR)),
-                ),
-            frontFields =
-                PassFields(
-                    header = parseFieldList(style.node[FIELD_HEADER_FIELDS]),
-                    primary = parseFieldList(style.node[FIELD_PRIMARY_FIELDS]),
-                    secondary = parseFieldList(style.node[FIELD_SECONDARY_FIELDS]),
-                    auxiliary = parseFieldList(style.node[FIELD_AUXILIARY_FIELDS]),
-                ),
-            backFields = parseFieldList(style.node[FIELD_BACK_FIELDS]),
-            barcode = parseBarcode(root),
-            images = emptyMap(),
-            locales = emptyMap(),
-        )
+        RequiredFields(serial, description, organization)
     } else {
         null
     }
 }
+
+private data class RequiredFields(
+    val serial: String,
+    val description: String,
+    val organization: String,
+)
 
 /**
  * Returns the resolved style with its sub-object, or a discriminated reason it could
@@ -286,84 +294,6 @@ private sealed interface ExpirationParse {
     data class Ok(val instant: PassInstant) : ExpirationParse
 }
 
-/**
- * Defensive ceiling check the kotlinx parser does not natively enforce. Iterates
- * source bytes once, tracking nesting depth and the byte length of in-progress JSON
- * string tokens. ASCII-byte scanning is safe over UTF-8: continuation bytes
- * (`0x80..0xBF`) cannot collide with `{`, `}`, `[`, `]`, `"`, or `\`.
- *
- * String byte-counting uses source bytes (overcount by escape-sequence shrinkage),
- * not decoded character bytes — the guard's intent is to bound JSON-bomb expansion
- * before allocation, and the overcount is conservative (never lets an over-budget
- * string through). Returns `null` on success, or the first arm that tripped. JSON
- * well-formedness is intentionally not verified here — kotlinx.serialization handles
- * that downstream — so an unbalanced bracket pair sails through here and surfaces as
- * [PassJsonFailure.InvalidJson] from the typed parse.
- */
-private fun enforceJsonLimits(
-    bytes: ByteArray,
-    config: ParserConfig,
-): PassJsonFailure? {
-    val state = JsonLimitTokenizer(maxDepth = config.maxJsonDepth, maxStringBytes = config.maxJsonStringBytes)
-    var i = 0
-    while (i < bytes.size && state.failure == null) {
-        state.consume(bytes[i])
-        i++
-    }
-    return state.failure
-}
-
-private class JsonLimitTokenizer(
-    private val maxDepth: Int,
-    private val maxStringBytes: Int,
-) {
-    var failure: PassJsonFailure? = null
-        private set
-
-    private var depth = 0
-    private var inString = false
-    private var stringByteCount = 0
-    private var escape = false
-
-    fun consume(b: Byte) {
-        if (inString) consumeInString(b) else consumeOutsideString(b)
-    }
-
-    private fun consumeInString(b: Byte) {
-        when {
-            escape -> {
-                escape = false
-                bumpStringByte()
-            }
-            b == BACKSLASH -> {
-                escape = true
-                bumpStringByte()
-            }
-            b == DOUBLE_QUOTE -> inString = false
-            else -> bumpStringByte()
-        }
-    }
-
-    private fun consumeOutsideString(b: Byte) {
-        when (b) {
-            DOUBLE_QUOTE -> {
-                inString = true
-                stringByteCount = 0
-            }
-            LBRACE, LBRACKET -> {
-                depth++
-                if (depth > maxDepth) failure = PassJsonFailure.JsonDepthExceeded
-            }
-            RBRACE, RBRACKET -> depth--
-        }
-    }
-
-    private fun bumpStringByte() {
-        stringByteCount++
-        if (stringByteCount > maxStringBytes) failure = PassJsonFailure.JsonStringTooLong
-    }
-}
-
 private val PASS_JSON: Json =
     Json {
         isLenient = false
@@ -451,10 +381,3 @@ private const val FIELD_FORMAT = "format"
 private const val FIELD_MESSAGE = "message"
 private const val FIELD_MESSAGE_ENCODING = "messageEncoding"
 private const val FIELD_ALT_TEXT = "altText"
-
-private const val DOUBLE_QUOTE: Byte = 0x22
-private const val BACKSLASH: Byte = 0x5C
-private const val LBRACE: Byte = 0x7B
-private const val RBRACE: Byte = 0x7D
-private const val LBRACKET: Byte = 0x5B
-private const val RBRACKET: Byte = 0x5D
