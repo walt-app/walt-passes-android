@@ -3,12 +3,16 @@ package `is`.walt.passes.storage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.storage.internal.WrappedKeyStorage
 import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Drives `bmgr` end-to-end against the test APK and asserts that the Auto Backup pipeline
@@ -73,8 +77,14 @@ class AutoBackupBmgrTest {
         precreatePassesDatabaseInTestApp()
         val canary = dropCanary()
 
+        // Capture a wall-clock baseline for logcat -T BEFORE invoking bmgr. Logcat is a
+        // shared ring buffer that persists across test methods and across runs on the same
+        // boot; without a baseline, awaitBackupCompletion would race against stale completion
+        // lines from prior runs and return before this run's backup actually finished.
+        val logcatBaseline = captureLogcatBaseline()
+
         InstrumentationShell.run("bmgr backupnow $packageName")
-        awaitBackupCompletion(packageName)
+        awaitBackupCompletion(logcatBaseline)
 
         val transportDir = File("/data/data/com.android.localtransport/files/$packageName")
         assumeTrue(
@@ -95,12 +105,13 @@ class AutoBackupBmgrTest {
         assertThat(listing).contains(canary.name)
 
         // The trust claim: the encrypted database, its sidecars, and the wrapped-key
-        // envelope must not appear in the blob.
-        assertThat(listing).doesNotContain("walt_passes.db")
-        assertThat(listing).doesNotContain("walt_passes.db-journal")
-        assertThat(listing).doesNotContain("walt_passes.db-wal")
-        assertThat(listing).doesNotContain("walt_passes.db-shm")
-        assertThat(listing).doesNotContain("is.walt.passes.storage.key_envelope")
+        // envelope must not appear in the blob. Reference the production constants so a
+        // rename in the implementation cannot drift these into vacuous absence assertions.
+        assertThat(listing).doesNotContain(Schema.DATABASE_NAME)
+        assertThat(listing).doesNotContain("${Schema.DATABASE_NAME}-journal")
+        assertThat(listing).doesNotContain("${Schema.DATABASE_NAME}-wal")
+        assertThat(listing).doesNotContain("${Schema.DATABASE_NAME}-shm")
+        assertThat(listing).doesNotContain(WrappedKeyStorage.PREFS_NAME)
     }
 
     /**
@@ -151,6 +162,13 @@ class AutoBackupBmgrTest {
     }
 
     /**
+     * Returns a logcat-compatible timestamp for the current wall-clock moment. Pair with
+     * `logcat -T '<timestamp>'` to read only entries strictly after this point.
+     */
+    private fun captureLogcatBaseline(): String =
+        SimpleDateFormat(LOGCAT_BASELINE_FORMAT, Locale.US).format(Date())
+
+    /**
      * `bmgr backupnow` queues the backup and returns before the per-package result is
      * known; on API 28 it returns immediately with "Running incremental backup for 1
      * requested packages.", and on newer APIs it sometimes blocks for several seconds but
@@ -158,26 +176,28 @@ class AutoBackupBmgrTest {
      * once the transport has accepted the data, so polling logcat for that tag is the
      * reliable signal across API 28-36.
      *
+     * Match shape: every candidate line must contain [packageName] AND a completion-marker
+     * substring (`result:`, `succeeded`, etc.). Requiring [packageName] on every line keeps
+     * a backup driven by another package on the same emulator from satisfying the wait.
+     *
      * Times out cleanly so a wedged framework on a flaky emulator surfaces as a test
      * failure rather than a hung instrumentation run.
      */
-    @Suppress("ReturnCount")
-    private fun awaitBackupCompletion(packageName: String) {
+    private fun awaitBackupCompletion(logcatBaseline: String) {
         val deadlineMillis = System.currentTimeMillis() + BACKUP_COMPLETION_TIMEOUT_MILLIS
         while (System.currentTimeMillis() < deadlineMillis) {
             val logcat = InstrumentationShell.run(
-                "logcat -d -s BackupManagerService:* PerformBackupTask:*",
+                "logcat -d -T '$logcatBaseline' -s BackupManagerService:* PerformBackupTask:*",
             ).output
-            val finished = logcat.lineSequence().any { line ->
-                (line.contains(packageName) && line.contains("result:")) ||
-                    line.contains("Backup pass finished")
+            val completed = logcat.lineSequence().any { line ->
+                line.contains(packageName) && BACKUP_COMPLETION_MARKERS.any(line::contains)
             }
-            if (finished) return
+            if (completed) return
             Thread.sleep(BACKUP_COMPLETION_POLL_INTERVAL_MILLIS)
         }
         error(
             "BackupManagerService did not log a completion line for $packageName " +
-                "within ${BACKUP_COMPLETION_TIMEOUT_MILLIS}ms",
+                "within ${BACKUP_COMPLETION_TIMEOUT_MILLIS}ms (baseline $logcatBaseline)",
         )
     }
 
@@ -185,5 +205,20 @@ class AutoBackupBmgrTest {
         const val CANARY_FILE_NAME: String = "wpass_cb9_backup_canary.txt"
         const val BACKUP_COMPLETION_TIMEOUT_MILLIS: Long = 30_000
         const val BACKUP_COMPLETION_POLL_INTERVAL_MILLIS: Long = 500
+        const val LOGCAT_BASELINE_FORMAT: String = "MM-dd HH:mm:ss.SSS"
+
+        /**
+         * Substrings that mark a per-package completion line emitted by
+         * `BackupManagerService` across API 28-36. The polling loop also requires the
+         * candidate line to contain the package name, so these markers can be liberal
+         * without producing cross-package false positives.
+         */
+        val BACKUP_COMPLETION_MARKERS: List<String> = listOf(
+            "result:",
+            "succeeded",
+            "Success",
+            "Failure",
+            "failed",
+        )
     }
 }

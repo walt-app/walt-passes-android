@@ -66,7 +66,7 @@ class KeyUnavailableAcrossDataClearTest {
         val context = InstrumentationRegistry.getInstrumentation().targetContext
         val dbFile = context.getDatabasePath(Schema.DATABASE_NAME)
         check(dbFile.exists()) { "Test setup left no DB file at $dbFile" }
-        deleteEnvelopeFile(context)
+        clearEnvelopePrefs(context)
 
         val keyResult = AndroidKeystorePassKeyProvider.create(context)
         check(keyResult is StorageResult.Success) {
@@ -142,7 +142,7 @@ class KeyUnavailableAcrossDataClearTest {
         repo.close()
     }
 
-    private fun deleteEnvelopeFile(context: Context) {
+    private fun clearEnvelopePrefs(context: Context) {
         // Clear through the SharedPreferences API rather than deleting the underlying XML.
         // SharedPreferences is a process-singleton with in-memory caching: a file-level
         // delete leaves stale data in the cache, so subsequent reads return the old
@@ -185,7 +185,7 @@ class KeyUnavailableAcrossDataClearTest {
             File(db.absolutePath + "-wal").delete()
             File(db.absolutePath + "-shm").delete()
         }
-        deleteEnvelopeFile(context)
+        clearEnvelopePrefs(context)
         deleteKeystoreMasterAlias()
     }
 
