@@ -1,5 +1,6 @@
 package `is`.walt.passes.storage
 
+import android.content.Context
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
@@ -14,6 +15,7 @@ import `is`.walt.passes.core.PassFields
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.storage.internal.WrappedKeyStorage
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Before
@@ -140,16 +142,27 @@ class KeyUnavailableAcrossDataClearTest {
         repo.close()
     }
 
-    private fun deleteEnvelopeFile(context: android.content.Context) {
-        // SharedPreferences XMLs live at /data/data/<pkg>/shared_prefs/<name>.xml.
-        // Direct file removal is the cleanest reproduction of the "envelope vanished"
-        // scenario; clearing the prefs through the SharedPreferences API would emit
-        // listeners and could leave the file on disk (even if empty).
-        val prefsDir = File(context.applicationInfo.dataDir, "shared_prefs")
-        val envelope = File(prefsDir, "is.walt.passes.storage.key_envelope.xml")
-        envelope.delete()
-        check(!envelope.exists()) {
-            "Envelope file at $envelope was not deletable; cannot run failure-closed assertion"
+    private fun deleteEnvelopeFile(context: Context) {
+        // Clear through the SharedPreferences API rather than deleting the underlying XML.
+        // SharedPreferences is a process-singleton with in-memory caching: a file-level
+        // delete leaves stale data in the cache, so subsequent reads return the old
+        // wrapped envelope. After a Keystore master regeneration that envelope can no
+        // longer be unwrapped, surfacing as KeyUnwrapFailed rather than the
+        // KeyUnavailable this test is pinning. Clearing through the API matches what
+        // production code observes after a `pm clear`-style wipe (which kills the
+        // process and empties the cache anyway), and the implementation reads via the
+        // same API surface so the wipe is consistent with how the envelope is consumed.
+        val prefs = context.getSharedPreferences(
+            WrappedKeyStorage.PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        val cleared = prefs.edit().clear().commit()
+        check(cleared) {
+            "Envelope prefs ${WrappedKeyStorage.PREFS_NAME} were not cleared; " +
+                "cannot run failure-closed assertion"
+        }
+        check(prefs.all.isEmpty()) {
+            "Envelope prefs ${WrappedKeyStorage.PREFS_NAME} still contain entries after clear()"
         }
     }
 
