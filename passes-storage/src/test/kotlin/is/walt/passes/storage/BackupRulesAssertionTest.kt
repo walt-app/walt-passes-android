@@ -242,6 +242,69 @@ class BackupRulesAssertionTest {
     }
 
     @Test
+    fun reflectionSucceedsAndManifestFallbackIsNotInvoked() {
+        // First tier of the read order: when reflection on ApplicationInfo returns a
+        // valid ResourceIds, the assertion must pass through to validateResource without
+        // invoking the manifest-XML fallback. Pins the documented "reflection first,
+        // manifest second" order so a future refactor cannot accidentally promote the
+        // (slower) fallback to primary.
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val ids = BackupRulesAssertion.ResourceIds(
+            fullBackup = R.xml.walt_passes_backup_rules,
+            dxr = R.xml.walt_passes_data_extraction_rules,
+        )
+        var manifestCalls = 0
+        val outcome = BackupRulesAssertion.assertBackupRulesApplied(
+            appInfo = context.applicationInfo,
+            resources = context.resources,
+            reflectionReader = { ids },
+            manifestFallbackReader = { _, _ -> manifestCalls++; null },
+        )
+
+        assertThat(outcome).isEqualTo(Outcome.Applied)
+        assertThat(manifestCalls).isEqualTo(0)
+    }
+
+    @Test
+    fun reflectionUnavailableTriggersManifestFallbackAndReturnsApplied() {
+        // Realises the simulated state PR #20 surfaced on real hardware: reflection on
+        // ApplicationInfo.dataExtractionRulesRes throws NoSuchFieldException under the
+        // hidden-API blocklist, so the first-tier reader returns null. The second-tier
+        // manifest-XML reader resolves the same resource ids and the assertion returns
+        // Applied — "degrade from broken to slower, not broken to manual review."
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val ids = BackupRulesAssertion.ResourceIds(
+            fullBackup = R.xml.walt_passes_backup_rules,
+            dxr = R.xml.walt_passes_data_extraction_rules,
+        )
+        val outcome = BackupRulesAssertion.assertBackupRulesApplied(
+            appInfo = context.applicationInfo,
+            resources = context.resources,
+            reflectionReader = { null },
+            manifestFallbackReader = { _, _ -> ids },
+        )
+
+        assertThat(outcome).isEqualTo(Outcome.Applied)
+    }
+
+    @Test
+    fun reflectionAndManifestFallbackBothFailSurfacesFieldUnavailable() {
+        // Both tiers exhausted: reflection blocklisted AND manifest read errored
+        // (e.g., AXML malformed, or no cookie probe matched the running package).
+        // The Outcome.FieldUnavailable surface remains the triage signal for "the OS
+        // made every read path go away."
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val outcome = BackupRulesAssertion.assertBackupRulesApplied(
+            appInfo = context.applicationInfo,
+            resources = context.resources,
+            reflectionReader = { null },
+            manifestFallbackReader = { _, _ -> null },
+        )
+
+        assertThat(outcome).isEqualTo(Outcome.FieldUnavailable)
+    }
+
+    @Test
     fun appWideAllowBackupFalseReturnsAppliedWithoutParsingRules() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         // Clone the live ApplicationInfo via Parcel so the test's mutation cannot leak
