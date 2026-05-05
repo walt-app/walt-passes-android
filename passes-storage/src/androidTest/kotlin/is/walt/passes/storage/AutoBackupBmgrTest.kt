@@ -3,11 +3,16 @@ package `is`.walt.passes.storage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.storage.internal.WrappedKeyStorage
+import org.junit.After
 import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Drives `bmgr` end-to-end against the test APK and asserts that the Auto Backup pipeline
@@ -26,14 +31,27 @@ import java.io.File
  *    [BackupRulesAssertionInstrumentationTest] (content-check of the merged rules) is
  *    sufficient for the trust claim.
  *
+ * Why a canary file: Auto Backup's exclude-only rules apply only when there is something
+ * to back up. If every file the test creates is excluded, the framework decides the package
+ * has no eligible data and the resulting blob is empty. A `doesNotContain("walt_passes.db")`
+ * assertion against an empty blob is vacuously true, so the test would pass even if the
+ * exclusion rules were missing or wrong. The canary is an unrestricted file in the app's
+ * `filesDir` whose presence in the blob is asserted before the exclusion assertions run.
+ * That makes the absence of `walt_passes.db` a load-bearing claim rather than an artifact
+ * of an empty blob.
+ *
  * The bmgr invocation choice: `bmgr backupnow <pkg>` is preferred over `bmgr fullbackup`
- * because the former returns a structured "Result: Success" line that a test can parse
- * deterministically across API 28-36. `bmgr fullbackup` writes a tarfile via
- * `adb backup` plumbing that has been progressively restricted since API 31 and is no
- * longer reliable from instrumentation. The local transport's blob layout is read from
- * `/data/data/com.android.localtransport/files/` when accessible; that path requires
- * privileged shell on most devices, so the file-listing assertion is gated behind
- * `assumeTrue` and skipped cleanly when the path is opaque.
+ * because `bmgr fullbackup` writes a tarfile via `adb backup` plumbing that has been
+ * progressively restricted since API 31 and is no longer reliable from instrumentation.
+ * `bmgr backupnow` queues the backup and returns before completion; the actual completion
+ * is logged by `BackupManagerService` later, so [awaitBackupCompletion] polls logcat for
+ * the per-package result line rather than parsing bmgr's own stdout.
+ *
+ * The local transport's blob layout is read from `/data/data/com.android.localtransport/files/`
+ * when accessible; that path requires privileged shell on most devices, so the file-listing
+ * assertion (and the canary inclusion check that gates it) is held behind `assumeTrue` and
+ * skipped cleanly when the path is opaque. On those devices [BackupRulesAssertionInstrumentationTest]
+ * carries the trust-claim assertion via the merged rules XML.
  */
 @RunWith(AndroidJUnit4::class)
 class AutoBackupBmgrTest {
@@ -49,32 +67,51 @@ class AutoBackupBmgrTest {
         InstrumentationShell.run("bmgr transport com.android.localtransport/.LocalTransport")
     }
 
-    @Test
-    fun bmgrBackupNowSucceedsAndExcludesPassesDatabase() {
-        precreatePassesDatabaseInTestApp()
+    @After
+    fun removeCanary() {
+        canaryFile().delete()
+    }
 
-        val backup = InstrumentationShell.run("bmgr backupnow $packageName")
-        // bmgr emits a per-package result line like:
-        //   "Package com.example.pkg with result: Success"
-        // older releases use "Backup finished with result: Success". Either form contains
-        // the substring "Success" only on the success path; "no data to backup" surfaces
-        // as a different terminal line.
-        assertThat(backup.output).contains("Success")
+    @Test
+    fun passesDataExcludedFromBackupBlob() {
+        precreatePassesDatabaseInTestApp()
+        val canary = dropCanary()
+
+        // Capture a wall-clock baseline for logcat -T BEFORE invoking bmgr. Logcat is a
+        // shared ring buffer that persists across test methods and across runs on the same
+        // boot; without a baseline, awaitBackupCompletion would race against stale completion
+        // lines from prior runs and return before this run's backup actually finished.
+        val logcatBaseline = captureLogcatBaseline()
+
+        InstrumentationShell.run("bmgr backupnow $packageName")
+        awaitBackupCompletion(logcatBaseline)
 
         val transportDir = File("/data/data/com.android.localtransport/files/$packageName")
         assumeTrue(
             "Local transport blob layout is not readable from the shell user on this " +
-                "device. The bmgr success line above is the load-bearing signal here; the " +
-                "blob-listing assertion is best-effort and only fires on userdebug builds.",
+                "device. The doesNotContain assertions below depend on inspecting the blob " +
+                "directly; on devices without that access this test runs as a smoke check " +
+                "that bmgr accepts the merged manifest, and BackupRulesAssertionInstrumentationTest " +
+                "carries the trust-claim assertion via the merged rules XML.",
             transportDir.canRead(),
         )
 
         val listing = InstrumentationShell.run("ls -laR ${transportDir.absolutePath}").output
-        assertThat(listing).doesNotContain("walt_passes.db")
-        assertThat(listing).doesNotContain("walt_passes.db-journal")
-        assertThat(listing).doesNotContain("walt_passes.db-wal")
-        assertThat(listing).doesNotContain("walt_passes.db-shm")
-        assertThat(listing).doesNotContain("is.walt.passes.storage.key_envelope")
+
+        // Sanity: the canary file (placed in the app's filesDir, not covered by any
+        // <exclude> rule) must appear in the blob. Without this presence check the
+        // exclusion assertions below would be vacuously true on an empty-blob run, e.g.
+        // when the framework decides nothing is eligible to back up.
+        assertThat(listing).contains(canary.name)
+
+        // The trust claim: the encrypted database, its sidecars, and the wrapped-key
+        // envelope must not appear in the blob. Reference the production constants so a
+        // rename in the implementation cannot drift these into vacuous absence assertions.
+        assertThat(listing).doesNotContain(Schema.DATABASE_NAME)
+        assertThat(listing).doesNotContain("${Schema.DATABASE_NAME}-journal")
+        assertThat(listing).doesNotContain("${Schema.DATABASE_NAME}-wal")
+        assertThat(listing).doesNotContain("${Schema.DATABASE_NAME}-shm")
+        assertThat(listing).doesNotContain(WrappedKeyStorage.PREFS_NAME)
     }
 
     /**
@@ -103,5 +140,85 @@ class AutoBackupBmgrTest {
         check(dbFile.exists()) {
             "Pre-backup precondition failed: $dbFile was not created."
         }
+    }
+
+    private fun canaryFile(): File =
+        File(
+            InstrumentationRegistry.getInstrumentation().targetContext.filesDir,
+            CANARY_FILE_NAME,
+        )
+
+    private fun dropCanary(): File {
+        val canary = canaryFile()
+        canary.writeText(
+            "wpass-cb9 backup canary; presence in the local-transport blob asserts that " +
+                "the framework produced a non-empty backup, which makes the doesNotContain " +
+                "assertions for walt_passes.db non-vacuous.",
+        )
+        check(canary.exists()) {
+            "Canary precondition failed: $canary was not created."
+        }
+        return canary
+    }
+
+    /**
+     * Returns a logcat-compatible timestamp for the current wall-clock moment. Pair with
+     * `logcat -T '<timestamp>'` to read only entries strictly after this point.
+     */
+    private fun captureLogcatBaseline(): String =
+        SimpleDateFormat(LOGCAT_BASELINE_FORMAT, Locale.US).format(Date())
+
+    /**
+     * `bmgr backupnow` queues the backup and returns before the per-package result is
+     * known; on API 28 it returns immediately with "Running incremental backup for 1
+     * requested packages.", and on newer APIs it sometimes blocks for several seconds but
+     * not always until completion. The completion line is logged by `BackupManagerService`
+     * once the transport has accepted the data, so polling logcat for that tag is the
+     * reliable signal across API 28-36.
+     *
+     * Match shape: every candidate line must contain [packageName] AND a completion-marker
+     * substring (`result:`, `succeeded`, etc.). Requiring [packageName] on every line keeps
+     * a backup driven by another package on the same emulator from satisfying the wait.
+     *
+     * Times out cleanly so a wedged framework on a flaky emulator surfaces as a test
+     * failure rather than a hung instrumentation run.
+     */
+    private fun awaitBackupCompletion(logcatBaseline: String) {
+        val deadlineMillis = System.currentTimeMillis() + BACKUP_COMPLETION_TIMEOUT_MILLIS
+        while (System.currentTimeMillis() < deadlineMillis) {
+            val logcat = InstrumentationShell.run(
+                "logcat -d -T '$logcatBaseline' -s BackupManagerService:* PerformBackupTask:*",
+            ).output
+            val completed = logcat.lineSequence().any { line ->
+                line.contains(packageName) && BACKUP_COMPLETION_MARKERS.any(line::contains)
+            }
+            if (completed) return
+            Thread.sleep(BACKUP_COMPLETION_POLL_INTERVAL_MILLIS)
+        }
+        error(
+            "BackupManagerService did not log a completion line for $packageName " +
+                "within ${BACKUP_COMPLETION_TIMEOUT_MILLIS}ms (baseline $logcatBaseline)",
+        )
+    }
+
+    private companion object {
+        const val CANARY_FILE_NAME: String = "wpass_cb9_backup_canary.txt"
+        const val BACKUP_COMPLETION_TIMEOUT_MILLIS: Long = 30_000
+        const val BACKUP_COMPLETION_POLL_INTERVAL_MILLIS: Long = 500
+        const val LOGCAT_BASELINE_FORMAT: String = "MM-dd HH:mm:ss.SSS"
+
+        /**
+         * Substrings that mark a per-package completion line emitted by
+         * `BackupManagerService` across API 28-36. The polling loop also requires the
+         * candidate line to contain the package name, so these markers can be liberal
+         * without producing cross-package false positives.
+         */
+        val BACKUP_COMPLETION_MARKERS: List<String> = listOf(
+            "result:",
+            "succeeded",
+            "Success",
+            "Failure",
+            "failed",
+        )
     }
 }
