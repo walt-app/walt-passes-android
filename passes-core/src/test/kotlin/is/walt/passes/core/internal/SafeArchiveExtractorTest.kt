@@ -75,6 +75,19 @@ class SafeArchiveExtractorTest {
     }
 
     @Test
+    fun streamSourceFailurePathLeavesUnderlyingStreamOpen() {
+        // Mid-archive failure path: a path-traversal entry trips well after ZipInputStream
+        // is already pulling bytes through the wrapper chain. The NonClosingInputStream
+        // contract must hold here too — caller still owns the stream's lifecycle even when
+        // extraction aborts.
+        val zip = buildArchive { entry("../etc/passwd.json", "pwned".toByteArray()) }
+        val tracker = OpenTrackingInputStream(ByteArrayInputStream(zip))
+        val result = extractSafely(PassSource.Stream(tracker, sizeHintBytes = zip.size.toLong()), ParserConfig())
+        assertMalformed(result, MalformedReason.NotAZipArchive)
+        assertThat(tracker.closed).isFalse()
+    }
+
+    @Test
     fun declaredSizeOverArchiveCapFailsFast() {
         // sizeHint > maxArchiveBytes — the underlying stream must not even be touched.
         val tracker = OpenTrackingInputStream(ByteArrayInputStream(ByteArray(0)))
@@ -143,6 +156,21 @@ class SafeArchiveExtractorTest {
         val config = ParserConfig().copy(maxEntries = 3)
         val result = extractSafely(PassSource.Bytes(zip), config)
         assertExceeded(result, ResourceLimit.EntryCount)
+    }
+
+    @Test
+    fun zipSlipDirectoryEntryIsRejected() {
+        // Path traversal must be rejected even for entries that are pure directories
+        // (no payload). Today nothing acts on directory entries, but validating up
+        // front means a future change can't bypass the guard by smuggling a `../`
+        // through a directory name.
+        val zip =
+            buildArchive {
+                directory("../escape/")
+                entry("pass.json", "{}".toByteArray())
+            }
+        val result = extractSafely(PassSource.Bytes(zip), ParserConfig())
+        assertMalformed(result, MalformedReason.NotAZipArchive)
     }
 
     @Test

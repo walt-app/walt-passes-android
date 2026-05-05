@@ -94,6 +94,13 @@ private fun runZipPipeline(
     rawStream: InputStream,
     config: ParserConfig,
 ): ExtractResult {
+    // Wrapper order is load-bearing. The chain is:
+    //   userStream -> NonClosingInputStream -> BufferedInputStream -> BoundedInputStream -> ZipInputStream
+    // BoundedInputStream MUST sit *outside* BufferedInputStream so that bytes the sniff
+    // pulled into the buffer still flow through the counter when ZipInputStream reads
+    // them back. Reordering (e.g. moving BufferedInputStream above BoundedInputStream)
+    // would silently let the first 4 sniffed bytes — and any others the buffer prefetched
+    // — escape the maxArchiveBytes accounting.
     val sniffer = BufferedInputStream(rawStream)
     val magicCheck = looksLikeZip(sniffer)
     if (magicCheck != null) return ExtractResult.Failure(magicCheck)
@@ -112,8 +119,11 @@ private fun runZipPipeline(
 /**
  * Returns [MalformedReason.NotAZipArchive] if the next 4 bytes of [stream] are neither a
  * local-file-header signature (`PK\x03\x04`) nor an end-of-central-directory signature
- * (`PK\x05\x06`). Leaves the stream re-positioned at byte 0 so the subsequent
- * [ZipInputStream] reads the same bytes the sniff observed.
+ * (`PK\x05\x06`). The EOCD prefix is legal only for a structurally valid empty archive
+ * (no local file headers, just the EOCD record); a non-empty zip starts with a local
+ * file header. Anything else with `PK\x05\x06` at the front is rejected by
+ * [ZipInputStream] on the next read. Leaves the stream re-positioned at byte 0 so the
+ * subsequent [ZipInputStream] reads the same bytes the sniff observed.
  */
 private fun looksLikeZip(stream: BufferedInputStream): MalformedReason? {
     stream.mark(MAGIC_PREFIX_LENGTH)
@@ -150,11 +160,19 @@ private fun processEntry(
     entries: MutableMap<String, ByteArray>,
     config: ParserConfig,
 ): ExtractResult.Failure? {
-    if (entry.isDirectory) {
-        zis.closeEntry()
-        return null
+    // Validate the name unconditionally, even for directory entries we'd otherwise
+    // skip. A `../foo/` directory is harmless today (nothing acts on directory
+    // entries), but checking up-front means a future change that does act on them
+    // can't accidentally bypass the path-traversal guard.
+    val pathRejection = pathTraversalReason(entry.name)
+    return when {
+        pathRejection != null -> ExtractResult.Failure(pathRejection)
+        entry.isDirectory -> {
+            zis.closeEntry()
+            null
+        }
+        else -> validateAndRead(zis, entry.name, entries, config)
     }
-    return validateAndRead(zis, entry.name, entries, config)
 }
 
 private fun validateAndRead(
@@ -163,9 +181,9 @@ private fun validateAndRead(
     entries: MutableMap<String, ByteArray>,
     config: ParserConfig,
 ): ExtractResult.Failure? {
+    // pathTraversalReason already ran in processEntry; the chain picks up here.
     val rejection =
-        pathTraversalReason(name)
-            ?: extensionReason(name)
+        extensionReason(name)
             ?: duplicateEntryReason(entries, name)
             ?: entryCountReason(entries, config)
     return rejection?.let { ExtractResult.Failure(it) }
@@ -196,12 +214,16 @@ private fun entryCountReason(
 
 private fun pathTraversalReason(name: String): MalformedReason? {
     val isWindowsAbsolute = name.length >= 2 && name[1] == ':'
+    // Strip a single trailing `/` so a legitimate directory entry name like
+    // "en.lproj/" doesn't trip the empty-segment check on the trailing split slot.
+    // Empty intermediate segments ("foo//bar") and a bare "/" still fail.
+    val canonical = name.trimEnd('/')
     val unsafe =
         name.isEmpty() ||
-            name.startsWith('/') ||
-            name.contains('\\') ||
+            canonical.startsWith('/') ||
+            canonical.contains('\\') ||
             isWindowsAbsolute ||
-            name.split('/').any { it == ".." || it == "." || it.isEmpty() }
+            canonical.split('/').any { it == ".." || it == "." || it.isEmpty() }
     return if (unsafe) MalformedReason.NotAZipArchive else null
 }
 
