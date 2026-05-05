@@ -1,13 +1,16 @@
 package `is`.walt.passes.storage
 
+import android.content.Context
 import android.content.pm.ApplicationInfo
+import android.os.Parcel
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.storage.BackupRulesAssertion.MissingSection
 import `is`.walt.passes.storage.BackupRulesAssertion.Outcome
-import `is`.walt.passes.storage.BackupRulesAssertion.RequiredExclude
-import `is`.walt.passes.storage.BackupRulesAssertion.Section
+import `is`.walt.passes.storage.BackupRulesContract.REQUIRED_EXCLUDES
+import `is`.walt.passes.storage.BackupRulesContract.RequiredExclude
+import `is`.walt.passes.storage.BackupRulesContract.Section
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -15,16 +18,16 @@ import org.xmlpull.v1.XmlPullParserFactory
 import java.io.StringReader
 
 /**
- * Behavioral tests for [BackupRulesAssertion]. The XML parsing logic is exercised
- * directly via [BackupRulesAssertion.parseRulesXml] against hand-crafted strings, which
- * lets us cover both consumer postures (inherit vs mirror), missing-entry diagnostics,
- * and malformed-input handling without needing test-only Android resources.
+ * Behavioral tests for [BackupRulesAssertion]. The XML parser is exercised directly
+ * against hand-crafted strings, which lets us cover both consumer postures (inherit vs
+ * mirror), missing-entry diagnostics, and malformed-input handling without needing
+ * test-only Android resources.
  *
  * The end-to-end Context-driven path is exercised against the library's own
  * `walt_passes_backup_rules.xml` and `walt_passes_data_extraction_rules.xml`, which
  * Robolectric loads via the library's manifest contributions. The on-device path
- * (StrongBox vs TEE matrix, bmgr backup-blob inspection) is covered by the
- * `wpass-x5l` instrumentation suite; this file stays JVM-only.
+ * (StrongBox vs TEE matrix, bmgr backup-blob inspection) is covered by the `wpass-x5l`
+ * instrumentation suite; this file stays JVM-only.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -46,7 +49,7 @@ class BackupRulesAssertionTest {
 
         assertThat(parsed.keys).containsExactly(Section.FullBackupContent)
         assertThat(parsed.getValue(Section.FullBackupContent))
-            .containsExactlyElementsIn(BackupRulesAssertion.REQUIRED_EXCLUDES)
+            .containsExactlyElementsIn(REQUIRED_EXCLUDES)
     }
 
     @Test
@@ -74,9 +77,9 @@ class BackupRulesAssertionTest {
 
         assertThat(parsed.keys).containsExactly(Section.CloudBackup, Section.DeviceTransfer)
         assertThat(parsed.getValue(Section.CloudBackup))
-            .containsExactlyElementsIn(BackupRulesAssertion.REQUIRED_EXCLUDES)
+            .containsExactlyElementsIn(REQUIRED_EXCLUDES)
         assertThat(parsed.getValue(Section.DeviceTransfer))
-            .containsExactlyElementsIn(BackupRulesAssertion.REQUIRED_EXCLUDES)
+            .containsExactlyElementsIn(REQUIRED_EXCLUDES)
     }
 
     @Test
@@ -100,7 +103,7 @@ class BackupRulesAssertionTest {
     }
 
     @Test
-    fun mirroredResourceWithExtraExcludesStillPasses() {
+    fun mirroredResourceWithExtraExcludesStillCarriesRequired() {
         // Walt-android's posture: own resource that mirrors required entries plus its own.
         val xml = """
             <data-extraction-rules>
@@ -126,22 +129,15 @@ class BackupRulesAssertionTest {
         val parsed = parse(xml)
 
         assertThat(parsed.getValue(Section.CloudBackup))
-            .containsAtLeastElementsIn(BackupRulesAssertion.REQUIRED_EXCLUDES)
+            .containsAtLeastElementsIn(REQUIRED_EXCLUDES)
     }
 
     @Test
-    fun missingDeviceTransferSectionIsReportedByCallerLogic() {
-        // The parser itself doesn't synthesize sections; it only returns what's there.
-        // The assertion treats absent sections as empty, which lets the assertion
-        // surface them as missing-required-excludes.
+    fun absentSectionIsReportedAsAbsentByParser() {
         val xml = """
             <data-extraction-rules>
                 <cloud-backup>
                     <exclude domain="database" path="walt_passes.db" />
-                    <exclude domain="database" path="walt_passes.db-journal" />
-                    <exclude domain="database" path="walt_passes.db-wal" />
-                    <exclude domain="database" path="walt_passes.db-shm" />
-                    <exclude domain="sharedpref" path="is.walt.passes.storage.key_envelope.xml" />
                 </cloud-backup>
             </data-extraction-rules>
         """.trimIndent()
@@ -152,19 +148,20 @@ class BackupRulesAssertionTest {
     }
 
     @Test
-    fun unknownRootElementThrows() {
+    fun unknownRootElementThrowsTypedException() {
         val xml = "<wrong-root><exclude domain=\"database\" path=\"x\" /></wrong-root>"
         try {
             parse(xml)
-            error("expected IllegalStateException")
-        } catch (expected: IllegalStateException) {
+            error("expected BackupRulesParseException")
+        } catch (expected: BackupRulesParseException) {
             assertThat(expected.message).contains("unexpected root element")
+            assertThat(expected.message).contains("wrong-root")
         }
     }
 
     @Test
     fun excludeOutsideAnySectionIsIgnored() {
-        // Defensive: an <exclude> directly under <data-extraction-rules> with no
+        // Defensive: a stray <exclude> directly under <data-extraction-rules> with no
         // <cloud-backup>/<device-transfer> wrapper has no semantics and is dropped.
         val xml = """
             <data-extraction-rules>
@@ -178,25 +175,29 @@ class BackupRulesAssertionTest {
 
     @Test
     fun endToEndAgainstLibraryOwnRulesReturnsApplied() {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val context = ApplicationProvider.getApplicationContext<Context>()
         val outcome = BackupRulesAssertion.assertBackupRulesApplied(context)
         assertThat(outcome).isEqualTo(Outcome.Applied)
     }
 
     @Test
     fun appWideAllowBackupFalseReturnsAppliedWithoutParsingRules() {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val info: ApplicationInfo = context.packageManager.getApplicationInfo(context.packageName, 0)
-        val originalFlags = info.flags
-        try {
-            info.flags = info.flags and ApplicationInfo.FLAG_ALLOW_BACKUP.inv()
-            val outcome = BackupRulesAssertion.assertBackupRulesApplied(context)
-            assertThat(outcome).isEqualTo(Outcome.Applied)
-        } finally {
-            info.flags = originalFlags
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        // Clone the live ApplicationInfo via Parcel so the test's mutation cannot leak
+        // into Robolectric's shared package state for sibling tests.
+        val freshInfo = cloneApplicationInfo(context.applicationInfo).apply {
+            flags = flags and ApplicationInfo.FLAG_ALLOW_BACKUP.inv()
         }
+        val outcome = BackupRulesAssertion.assertBackupRulesApplied(freshInfo, context.resources)
+        assertThat(outcome).isEqualTo(Outcome.Applied)
     }
 
+    /**
+     * Locks the [Outcome] surface against silent additions or removals. Matches the
+     * project convention from `PublicApiSurfaceTest`: every sealed arm is reached via
+     * an exhaustive `when` so that adding or removing an arm forces a compile-time
+     * conversation here, before any consumer sees it.
+     */
     @Test
     fun outcomeArmsAreReachableViaWhen() {
         val outcomes: List<Outcome> = listOf(
@@ -236,18 +237,32 @@ class BackupRulesAssertionTest {
     }
 
     @Test
-    fun sectionEnumeratesTheThreeKnownSections() {
+    fun sectionEnumeratesTheThreeKnownSectionsWithXmlElementNames() {
         assertThat(Section.entries.map { it.name }).containsExactly(
             "FullBackupContent",
             "CloudBackup",
             "DeviceTransfer",
         ).inOrder()
+        assertThat(Section.FullBackupContent.xmlElement).isEqualTo("full-backup-content")
+        assertThat(Section.CloudBackup.xmlElement).isEqualTo("cloud-backup")
+        assertThat(Section.DeviceTransfer.xmlElement).isEqualTo("device-transfer")
     }
 
     private fun parse(xml: String): Map<Section, Set<RequiredExclude>> {
         val factory = XmlPullParserFactory.newInstance().apply { isNamespaceAware = false }
         val parser = factory.newPullParser()
         parser.setInput(StringReader(xml))
-        return BackupRulesAssertion.parseRulesXml(parser)
+        return parseRulesXml(parser)
+    }
+
+    private fun cloneApplicationInfo(source: ApplicationInfo): ApplicationInfo {
+        val parcel = Parcel.obtain()
+        return try {
+            source.writeToParcel(parcel, 0)
+            parcel.setDataPosition(0)
+            ApplicationInfo.CREATOR.createFromParcel(parcel)
+        } finally {
+            parcel.recycle()
+        }
     }
 }

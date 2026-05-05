@@ -6,14 +6,18 @@ import android.content.pm.PackageManager
 import android.content.res.Resources
 import android.content.res.XmlResourceParser
 import android.os.Build
-import org.xmlpull.v1.XmlPullParser
+import androidx.annotation.VisibleForTesting
+import `is`.walt.passes.storage.BackupRulesContract.REQUIRED_EXCLUDES
+import `is`.walt.passes.storage.BackupRulesContract.RequiredExclude
+import `is`.walt.passes.storage.BackupRulesContract.Section
 import org.xmlpull.v1.XmlPullParserException
 import java.io.IOException
 
 /**
  * Verifies that the trust claim "pass data is excluded from cloud backup" holds in the
- * consumer's merged manifest. Intended for the consumer's instrumentation test suite so
- * that the claim is checkable in CI rather than relying on manifest review.
+ * consumer's merged manifest. Intended for the consumer's test suite (Robolectric or
+ * on-device instrumentation) so that the claim is checkable in CI rather than relying
+ * on manifest review.
  *
  * The library ships `walt_passes_backup_rules.xml` (API 23 - 30) and
  * `walt_passes_data_extraction_rules.xml` (API 31+). Two consumer postures are valid:
@@ -29,26 +33,20 @@ import java.io.IOException
  *
  * Both postures satisfy the trust claim. The assertion validates by **content**, not
  * resource identity: it opens whichever XML resource the merged manifest points at and
- * confirms every entry in [REQUIRED_EXCLUDES] is present in every backup-relevant
- * section of that resource. A consumer is free to add their own additional excludes;
- * only the pass-related entries are required.
+ * confirms every entry in [BackupRulesContract.REQUIRED_EXCLUDES] is present in every
+ * backup-relevant section. Consumers may add additional excludes; only the pass-related
+ * entries are required.
  *
  * If the consumer has set `android:allowBackup="false"` app-wide, the trust claim is
- * trivially satisfied (no surface for pass data to leak through) and the assertion
- * returns [Outcome.Applied] without parsing rules.
+ * trivially satisfied and the assertion returns [Outcome.Applied] without parsing rules.
  *
- * Reflection on `ApplicationInfo.fullBackupContent` and `ApplicationInfo.dataExtractionRulesRes`
- * is intentional: the alternative is parsing the merged manifest XML by hand, which is
- * more brittle than greylisted hidden-API fields whose semantics have not changed since
- * the feature shipped.
+ * Reflection on `ApplicationInfo.fullBackupContent` and
+ * `ApplicationInfo.dataExtractionRulesRes` is intentional: those greylisted hidden-API
+ * fields are the most reliable read of the merged manifest. They may be moved to the
+ * blocklist in a future Android release; if that happens, [Outcome.FieldUnavailable] is
+ * the surface for triage and a manifest-XML fallback is the expected mitigation.
  */
 public object BackupRulesAssertion {
-
-    /** Backup rule sections the assertion validates. */
-    public enum class Section { FullBackupContent, CloudBackup, DeviceTransfer }
-
-    /** A single `<exclude domain="..." path="..."/>` entry. */
-    public data class RequiredExclude(public val domain: String, public val path: String)
 
     /** A section that is missing one or more required excludes. */
     public data class MissingSection(
@@ -96,180 +94,123 @@ public object BackupRulesAssertion {
         public data object FieldUnavailable : Outcome
     }
 
-    /** Entries the library requires every consumer rules resource to carry. */
-    public val REQUIRED_EXCLUDES: List<RequiredExclude> = listOf(
-        RequiredExclude(domain = "database", path = "walt_passes.db"),
-        RequiredExclude(domain = "database", path = "walt_passes.db-journal"),
-        RequiredExclude(domain = "database", path = "walt_passes.db-wal"),
-        RequiredExclude(domain = "database", path = "walt_passes.db-shm"),
-        RequiredExclude(domain = "sharedpref", path = "is.walt.passes.storage.key_envelope.xml"),
-    )
-
     @JvmStatic
     public fun assertBackupRulesApplied(context: Context): Outcome {
         val appInfo = loadApplicationInfo(context) ?: return Outcome.PackageInfoUnavailable
+        return assertBackupRulesApplied(appInfo, context.resources)
+    }
 
+    /**
+     * Test seam. Lets unit tests construct a fresh [ApplicationInfo] (e.g., via Parcel
+     * round-trip) and pass it directly, avoiding mutation of the Robolectric-shared
+     * `ApplicationInfo` returned by `Context.applicationInfo`.
+     */
+    @VisibleForTesting
+    internal fun assertBackupRulesApplied(appInfo: ApplicationInfo, resources: Resources): Outcome =
         if (appInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP == 0) {
-            return Outcome.Applied
+            Outcome.Applied
+        } else {
+            evaluateRules(appInfo, resources)
         }
 
-        val fullBackupResId = readIntField(appInfo, "fullBackupContent")
-            ?: return Outcome.FieldUnavailable
-        val dxrResId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            readIntField(appInfo, "dataExtractionRulesRes") ?: return Outcome.FieldUnavailable
+    private fun evaluateRules(appInfo: ApplicationInfo, resources: Resources): Outcome {
+        val resIds = readResourceIds(appInfo)
+        return when {
+            resIds == null -> Outcome.FieldUnavailable
+            resIds.fullBackup == 0 && resIds.dxr == 0 -> Outcome.NoBackupRulesConfigured
+            else -> reduce(
+                fullBackup = validateResource(
+                    resources = resources,
+                    resId = resIds.fullBackup,
+                    sections = listOf(Section.FullBackupContent),
+                ),
+                dxr = validateResource(
+                    resources = resources,
+                    resId = resIds.dxr,
+                    sections = listOf(Section.CloudBackup, Section.DeviceTransfer),
+                ),
+            )
+        }
+    }
+
+    private fun reduce(fullBackup: ValidationResult, dxr: ValidationResult): Outcome = when {
+        fullBackup is ValidationResult.Unreadable -> fullBackup.outcome
+        dxr is ValidationResult.Unreadable -> dxr.outcome
+        else -> {
+            val problems = (fullBackup as ValidationResult.Ok).problems +
+                (dxr as ValidationResult.Ok).problems
+            if (problems.isEmpty()) Outcome.Applied else Outcome.MissingExcludes(problems)
+        }
+    }
+
+    private data class ResourceIds(val fullBackup: Int, val dxr: Int)
+
+    private fun readResourceIds(appInfo: ApplicationInfo): ResourceIds? {
+        val full = readIntField(appInfo, "fullBackupContent")
+        val dxr = readDxrResId(appInfo)
+        return if (full != null && dxr != null) ResourceIds(fullBackup = full, dxr = dxr) else null
+    }
+
+    private fun readDxrResId(appInfo: ApplicationInfo): Int? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            readIntField(appInfo, "dataExtractionRulesRes")
         } else {
             0
         }
 
-        if (fullBackupResId == 0 && dxrResId == 0) {
-            return Outcome.NoBackupRulesConfigured
+    private sealed interface ValidationResult {
+        data class Ok(val problems: List<MissingSection>) : ValidationResult
+        data class Unreadable(val outcome: Outcome.RulesResourceUnreadable) : ValidationResult
+    }
+
+    private fun validateResource(
+        resources: Resources,
+        resId: Int,
+        sections: List<Section>,
+    ): ValidationResult {
+        if (resId == 0) return ValidationResult.Ok(emptyList())
+        return when (val attempt = parseResource(resources, resId)) {
+            is ParseAttempt.Failed ->
+                ValidationResult.Unreadable(Outcome.RulesResourceUnreadable(resId, attempt.reason))
+            is ParseAttempt.Success -> {
+                val problems = sections.mapNotNull { section ->
+                    val excludes = attempt.sections[section].orEmpty()
+                    val missing = REQUIRED_EXCLUDES.filterNot { it in excludes }
+                    if (missing.isEmpty()) null else MissingSection(resId, section, missing)
+                }
+                ValidationResult.Ok(problems)
+            }
         }
+    }
 
-        val problems = mutableListOf<MissingSection>()
-        validateResource(
-            context = context,
-            resId = fullBackupResId,
-            sections = listOf(Section.FullBackupContent),
-            problems = problems,
-        )?.let { return it }
-        validateResource(
-            context = context,
-            resId = dxrResId,
-            sections = listOf(Section.CloudBackup, Section.DeviceTransfer),
-            problems = problems,
-        )?.let { return it }
+    private sealed interface ParseAttempt {
+        data class Success(val sections: Map<Section, Set<RequiredExclude>>) : ParseAttempt
+        data class Failed(val reason: String) : ParseAttempt
+    }
 
-        return if (problems.isEmpty()) Outcome.Applied else Outcome.MissingExcludes(problems.toList())
+    private fun parseResource(resources: Resources, resId: Int): ParseAttempt {
+        val parser: XmlResourceParser = try {
+            resources.getXml(resId)
+        } catch (e: Resources.NotFoundException) {
+            return ParseAttempt.Failed(e.message ?: "resource not found")
+        }
+        return try {
+            ParseAttempt.Success(parseRulesXml(parser))
+        } catch (e: BackupRulesParseException) {
+            ParseAttempt.Failed(e.message ?: "malformed rules document")
+        } catch (e: XmlPullParserException) {
+            ParseAttempt.Failed(e.message ?: "xml parse error")
+        } catch (e: IOException) {
+            ParseAttempt.Failed(e.message ?: "io error")
+        } finally {
+            parser.close()
+        }
     }
 
     private fun loadApplicationInfo(context: Context): ApplicationInfo? = try {
         context.packageManager.getApplicationInfo(context.packageName, 0)
     } catch (_: PackageManager.NameNotFoundException) {
         null
-    }
-
-    /**
-     * Parses [resId] (if non-zero) and appends a [MissingSection] for every entry in
-     * [sections] that is missing a required exclude. Returns a short-circuit
-     * [Outcome.RulesResourceUnreadable] if the resource cannot be opened or parsed.
-     */
-    private fun validateResource(
-        context: Context,
-        resId: Int,
-        sections: List<Section>,
-        problems: MutableList<MissingSection>,
-    ): Outcome? {
-        if (resId != 0) {
-            val parsed = parseResource(context, resId)
-                ?: return Outcome.RulesResourceUnreadable(resId, "parse failed")
-            for (section in sections) {
-                val excludes = parsed[section].orEmpty()
-                val missing = REQUIRED_EXCLUDES.filterNot { it in excludes }
-                if (missing.isNotEmpty()) {
-                    problems += MissingSection(resId, section, missing)
-                }
-            }
-        }
-        return null
-    }
-
-    private fun parseResource(context: Context, resId: Int): Map<Section, Set<RequiredExclude>>? {
-        val parser: XmlResourceParser = try {
-            context.resources.getXml(resId)
-        } catch (_: Resources.NotFoundException) {
-            return null
-        }
-        return try {
-            parseRulesXml(parser)
-        } catch (_: XmlPullParserException) {
-            null
-        } catch (_: IOException) {
-            null
-        } catch (_: IllegalStateException) {
-            null
-        } finally {
-            parser.close()
-        }
-    }
-
-    /**
-     * Walks a backup-rules XML document and returns the `<exclude>` entries grouped by
-     * section. Accepts both legacy `<full-backup-content>` documents (single implicit
-     * section) and modern `<data-extraction-rules>` documents (with `<cloud-backup>` and
-     * `<device-transfer>` children). `<include>` entries and unknown elements are
-     * ignored; only the `<exclude>` discipline is load-bearing for the trust claim.
-     */
-    @JvmStatic
-    internal fun parseRulesXml(parser: XmlPullParser): Map<Section, Set<RequiredExclude>> {
-        val state = ParseState()
-        var event = parser.eventType
-        while (event != XmlPullParser.END_DOCUMENT) {
-            when (event) {
-                XmlPullParser.START_TAG -> handleStartTag(parser, state)
-                XmlPullParser.END_TAG -> handleEndTag(parser, state)
-            }
-            event = parser.next()
-        }
-        return state.sections
-    }
-
-    private fun handleStartTag(parser: XmlPullParser, state: ParseState) {
-        val name = parser.name
-        when {
-            !state.rootSeen -> openRoot(name, state)
-            !state.rootIsFullBackup && name == "cloud-backup" -> state.enter(Section.CloudBackup)
-            !state.rootIsFullBackup && name == "device-transfer" -> state.enter(Section.DeviceTransfer)
-            name == "exclude" -> recordExclude(parser, state)
-        }
-    }
-
-    private fun handleEndTag(parser: XmlPullParser, state: ParseState) {
-        if (state.rootIsFullBackup) return
-        val name = parser.name
-        if (name == "cloud-backup" || name == "device-transfer") {
-            state.leave()
-        }
-    }
-
-    private fun openRoot(name: String, state: ParseState) {
-        state.rootSeen = true
-        when (name) {
-            "full-backup-content" -> {
-                state.rootIsFullBackup = true
-                state.enter(Section.FullBackupContent)
-            }
-            "data-extraction-rules" -> Unit
-            else -> error("unexpected root element: $name")
-        }
-    }
-
-    private fun recordExclude(parser: XmlPullParser, state: ParseState) {
-        val sect = state.currentSection
-        val domain = parser.getAttributeValue(null, "domain")
-        val path = parser.getAttributeValue(null, "path")
-        if (sect != null && domain != null && path != null) {
-            state.add(sect, RequiredExclude(domain, path))
-        }
-    }
-
-    private class ParseState {
-        val sections: MutableMap<Section, MutableSet<RequiredExclude>> = mutableMapOf()
-        var currentSection: Section? = null
-        var rootIsFullBackup: Boolean = false
-        var rootSeen: Boolean = false
-
-        fun enter(section: Section) {
-            currentSection = section
-            sections.getOrPut(section) { mutableSetOf() }
-        }
-
-        fun leave() {
-            currentSection = null
-        }
-
-        fun add(section: Section, exclude: RequiredExclude) {
-            sections.getValue(section).add(exclude)
-        }
     }
 
     private fun readIntField(target: Any, name: String): Int? = try {

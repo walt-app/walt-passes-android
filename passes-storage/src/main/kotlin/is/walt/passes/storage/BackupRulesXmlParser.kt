@@ -1,0 +1,95 @@
+package `is`.walt.passes.storage
+
+import `is`.walt.passes.storage.BackupRulesContract.RequiredExclude
+import `is`.walt.passes.storage.BackupRulesContract.Section
+import org.xmlpull.v1.XmlPullParser
+
+/**
+ * Walks a backup-rules XML document and returns the `<exclude>` entries grouped by
+ * section. Accepts both legacy `<full-backup-content>` documents (single implicit
+ * section) and modern `<data-extraction-rules>` documents (`<cloud-backup>` and
+ * `<device-transfer>` children). `<include>` entries and unknown elements are ignored;
+ * only the `<exclude>` discipline is load-bearing for the trust claim.
+ *
+ * Throws [BackupRulesParseException] when the document does not have a recognized
+ * backup-rules root element. Other XML or IO errors propagate as
+ * [org.xmlpull.v1.XmlPullParserException] / [java.io.IOException] for the caller to
+ * translate into [BackupRulesAssertion.Outcome.RulesResourceUnreadable].
+ */
+internal fun parseRulesXml(parser: XmlPullParser): Map<Section, Set<RequiredExclude>> {
+    advanceToFirstStartTag(parser)
+    return when (val name = parser.name) {
+        Section.FullBackupContent.xmlElement ->
+            mapOf(Section.FullBackupContent to collectExcludesUntil(parser, name))
+        DATA_EXTRACTION_RULES_ELEMENT -> parseDataExtractionRules(parser)
+        else -> throw BackupRulesParseException("unexpected root element: $name")
+    }
+}
+
+internal class BackupRulesParseException(message: String) : RuntimeException(message)
+
+private const val DATA_EXTRACTION_RULES_ELEMENT = "data-extraction-rules"
+private const val EXCLUDE_ELEMENT = "exclude"
+private const val DOMAIN_ATTRIBUTE = "domain"
+private const val PATH_ATTRIBUTE = "path"
+
+private fun advanceToFirstStartTag(parser: XmlPullParser) {
+    var event = parser.eventType
+    while (event != XmlPullParser.START_TAG && event != XmlPullParser.END_DOCUMENT) {
+        event = parser.next()
+    }
+    if (event != XmlPullParser.START_TAG) {
+        throw BackupRulesParseException("empty rules document")
+    }
+}
+
+private fun parseDataExtractionRules(parser: XmlPullParser): Map<Section, Set<RequiredExclude>> {
+    val sections = mutableMapOf<Section, Set<RequiredExclude>>()
+    var event = parser.next()
+    while (!isEndOfDataExtractionRules(event, parser)) {
+        if (event == XmlPullParser.START_TAG) {
+            val section = sectionByElementName(parser.name)
+            if (section != null) {
+                sections[section] = collectExcludesUntil(parser, parser.name)
+            }
+        }
+        event = parser.next()
+    }
+    return sections
+}
+
+/**
+ * Reads `<exclude>` children of the element currently positioned at START_TAG. Returns
+ * once the matching END_TAG (named [closingElement]) is consumed.
+ */
+private fun collectExcludesUntil(
+    parser: XmlPullParser,
+    closingElement: String,
+): Set<RequiredExclude> {
+    val excludes = mutableSetOf<RequiredExclude>()
+    var event = parser.next()
+    while (!isClosingEvent(event, parser, closingElement)) {
+        if (event == XmlPullParser.START_TAG && parser.name == EXCLUDE_ELEMENT) {
+            val domain = parser.getAttributeValue(null, DOMAIN_ATTRIBUTE)
+            val path = parser.getAttributeValue(null, PATH_ATTRIBUTE)
+            if (domain != null && path != null) {
+                excludes.add(RequiredExclude(domain, path))
+            }
+        }
+        event = parser.next()
+    }
+    return excludes
+}
+
+private fun isClosingEvent(event: Int, parser: XmlPullParser, closingElement: String): Boolean {
+    if (event == XmlPullParser.END_DOCUMENT) return true
+    return event == XmlPullParser.END_TAG && parser.name == closingElement
+}
+
+private fun isEndOfDataExtractionRules(event: Int, parser: XmlPullParser): Boolean {
+    if (event == XmlPullParser.END_DOCUMENT) return true
+    return event == XmlPullParser.END_TAG && parser.name == DATA_EXTRACTION_RULES_ELEMENT
+}
+
+private fun sectionByElementName(name: String): Section? =
+    Section.entries.firstOrNull { it.xmlElement == name }
