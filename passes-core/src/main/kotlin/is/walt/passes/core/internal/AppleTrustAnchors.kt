@@ -1,0 +1,85 @@
+package `is`.walt.passes.core.internal
+
+import java.security.cert.CertificateFactory
+import java.security.cert.TrustAnchor
+import java.security.cert.X509Certificate
+
+/**
+ * Loads the Apple trust anchors and known WWDR intermediates bundled under
+ * `passes-core/src/main/resources/is/walt/passes/core/internal/certs/`. Loaded once on
+ * first access and held in [BundledCerts]. The fingerprints and provenance of every
+ * certificate are documented in `certs/SECURITY-CERTS.md`; an auditor or downstream
+ * security reviewer can verify the bundled set without running the parser.
+ *
+ * **Why bundled, not platform-trusted.** The JVM truststore is mutable at runtime
+ * (system properties, `keytool`, OS-level CA changes). Walt's trust claim is "this
+ * pass chains to Apple," not "this pass chains to whatever JVM trust store this
+ * particular device happens to ship today." Bundling pins the trust set to whatever
+ * shipped with `passes-core` and lets the parser surface
+ * [`is`.walt.passes.core.SignatureStatus.CertChainIncomplete] for a chain that
+ * _the JVM_ might happen to trust but that does not reach an Apple root.
+ *
+ * **Why no network fetches.** Some PKCS#7 envelopes embed an issuer URL in their
+ * Authority Information Access extension; fetching from that URL would let a
+ * signature blob influence which issuers we contact. The `CertChainIncomplete` arm
+ * is the explicit fallback for "leaf math validates but the chain we have on hand
+ * does not reach a known root" — chasing the AIA URL would replace that surface
+ * with a network footgun.
+ */
+internal object AppleTrustAnchors {
+    private val BUNDLED_TRUST_ANCHOR_FILENAMES =
+        listOf(
+            "apple-root-ca.cer",
+            "apple-root-ca-g2.cer",
+            "apple-root-ca-g3.cer",
+        )
+
+    private val BUNDLED_INTERMEDIATE_FILENAMES =
+        listOf(
+            "apple-wwdr-g3.cer",
+            "apple-wwdr-g6.cer",
+        )
+
+    private val cache: BundledCerts by lazy { loadFromResources() }
+
+    /** The Apple roots, wrapped as JCE [TrustAnchor]s for `PKIXBuilderParameters`. */
+    fun trustAnchors(): Set<TrustAnchor> = cache.trustAnchors
+
+    /**
+     * Bundled WWDR intermediates. Added to the path-builder cert store so a signature
+     * blob that omits its intermediate (occasionally observed) can still chain to a
+     * bundled root; never trust anchors on their own.
+     */
+    fun knownIntermediates(): Set<X509Certificate> = cache.intermediates
+
+    private fun loadFromResources(): BundledCerts {
+        val factory = CertificateFactory.getInstance(X509_TYPE)
+        val anchors =
+            BUNDLED_TRUST_ANCHOR_FILENAMES.mapTo(LinkedHashSet()) {
+                TrustAnchor(loadResource(factory, it), null)
+            }
+        val intermediates =
+            BUNDLED_INTERMEDIATE_FILENAMES.mapTo(LinkedHashSet()) {
+                loadResource(factory, it)
+            }
+        return BundledCerts(anchors, intermediates)
+    }
+
+    private fun loadResource(
+        factory: CertificateFactory,
+        filename: String,
+    ): X509Certificate {
+        val stream =
+            AppleTrustAnchors::class.java.getResourceAsStream("$RESOURCE_DIR/$filename")
+                ?: error("Bundled cert missing from resources: $RESOURCE_DIR/$filename")
+        return stream.use { factory.generateCertificate(it) as X509Certificate }
+    }
+
+    private data class BundledCerts(
+        val trustAnchors: Set<TrustAnchor>,
+        val intermediates: Set<X509Certificate>,
+    )
+
+    private const val X509_TYPE = "X.509"
+    private const val RESOURCE_DIR = "certs"
+}
