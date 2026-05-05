@@ -29,12 +29,46 @@ private const val PACKAGE_ATTRIBUTE = "package"
 private const val MAX_MANIFEST_COOKIE_PROBE = 32
 
 /**
- * Manifest-XML fallback path. The running [AssetManager] already has the app's own
+ * Tier 1: read resource ids from the merged-manifest values cached on `ApplicationInfo`.
+ * Direct, but reaches greylisted hidden-API fields. Returns `null` for either field that
+ * the platform's hidden-API policy now blocks (notably `dataExtractionRulesRes` on API
+ * 31+ for our target SDK).
+ */
+private fun readResourceIdsViaReflection(
+    appInfo: ApplicationInfo,
+): BackupRulesAssertion.ResourceIds? {
+    val full = readIntField(appInfo, "fullBackupContent")
+    val dxr = readDxrResId(appInfo)
+    return if (full != null && dxr != null) {
+        BackupRulesAssertion.ResourceIds(fullBackup = full, dxr = dxr)
+    } else {
+        null
+    }
+}
+
+private fun readDxrResId(appInfo: ApplicationInfo): Int? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        readIntField(appInfo, "dataExtractionRulesRes")
+    } else {
+        0
+    }
+
+private fun readIntField(target: Any, name: String): Int? = try {
+    val field = target.javaClass.getDeclaredField(name).also { it.isAccessible = true }
+    field.getInt(target)
+} catch (_: NoSuchFieldException) {
+    null
+} catch (_: IllegalAccessException) {
+    null
+}
+
+/**
+ * Tier 2: manifest-XML fallback. The running [AssetManager] already has the app's own
  * `AndroidManifest.xml` loaded; the only unknown is which cookie it sits behind (varies
  * by Android version and presence of split APKs / resource loaders). Iterate cookies
  * 1..[MAX_MANIFEST_COOKIE_PROBE] and pick the first parser whose
- * `<manifest package="...">` matches [packageName] — that's the merged manifest the
- * trust claim cares about. Reads `android:fullBackupContent` /
+ * `<manifest package="...">` matches the running package — that's the merged manifest
+ * the trust claim cares about. Reads `android:fullBackupContent` /
  * `android:dataExtractionRules` off the `<application>` element using only public
  * AssetManager API ([AssetManager.openXmlResourceParser], since API 1).
  *
@@ -43,11 +77,11 @@ private const val MAX_MANIFEST_COOKIE_PROBE = 32
  *  - Loading or parsing the manifest throws IO / XML errors.
  *  - The merged manifest has no `<application>` tag (defensive; should not happen).
  */
-private fun readManifestResourceIds(
-    assets: AssetManager,
-    packageName: String,
+private fun readResourceIdsFromManifestXml(
+    appInfo: ApplicationInfo,
+    resources: Resources,
 ): BackupRulesAssertion.ResourceIds? {
-    val parser = openOwnManifestParser(assets, packageName) ?: return null
+    val parser = openOwnManifestParser(resources.assets, appInfo.packageName) ?: return null
     return try {
         parseApplicationAttributes(parser)
     } catch (_: XmlPullParserException) {
@@ -316,39 +350,6 @@ public object BackupRulesAssertion {
     @VisibleForTesting
     internal data class ResourceIds(val fullBackup: Int, val dxr: Int)
 
-    private fun readResourceIdsViaReflection(appInfo: ApplicationInfo): ResourceIds? {
-        val full = readIntField(appInfo, "fullBackupContent")
-        val dxr = readDxrResId(appInfo)
-        return if (full != null && dxr != null) ResourceIds(fullBackup = full, dxr = dxr) else null
-    }
-
-    private fun readDxrResId(appInfo: ApplicationInfo): Int? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            readIntField(appInfo, "dataExtractionRulesRes")
-        } else {
-            0
-        }
-
-    /**
-     * Manifest-XML fallback path. The running `AssetManager` already has the app's own
-     * `AndroidManifest.xml` loaded; the only unknown is which cookie it sits behind
-     * (varies by Android version and presence of split APKs / resource loaders).
-     * Iterate cookies 1..N and pick the first parser whose `<manifest package="...">`
-     * matches the running package — that's the merged manifest the trust claim cares
-     * about. Reads `android:fullBackupContent` / `android:dataExtractionRules` off the
-     * `<application>` element using only public AssetManager API (`openXmlResourceParser`,
-     * since API 1).
-     *
-     * Returns null when:
-     *  - No cookie in the probed range yields a parser whose package matches.
-     *  - Loading or parsing the manifest throws IO / XML errors.
-     *  - The merged manifest has no `<application>` tag (defensive; should not happen).
-     */
-    private fun readResourceIdsFromManifestXml(
-        appInfo: ApplicationInfo,
-        resources: Resources,
-    ): ResourceIds? = readManifestResourceIds(resources.assets, appInfo.packageName)
-
     private sealed interface ValidationResult {
         data class Ok(val problems: List<MissingSection>) : ValidationResult
         data class Unreadable(val outcome: Outcome.RulesResourceUnreadable) : ValidationResult
@@ -401,15 +402,6 @@ public object BackupRulesAssertion {
     private fun loadApplicationInfo(context: Context): ApplicationInfo? = try {
         context.packageManager.getApplicationInfo(context.packageName, 0)
     } catch (_: PackageManager.NameNotFoundException) {
-        null
-    }
-
-    private fun readIntField(target: Any, name: String): Int? = try {
-        val field = target.javaClass.getDeclaredField(name).also { it.isAccessible = true }
-        field.getInt(target)
-    } catch (_: NoSuchFieldException) {
-        null
-    } catch (_: IllegalAccessException) {
         null
     }
 }
