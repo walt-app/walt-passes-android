@@ -110,6 +110,13 @@ The library does NOT set `android:allowBackup="false"` on the consumer, because 
 
 A consumer-side `assertBackupRulesApplied()` helper is exposed from `passes-storage` for use in instrumentation tests, so the trust claim is checkable in CI rather than relying on documentation review.
 
+Two consumer postures are valid and the assertion accepts both:
+
+1. **Inherit.** The consumer lets the library's manifest contributions reach the merged manifest unchanged. `ApplicationInfo.fullBackupContent` and `ApplicationInfo.dataExtractionRulesRes` then reference `walt_passes_backup_rules` and `walt_passes_data_extraction_rules` directly.
+2. **Mirror.** The consumer overrides the library contributions with `tools:replace="android:fullBackupContent,android:dataExtractionRules"` and points the manifest at a consumer-owned XML resource that mirrors the library's required `<exclude>` entries (and optionally adds its own). Walt-android takes this posture so it can manage backup posture for the whole app from a single resource.
+
+The assertion validates by content, not resource identity. It opens whichever XML resource the merged manifest points at and checks that every entry in `BackupRulesAssertion.REQUIRED_EXCLUDES` is present in every backup-relevant section of that resource (`<full-backup-content>` for the API 23 - 30 path; both `<cloud-backup>` and `<device-transfer>` for the API 31+ path). Consumers may add additional excludes; only the pass-related entries are required for the trust claim. Setting `android:allowBackup="false"` app-wide trivially satisfies the claim and short-circuits the assertion.
+
 ### D6. Deletion is items 1+3+4+5+6 from `decision-wlt-0tn-q3-4`
 
 `PassRepository.delete(id)`:
