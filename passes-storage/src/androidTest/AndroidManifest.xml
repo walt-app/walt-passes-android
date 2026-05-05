@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Test-APK manifest for the passes-storage on-device suite.
+
+  android:allowBackup="true" forces the BackupRulesAssertion to walk the merged rules XML
+  rather than short-circuiting on FLAG_ALLOW_BACKUP=0. Without this the assertion would
+  trivially return Applied on a test APK whose generated manifest happened to have
+  allowBackup=false, masking a real regression in the library's manifest contributions.
+
+  This manifest does NOT use tools:replace on android:fullBackupContent or
+  android:dataExtractionRules. The library's manifest contributions reach the merged test
+  manifest unchanged ("inherit" posture per ADR 0002 D5), which is the posture the
+  assertion sees on device here.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application
+        android:allowBackup="true" />
+
+</manifest>
