@@ -56,8 +56,8 @@ decision: it expands the set of signers we consider Apple-issued. The change
 must:
 
 1. Update this file (table row, source attribution, SHA-256 fingerprint).
-2. Update the `BUNDLED_CERT_FILENAMES` and `BUNDLED_TRUST_ANCHOR_FILENAMES`
-   lists in `AppleTrustAnchors.kt`.
+2. Update the `BUNDLED_TRUST_ANCHOR_FILENAMES` and
+   `BUNDLED_INTERMEDIATE_FILENAMES` lists in `AppleTrustAnchors.kt`.
 3. Pass `:passes-core:check` — `AppleTrustAnchorsTest` enforces the bundled
    files load and that the documented anchors are present.
 
