@@ -183,6 +183,27 @@ class ManifestVerifierTest {
     }
 
     @Test
+    fun selfReferentialEntryWinsOverInvalidHashFormat() {
+        // When a manifest declares "signature" with a malformed hex, the structural
+        // arm (signature can never self-reference) wins over the hex-format arm. The
+        // structural rule is the stronger statement; flipping this order would let an
+        // attacker disguise a SelfReferentialEntry as an InvalidManifest by pairing
+        // it with a bad hex once wpass-n6g splits the MalformedReason arms.
+        val passJson = "{}".toByteArray()
+        val manifestJson =
+            manifestBytesOf(
+                "pass.json" to sha1HexOf(passJson),
+                "signature" to "not-even-close-to-hex",
+            )
+        val entries =
+            mapOf(
+                "pass.json" to passJson,
+                "manifest.json" to manifestJson,
+            )
+        assertFailedWith(verifyManifest(entries), ManifestFailure.SelfReferentialEntry)
+    }
+
+    @Test
     fun selfReferentialEntryRejected() {
         // A manifest that declares "signature" is malformed by spec. The signature
         // signs the manifest, so a manifest entry pointing at it cannot be self-

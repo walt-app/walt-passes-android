@@ -1,11 +1,10 @@
 package `is`.walt.passes.core.internal
 
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.security.MessageDigest
+import java.util.HexFormat
 
 /**
  * Verifies the SHA-1 hash chain a PKPASS archive declares in `manifest.json`. Pure
@@ -14,125 +13,97 @@ import java.security.MessageDigest
  *
  * The PKPASS spec uses SHA-1 here as a structural integrity check, *not* a security
  * cipher choice. The actual cryptographic binding is the PKCS#7 detached signature
- * over `manifest.json`'s bytes — that's `wpass-dw2`'s job. If SHA-1 collisions are
- * weaponized against this layer, the attacker still has to forge the PKCS#7 envelope
- * to reach the trust boundary. SHA-1 here is sufficient because PKPASS writers
- * (Apple Wallet, every issuer toolchain) emit SHA-1; deviating would break every real
- * pass in the wild.
+ * over `manifest.json`'s bytes — that's `wpass-dw2`'s job. SHA-1 here is sufficient
+ * because every PKPASS writer in the wild emits SHA-1; deviating would break every
+ * real pass.
  *
- * Failure-arm ordering inside [verifyManifest] is documented and load-bearing:
+ * **Iteration-order contract.** [entries] is consumed in iteration order: the first
+ * stray archive entry surfaces as [ManifestFailure.ExtraEntry], and the first
+ * manifest entry that fails surfaces with its name as the per-entry arm.
+ * [extractSafely] returns an insertion-ordered map mirroring the archive's local-
+ * file-header order, so calling code gets deterministic failure naming. A caller that
+ * passes a plain `HashMap` (e.g. a fuzz harness) would observe non-deterministic
+ * names; correctness of accept-vs-reject is unaffected.
  *
- *  1. **No manifest** → [ManifestFailure.Missing]
- *  2. **Bad JSON** → [ManifestFailure.InvalidJson]
- *  3. **Wrong shape** (not an object, or a value that's not a string) →
- *     [ManifestFailure.InvalidShape]
- *  4. **Per declared entry, in declaration order:**
- *     a. hex parse fails → [ManifestFailure.InvalidHashFormat]
- *     b. entry name is `"signature"` → [ManifestFailure.SelfReferentialEntry]
- *     c. entry not in archive → [ManifestFailure.MissingEntry]
- *     d. hash differs → [ManifestFailure.HashMismatch]
- *  5. **After the loop**, an archive entry not declared in the manifest (other than
- *     the `signature` and `manifest.json` exemptions) → [ManifestFailure.ExtraEntry]
+ * **Failure-arm ordering inside the per-entry loop.** Documented and load-bearing —
+ * once `wpass-n6g` lands dedicated `MalformedReason` arms, telemetry on hash mismatch
+ * is operationally distinct from "structurally malformed", and an attack that
+ * simultaneously tampers a hash and adds a stray file should surface as the security
+ * event:
  *
- * The loop short-circuits on the first per-entry failure. That means
- * [ManifestFailure.HashMismatch] (raised inside the loop) wins over
- * [ManifestFailure.ExtraEntry] (raised after the loop) when both could fire — once
- * `wpass-n6g` lands dedicated `MalformedReason` arms, telemetry on hash-mismatch is
- * operationally distinct from "structurally malformed", and an attack that simulta-
- * neously tampers a hash and adds a stray file should surface as the security event,
- * not as the structural one. Reordering this loop without updating that bead silently
- * downgrades the alert.
+ *  1. `name == "signature"` → [ManifestFailure.SelfReferentialEntry]. The structural
+ *     rule (signature can never have a manifest entry, since it signs the manifest)
+ *     wins over hex-format validity — that is, a manifest line `"signature": "g..."`
+ *     surfaces as `SelfReferentialEntry`, not `InvalidHashFormat`. The structural arm
+ *     is the stronger statement.
+ *  2. hex parse fails → [ManifestFailure.InvalidHashFormat]
+ *  3. entry not in archive → [ManifestFailure.MissingEntry]
+ *  4. hash differs → [ManifestFailure.HashMismatch]
+ *
+ * After the loop completes without failure, [ManifestFailure.ExtraEntry] surfaces any
+ * archive entry not declared in the manifest (`signature` and `manifest.json`
+ * exempted). Because the loop short-circuits, [ManifestFailure.HashMismatch] beats
+ * [ManifestFailure.ExtraEntry] when both could fire.
  */
 internal fun verifyManifest(entries: Map<String, ByteArray>): ManifestVerifyResult {
     val manifestBytes =
         entries[MANIFEST_FILE_NAME]
             ?: return ManifestVerifyResult.Failed(ManifestFailure.Missing)
-    val failure = checkManifest(manifestBytes, entries)
+    val failure =
+        when (val parsed = parseManifest(manifestBytes)) {
+            is ManifestParse.Failed -> parsed.failure
+            is ManifestParse.Ok -> validateAllEntries(parsed.declared, entries)
+        }
     return failure?.let { ManifestVerifyResult.Failed(it) }
         ?: ManifestVerifyResult.Ok(manifestBytes)
 }
 
-private fun checkManifest(
-    manifestBytes: ByteArray,
-    entries: Map<String, ByteArray>,
-): ManifestFailure? =
-    when (val parsed = parseManifest(manifestBytes)) {
-        is ManifestParse.Failed -> parsed.failure
-        is ManifestParse.Ok -> validateAllEntries(parsed.declared, entries)
-    }
-
 private fun parseManifest(manifestBytes: ByteArray): ManifestParse {
     val root =
-        parseJsonOrNull(manifestBytes)
+        runCatching { Json.parseToJsonElement(manifestBytes.decodeToString()) }.getOrNull()
             ?: return ManifestParse.Failed(ManifestFailure.InvalidJson)
-    return readStringMap(root)
+    val declared = (root as? JsonObject)?.toStringMapOrNull()
+    return declared?.let { ManifestParse.Ok(it) }
+        ?: ManifestParse.Failed(ManifestFailure.InvalidShape)
 }
 
-private fun parseJsonOrNull(manifestBytes: ByteArray): JsonElement? =
-    try {
-        Json.parseToJsonElement(manifestBytes.decodeToString())
-    } catch (_: SerializationException) {
-        null
-    }
-
-private fun readStringMap(root: JsonElement): ManifestParse {
-    val obj =
-        root as? JsonObject
-            ?: return ManifestParse.Failed(ManifestFailure.InvalidShape)
-    return collectStringEntries(obj)
-}
-
-private fun collectStringEntries(obj: JsonObject): ManifestParse {
-    val map = LinkedHashMap<String, String>(obj.size)
-    for ((key, value) in obj) {
+private fun JsonObject.toStringMapOrNull(): Map<String, String>? {
+    val out = LinkedHashMap<String, String>(size)
+    for ((key, value) in this) {
         val str =
             (value as? JsonPrimitive)?.takeIf { it.isString }?.content
-                ?: return ManifestParse.Failed(ManifestFailure.InvalidShape)
-        map[key] = str
+                ?: return null
+        out[key] = str
     }
-    return ManifestParse.Ok(map)
+    return out
 }
 
 private fun validateAllEntries(
     declared: Map<String, String>,
     entries: Map<String, ByteArray>,
 ): ManifestFailure? {
-    val perEntry = firstEntryFailure(declared, entries)
-    return perEntry ?: extraEntryFailure(declared.keys, entries.keys)
-}
-
-private fun firstEntryFailure(
-    declared: Map<String, String>,
-    entries: Map<String, ByteArray>,
-): ManifestFailure? {
     for ((name, hexHash) in declared) {
-        val failure = validateOneEntry(name, hexHash, entries)
+        val failure = perEntryFailure(name, hexHash, entries)
         if (failure != null) return failure
     }
-    return null
+    return findExtraEntry(declared.keys, entries.keys)
 }
 
-private fun validateOneEntry(
+private fun perEntryFailure(
     name: String,
     hexHash: String,
     entries: Map<String, ByteArray>,
 ): ManifestFailure? {
-    val expected =
-        decodeSha1HexOrNull(hexHash)
-            ?: return ManifestFailure.InvalidHashFormat(name)
-    return checkEntryAgainstHash(name, expected, entries)
-}
-
-private fun checkEntryAgainstHash(
-    name: String,
-    expected: ByteArray,
-    entries: Map<String, ByteArray>,
-): ManifestFailure? {
     if (name == SIGNATURE_FILE_NAME) return ManifestFailure.SelfReferentialEntry
-    return compareEntryBytes(name, expected, entries)
+    val expected = decodeSha1Hex(hexHash)
+    return if (expected == null) {
+        ManifestFailure.InvalidHashFormat(name)
+    } else {
+        matchEntry(name, expected, entries)
+    }
 }
 
-private fun compareEntryBytes(
+private fun matchEntry(
     name: String,
     expected: ByteArray,
     entries: Map<String, ByteArray>,
@@ -141,24 +112,34 @@ private fun compareEntryBytes(
     // MessageDigest.isEqual is the constant-time comparator. Plain contentEquals or
     // == on ByteArray short-circuits on first mismatch and leaks a timing oracle; for
     // a hash compared against attacker-controlled bytes that's the textbook footgun.
-    val matches = MessageDigest.isEqual(sha1Of(actual), expected)
+    val matches = MessageDigest.isEqual(MessageDigest.getInstance(SHA1_ALGORITHM).digest(actual), expected)
     return if (matches) null else ManifestFailure.HashMismatch(name)
 }
 
-private fun extraEntryFailure(
+private fun findExtraEntry(
     declared: Set<String>,
     archiveEntries: Set<String>,
 ): ManifestFailure? {
-    val firstExtra = archiveEntries.firstOrNull { it !in declared && !isManifestExempt(it) }
+    val firstExtra =
+        archiveEntries.firstOrNull {
+            // signature signs the manifest (cannot self-reference); manifest.json
+            // cannot list itself (chicken-and-egg). Both exempt by spec.
+            it !in declared && it != SIGNATURE_FILE_NAME && it != MANIFEST_FILE_NAME
+        }
     return firstExtra?.let { ManifestFailure.ExtraEntry(it) }
 }
 
-private fun isManifestExempt(name: String): Boolean =
-    // The signature blob signs the manifest, so cannot be a manifest entry. The
-    // manifest cannot list itself (chicken-and-egg). Both are exempt by spec.
-    name == SIGNATURE_FILE_NAME || name == MANIFEST_FILE_NAME
-
-private fun sha1Of(bytes: ByteArray): ByteArray = MessageDigest.getInstance(SHA1_ALGORITHM).digest(bytes)
+/**
+ * Decodes a 40-character SHA-1 hex string to its 20 raw bytes, accepting any case
+ * mix. Returns `null` (not an exception) so the caller can map to
+ * [ManifestFailure.InvalidHashFormat] without a try/catch at every call site.
+ * [HexFormat.parseHex] accepts both cases; the explicit length check is here because
+ * `parseHex` accepts any even length and we require exactly SHA-1.
+ */
+private fun decodeSha1Hex(hex: String): ByteArray? {
+    if (hex.length != SHA1_HEX_LENGTH) return null
+    return runCatching { HEX.parseHex(hex) }.getOrNull()
+}
 
 private sealed interface ManifestParse {
     data class Ok(val declared: Map<String, String>) : ManifestParse
@@ -169,3 +150,5 @@ private sealed interface ManifestParse {
 private const val MANIFEST_FILE_NAME = "manifest.json"
 private const val SIGNATURE_FILE_NAME = "signature"
 private const val SHA1_ALGORITHM = "SHA-1"
+private const val SHA1_HEX_LENGTH = 40
+private val HEX: HexFormat = HexFormat.of()
