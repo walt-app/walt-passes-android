@@ -225,9 +225,20 @@ class BackupRulesAssertionTest {
         // Pre-S devices use full-backup-content, not data-extraction-rules. This test
         // pins that the legacy path of the trust claim works end-to-end on Android 11
         // and earlier, where ApplicationInfo.dataExtractionRulesRes does not exist.
+        // Hardened the same way as the API 34 endToEnd test so a future allowBackup
+        // flip surfaces here regardless of which Android version regresses first.
         val context = ApplicationProvider.getApplicationContext<Context>()
-        val outcome = BackupRulesAssertion.assertBackupRulesApplied(context)
-        assertThat(outcome).isEqualTo(Outcome.Applied)
+        assertThat(context.applicationInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP)
+            .isNotEqualTo(0)
+
+        val publicOutcome = BackupRulesAssertion.assertBackupRulesApplied(context)
+        val seamOutcome = BackupRulesAssertion.assertBackupRulesApplied(
+            context.applicationInfo,
+            context.resources,
+        )
+
+        assertThat(publicOutcome).isEqualTo(Outcome.Applied)
+        assertThat(seamOutcome).isEqualTo(publicOutcome)
     }
 
     @Test

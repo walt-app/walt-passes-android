@@ -69,7 +69,7 @@ internal object BackupRulesXmlParser {
     ) {
         val section = sectionByElementName(parser.name) ?: return
         val collected = collectExcludesUntil(parser, parser.name)
-        sections[section] = sections[section]?.let { it + collected } ?: collected
+        sections.merge(section, collected, Set<RequiredExclude>::plus)
     }
 
     /**

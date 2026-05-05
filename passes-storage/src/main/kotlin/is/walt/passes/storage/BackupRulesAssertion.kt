@@ -134,6 +134,9 @@ public object BackupRulesAssertion {
     }
 
     private fun reduce(fullBackup: ValidationResult, dxr: ValidationResult): Outcome {
+        // If both arms are unreadable, only the first is reported. The Outcome shape
+        // (single resourceId + reason) does not model simultaneous failures; a consumer
+        // fixing the first surfaces the second on the next run.
         val unreadable = fullBackup as? ValidationResult.Unreadable
             ?: dxr as? ValidationResult.Unreadable
         if (unreadable != null) return unreadable.outcome
