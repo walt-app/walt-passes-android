@@ -78,14 +78,25 @@ internal fun verifySignature(
     signatureBytes: ByteArray,
     manifestBytes: ByteArray,
     config: ParserConfig,
-): SignatureVerifyResult =
-    verifySignatureAgainst(
-        signatureBytes,
-        manifestBytes,
-        config,
-        AppleTrustAnchors.trustAnchors(),
-        AppleTrustAnchors.knownIntermediates(),
-    )
+): SignatureVerifyResult {
+    ensureBouncyCastleRegistered()
+    // Anchor lookups MUST live inside the runCatching: AppleTrustAnchors.trustAnchors()
+    // calls into resource I/O and CertificateFactory.generateCertificate, both of which
+    // can throw if the JAR is repackaged (proguard/R8 stripping, shaded classpath, a
+    // corrupted .cer file). Lazy-cached results re-throw on every subsequent call too,
+    // so a single misconfigured build would crash every parse for the lifetime of the
+    // JVM. Treating the loader as part of the verification operation collapses that
+    // failure mode onto the documented Failed(SignatureCryptoFailure) arm.
+    return runCatching {
+        val ctx =
+            VerifyContext(
+                config,
+                AppleTrustAnchors.trustAnchors(),
+                AppleTrustAnchors.knownIntermediates(),
+            )
+        verifyAndClassify(signatureBytes, manifestBytes, ctx)
+    }.getOrElse { SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure) }
+}
 
 /**
  * Test seam. Production callers go through [verifySignature]; tests inject their own
