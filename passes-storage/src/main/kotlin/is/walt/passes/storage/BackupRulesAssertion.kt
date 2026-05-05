@@ -3,15 +3,190 @@ package `is`.walt.passes.storage
 import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import android.content.res.AssetManager
 import android.content.res.Resources
 import android.content.res.XmlResourceParser
 import android.os.Build
+import androidx.annotation.RequiresApi
 import androidx.annotation.VisibleForTesting
 import `is`.walt.passes.storage.BackupRulesContract.REQUIRED_EXCLUDES
 import `is`.walt.passes.storage.BackupRulesContract.RequiredExclude
 import `is`.walt.passes.storage.BackupRulesContract.Section
+import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserException
 import java.io.IOException
+
+private const val MANIFEST_FILE_NAME = "AndroidManifest.xml"
+private const val APPLICATION_ELEMENT = "application"
+private const val MANIFEST_ELEMENT = "manifest"
+private const val PACKAGE_ATTRIBUTE = "package"
+
+// AssetManager assigns a cookie per loaded ApkAssets. The running app's main APK
+// usually lands at cookie 1 or 2 (framework loads first); split APKs and dynamically
+// loaded resource providers may push it higher. 32 is a generous upper bound that
+// covers every shipping Android configuration without making the search expensive
+// (each iteration is a JNI call that returns immediately for unknown cookies).
+private const val MAX_MANIFEST_COOKIE_PROBE = 32
+
+/**
+ * Tier 1: read resource ids from the merged-manifest values cached on `ApplicationInfo`.
+ * Direct, but reaches greylisted hidden-API fields. Returns `null` for either field that
+ * the platform's hidden-API policy now blocks (notably `dataExtractionRulesRes` on API
+ * 31+ for our target SDK).
+ */
+private fun readResourceIdsViaReflection(
+    appInfo: ApplicationInfo,
+): BackupRulesAssertion.ResourceIds? {
+    val full = readIntField(appInfo, "fullBackupContent")
+    val dxr = readDxrResId(appInfo)
+    return if (full != null && dxr != null) {
+        BackupRulesAssertion.ResourceIds(fullBackup = full, dxr = dxr)
+    } else {
+        null
+    }
+}
+
+private fun readDxrResId(appInfo: ApplicationInfo): Int? =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        readIntField(appInfo, "dataExtractionRulesRes")
+    } else {
+        0
+    }
+
+private fun readIntField(target: Any, name: String): Int? = try {
+    val field = target.javaClass.getDeclaredField(name).also { it.isAccessible = true }
+    field.getInt(target)
+} catch (_: NoSuchFieldException) {
+    null
+} catch (_: IllegalAccessException) {
+    null
+}
+
+/**
+ * Tier 2: manifest-XML fallback. The running [AssetManager] already has the app's own
+ * `AndroidManifest.xml` loaded; the only unknown is which cookie it sits behind (varies
+ * by Android version and presence of split APKs / resource loaders). Iterate cookies
+ * 1..[MAX_MANIFEST_COOKIE_PROBE] and pick the first parser whose
+ * `<manifest package="...">` matches the running package — that's the merged manifest
+ * the trust claim cares about. Reads `android:fullBackupContent` /
+ * `android:dataExtractionRules` off the `<application>` element using only public
+ * AssetManager API ([AssetManager.openXmlResourceParser], since API 1).
+ *
+ * Returns null when:
+ *  - No cookie in the probed range yields a parser whose package matches.
+ *  - Loading or parsing the manifest throws IO / XML errors.
+ *  - The merged manifest has no `<application>` tag (defensive; should not happen).
+ */
+private fun readResourceIdsFromManifestXml(
+    appInfo: ApplicationInfo,
+    resources: Resources,
+): BackupRulesAssertion.ResourceIds? {
+    val parser = openOwnManifestParser(resources.assets, appInfo.packageName) ?: return null
+    return try {
+        parseApplicationAttributes(parser)
+    } catch (_: XmlPullParserException) {
+        null
+    } catch (_: IOException) {
+        null
+    } finally {
+        parser.close()
+    }
+}
+
+private fun openOwnManifestParser(
+    assets: AssetManager,
+    packageName: String,
+): XmlResourceParser? {
+    for (cookie in 1..MAX_MANIFEST_COOKIE_PROBE) {
+        val candidate = openManifestAt(assets, cookie) ?: continue
+        if (advanceToOwnManifestStartTag(candidate, packageName)) {
+            return candidate
+        }
+        candidate.close()
+    }
+    return null
+}
+
+private fun openManifestAt(assets: AssetManager, cookie: Int): XmlResourceParser? = try {
+    assets.openXmlResourceParser(cookie, MANIFEST_FILE_NAME)
+} catch (_: IOException) {
+    null
+} catch (_: RuntimeException) {
+    // Native side raises IllegalArgumentException / IndexOutOfBoundsException for
+    // cookies that don't map to a loaded ApkAssets. Treat as "not this one" and
+    // keep probing.
+    null
+}
+
+/**
+ * Advances [parser] to the `<manifest>` start tag and returns true iff its `package`
+ * attribute matches [expectedPackage]. Leaves the parser positioned at that start tag
+ * so the caller can keep walking into `<application>`. A single return path keeps the
+ * detekt ReturnCount budget small without sacrificing the IO/XML error short-circuit.
+ */
+private fun advanceToOwnManifestStartTag(
+    parser: XmlResourceParser,
+    expectedPackage: String,
+): Boolean = try {
+    var matched = false
+    var event = parser.eventType
+    while (event != XmlPullParser.END_DOCUMENT) {
+        if (event == XmlPullParser.START_TAG && parser.name == MANIFEST_ELEMENT) {
+            matched = parser.getAttributeValue(null, PACKAGE_ATTRIBUTE) == expectedPackage
+            break
+        }
+        event = parser.next()
+    }
+    matched
+} catch (_: XmlPullParserException) {
+    false
+} catch (_: IOException) {
+    false
+}
+
+/**
+ * Walks the manifest's binary AXML to the first `<application>` start tag and reads
+ * the resource ids of the two attributes the trust claim cares about. Returns null if
+ * the document has no `<application>` element at all (a malformed manifest).
+ */
+private fun parseApplicationAttributes(
+    parser: XmlResourceParser,
+): BackupRulesAssertion.ResourceIds? {
+    var event = parser.eventType
+    while (event != XmlPullParser.END_DOCUMENT) {
+        if (event == XmlPullParser.START_TAG && parser.name == APPLICATION_ELEMENT) {
+            return readApplicationAttributes(parser)
+        }
+        event = parser.next()
+    }
+    return null
+}
+
+private fun readApplicationAttributes(parser: XmlResourceParser): BackupRulesAssertion.ResourceIds {
+    var fullBackup = 0
+    for (i in 0 until parser.attributeCount) {
+        if (parser.getAttributeNameResource(i) == android.R.attr.fullBackupContent) {
+            fullBackup = parser.getAttributeResourceValue(i, 0)
+            break
+        }
+    }
+    val dxr = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        readDataExtractionRulesAttribute(parser)
+    } else {
+        0
+    }
+    return BackupRulesAssertion.ResourceIds(fullBackup = fullBackup, dxr = dxr)
+}
+
+@RequiresApi(Build.VERSION_CODES.S)
+private fun readDataExtractionRulesAttribute(parser: XmlResourceParser): Int {
+    for (i in 0 until parser.attributeCount) {
+        if (parser.getAttributeNameResource(i) == android.R.attr.dataExtractionRules) {
+            return parser.getAttributeResourceValue(i, 0)
+        }
+    }
+    return 0
+}
 
 /**
  * Verifies that the trust claim "pass data is excluded from cloud backup" holds in the
@@ -40,11 +215,24 @@ import java.io.IOException
  * If the consumer has set `android:allowBackup="false"` app-wide, the trust claim is
  * trivially satisfied and the assertion returns [Outcome.Applied] without parsing rules.
  *
- * Reflection on `ApplicationInfo.fullBackupContent` and
- * `ApplicationInfo.dataExtractionRulesRes` is intentional: those greylisted hidden-API
- * fields are the most reliable read of the merged manifest. They may be moved to the
- * blocklist in a future Android release; if that happens, [Outcome.FieldUnavailable] is
- * the surface for triage and a manifest-XML fallback is the expected mitigation.
+ * The resource-id read is two-tier:
+ *
+ *  1. **Reflection on `ApplicationInfo.fullBackupContent` and
+ *     `ApplicationInfo.dataExtractionRulesRes`** — the most direct read of the merged
+ *     manifest, but those fields are greylisted hidden-API. On platforms where either
+ *     field has been moved to the blocklist (observed on API 31+ for our target SDK,
+ *     where `dataExtractionRulesRes` collapses to `NoSuchFieldException`), reflection
+ *     returns no value.
+ *  2. **Manifest-XML fallback** — when reflection fails, the assertion opens the running
+ *     app's already-loaded `AndroidManifest.xml` through the running `AssetManager`
+ *     (`AssetManager.openXmlResourceParser`, public since API 1) and reads
+ *     `android:fullBackupContent` / `android:dataExtractionRules` off the `<application>`
+ *     element. Slower than reflection, but uses only stable public API.
+ *
+ * [Outcome.FieldUnavailable] is reserved for the case where both tiers fail (reflection
+ * blocked AND the manifest read errors out, e.g. AXML malformed or no cookie in the
+ * probed range matches the running package). It is the triage surface for genuinely
+ * incompatible OS-side changes.
  */
 public object BackupRulesAssertion {
 
@@ -103,18 +291,32 @@ public object BackupRulesAssertion {
     /**
      * Test seam. Lets unit tests construct a fresh [ApplicationInfo] (e.g., via Parcel
      * round-trip) and pass it directly, avoiding mutation of the Robolectric-shared
-     * `ApplicationInfo` returned by `Context.applicationInfo`.
+     * `ApplicationInfo` returned by `Context.applicationInfo`. The two reader parameters
+     * let JVM tests drive each tier of the read order independently — useful because
+     * Robolectric cannot easily simulate hidden-API blocklist failures on
+     * `ApplicationInfo` reflection.
      */
     @VisibleForTesting
-    internal fun assertBackupRulesApplied(appInfo: ApplicationInfo, resources: Resources): Outcome =
+    internal fun assertBackupRulesApplied(
+        appInfo: ApplicationInfo,
+        resources: Resources,
+        reflectionReader: (ApplicationInfo) -> ResourceIds? = ::readResourceIdsViaReflection,
+        manifestFallbackReader: (ApplicationInfo, Resources) -> ResourceIds? =
+            ::readResourceIdsFromManifestXml,
+    ): Outcome =
         if (appInfo.flags and ApplicationInfo.FLAG_ALLOW_BACKUP == 0) {
             Outcome.Applied
         } else {
-            evaluateRules(appInfo, resources)
+            evaluateRules(appInfo, resources, reflectionReader, manifestFallbackReader)
         }
 
-    private fun evaluateRules(appInfo: ApplicationInfo, resources: Resources): Outcome {
-        val resIds = readResourceIds(appInfo)
+    private fun evaluateRules(
+        appInfo: ApplicationInfo,
+        resources: Resources,
+        reflectionReader: (ApplicationInfo) -> ResourceIds?,
+        manifestFallbackReader: (ApplicationInfo, Resources) -> ResourceIds?,
+    ): Outcome {
+        val resIds = reflectionReader(appInfo) ?: manifestFallbackReader(appInfo, resources)
         return when {
             resIds == null -> Outcome.FieldUnavailable
             resIds.fullBackup == 0 && resIds.dxr == 0 -> Outcome.NoBackupRulesConfigured
@@ -145,20 +347,8 @@ public object BackupRulesAssertion {
         return if (problems.isEmpty()) Outcome.Applied else Outcome.MissingExcludes(problems)
     }
 
-    private data class ResourceIds(val fullBackup: Int, val dxr: Int)
-
-    private fun readResourceIds(appInfo: ApplicationInfo): ResourceIds? {
-        val full = readIntField(appInfo, "fullBackupContent")
-        val dxr = readDxrResId(appInfo)
-        return if (full != null && dxr != null) ResourceIds(fullBackup = full, dxr = dxr) else null
-    }
-
-    private fun readDxrResId(appInfo: ApplicationInfo): Int? =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            readIntField(appInfo, "dataExtractionRulesRes")
-        } else {
-            0
-        }
+    @VisibleForTesting
+    internal data class ResourceIds(val fullBackup: Int, val dxr: Int)
 
     private sealed interface ValidationResult {
         data class Ok(val problems: List<MissingSection>) : ValidationResult
@@ -212,15 +402,6 @@ public object BackupRulesAssertion {
     private fun loadApplicationInfo(context: Context): ApplicationInfo? = try {
         context.packageManager.getApplicationInfo(context.packageName, 0)
     } catch (_: PackageManager.NameNotFoundException) {
-        null
-    }
-
-    private fun readIntField(target: Any, name: String): Int? = try {
-        val field = target.javaClass.getDeclaredField(name).also { it.isAccessible = true }
-        field.getInt(target)
-    } catch (_: NoSuchFieldException) {
-        null
-    } catch (_: IllegalAccessException) {
         null
     }
 }
