@@ -52,6 +52,13 @@ public fun DocumentTrustCaption(
  * matches the trust claim verbatim. Wording is the load-bearing part of ADR 0005 D5;
  * a contributor changing this string is making a security-policy edit and the test
  * suite will require them to update the assertion.
+ *
+ * Note on dual-anchor placement: the caption is composed BOTH inside `DocumentsLane`
+ * (so the wallet-list user sees it before tapping any document) AND inside
+ * `DocumentView` (so a deep-linked or shortcut-launched DocumentView does not bypass
+ * it). The duplication is deliberate; do NOT refactor it to a single render site —
+ * each composition site is an independent trust anchor and removing one collapses the
+ * defense.
  */
 internal const val TRUST_CAPTION_TEXT: String =
     "User-provided document. Walt has not verified the source."

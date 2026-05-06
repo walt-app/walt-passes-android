@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -65,6 +64,13 @@ import java.nio.ByteBuffer
  * `LaunchedEffect` keyed on the current page is cancelled when the user swipes,
  * freeing the rendering coroutine even if the underlying binder transact is still
  * in flight on its IO worker.
+ *
+ * pdfFile lifetime: [pdfFile] is owned by the caller. It MUST remain open for as
+ * long as `DocumentView` is composed; closing it earlier produces undefined
+ * behaviour for any in-flight `render()` call (the binder duplicates the fd
+ * on each transact, but a closed source fd surfaces as a renderer-side
+ * `RendererFailed`, not as a UI-visible error). Close after `DocumentView` leaves
+ * composition.
  */
 @Composable
 public fun DocumentView(
@@ -95,21 +101,11 @@ public fun DocumentView(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         DocumentTrustCaption()
-        if (doc.pageCount == 0) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    // No-pages is a renderer-side rejection in production; surface
-                    // an inert placeholder rather than render an empty pager.
-                    text = "",
-                    color = semantics.tileForeground.toComposeColor(),
-                )
-            }
-            return@Column
-        }
 
+        // pageCount = 0 is rejected at import (DocumentRejectedKind.RendererFailed),
+        // so the pager renders nothing. HorizontalPager handles a 0-count state
+        // gracefully without a placeholder; a custom branch here would only mask a
+        // future regression in the import path with a silent empty surface.
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
@@ -141,18 +137,27 @@ private fun DocumentPage(
         mutableStateOf<ImageBitmap?>(cache.get(document.id, pageIndex)?.asImageBitmap())
     }
 
-    val widthPx = with(density) { TARGET_PAGE_WIDTH_DP.dp.toPx().toInt().coerceAtLeast(1) }
-    val heightPx = with(density) { TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1) }
+    val requestWidthPx = with(density) {
+        TARGET_PAGE_WIDTH_DP.dp.toPx().toInt().coerceAtLeast(1)
+    }
+    val requestHeightPx = with(density) {
+        TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1)
+    }
 
-    LaunchedEffect(document.id, pageIndex, widthPx, heightPx) {
+    LaunchedEffect(document.id, pageIndex, requestWidthPx, requestHeightPx) {
         val cached = cache.get(document.id, pageIndex)
         if (cached != null && !cached.isRecycled) {
             rendered = cached.asImageBitmap()
             return@LaunchedEffect
         }
-        val result = renderer.render(pdfFile, pageIndex, widthPx, heightPx)
+        val result = renderer.render(pdfFile, pageIndex, requestWidthPx, requestHeightPx)
         if (result is RenderResult.Ok) {
-            val bitmap = bitmapFromSharedMemory(result, widthPx, heightPx)
+            // ADR 0005 D7: the renderer service caps bitmap area independently and may
+            // return a downsized buffer. Use the renderer's reported dimensions, NOT the
+            // request, when reconstructing the Bitmap — using the request would make
+            // copyPixelsFromBuffer either throw against an undersized SharedMemory
+            // (silently swallowed by runCatching below) or render a misshapen image.
+            val bitmap = bitmapFromSharedMemory(result)
             if (bitmap != null) {
                 cache.put(document.id, pageIndex, bitmap)
                 rendered = bitmap.asImageBitmap()
@@ -169,7 +174,10 @@ private fun DocumentPage(
         rendered?.let { bitmap ->
             Image(
                 bitmap = bitmap,
-                contentDescription = null,
+                // ADR 0005 D4 forbids extracting text from the PDF; positional caption
+                // is the only safe TalkBack fallback. "Page 3 of 7" is non-content but
+                // navigationally useful.
+                contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxWidth(),
             )
@@ -177,18 +185,22 @@ private fun DocumentPage(
     }
 }
 
-private fun bitmapFromSharedMemory(
-    ok: RenderResult.Ok,
-    widthPx: Int,
-    heightPx: Int,
-): Bitmap? {
-    // The renderer service writes ARGB_8888 packed row-major with no padding. Reconstruct
-    // a Bitmap of the same dimensions and copy the SharedMemory bytes in. The SharedMemory
-    // region is read-only by service contract.
+private fun bitmapFromSharedMemory(ok: RenderResult.Ok): Bitmap? {
+    // The renderer service writes ARGB_8888 packed row-major with no padding using the
+    // dimensions it reports back in `ok.widthPx` / `ok.heightPx` (which may differ from
+    // the request — see the call-site comment for D7).
+    //
+    // Failure modes that runCatching here intentionally swallows: OOM on
+    // Bitmap.createBitmap, BufferUnderflowException from copyPixelsFromBuffer if the
+    // SharedMemory size mismatches the bitmap, IllegalStateException if the
+    // SharedMemory was already closed by a parallel render. Each of these surfaces as
+    // "page does not paint" and the next swipe re-attempts; the renderer-service-side
+    // failure mode is already telemetered via DocumentTelemetryGuard. Consumer-side
+    // telemetry for the silent path is tracked in a follow-up issue (see PR review).
     return runCatching {
         val mapped: ByteBuffer = ok.sharedMemory.mapReadOnly()
         try {
-            val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+            val bitmap = Bitmap.createBitmap(ok.widthPx, ok.heightPx, Bitmap.Config.ARGB_8888)
             bitmap.copyPixelsFromBuffer(mapped)
             bitmap
         } finally {
@@ -198,7 +210,11 @@ private fun bitmapFromSharedMemory(
     }.getOrNull()
 }
 
-internal const val LRU_PAGE_WINDOW: Int = 3
+// HorizontalPager retains composed Image references for adjacent pages during a swipe
+// transition. A window equal to "current ± 2" gives the access-ordered LRU enough room
+// that an evicted bitmap is never the one the pager is still painting; recycling a
+// bitmap whose Image is on screen crashes the draw pass. See PR review C2.
+internal const val LRU_PAGE_WINDOW: Int = 5
 
 // Render budget defaults. The renderer service caps the bitmap area independently
 // (ADR 0005 D7); these are the UI-side request size, picked to look reasonable on

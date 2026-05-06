@@ -77,9 +77,13 @@ public fun DocumentTile(
                 if (thumbnail != null) {
                     Image(
                         bitmap = thumbnail,
+                        // Decorative — the displayLabel underneath carries the
+                        // navigational name. TalkBack reads the label.
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxWidth().aspectRatio(THUMBNAIL_ASPECT_RATIO),
+                        // The outer Box already constrains aspect via its own
+                        // .aspectRatio(...) modifier; setting it here too is redundant.
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 } else {
                     Box(
