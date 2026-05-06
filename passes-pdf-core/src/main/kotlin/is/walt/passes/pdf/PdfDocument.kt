@@ -55,6 +55,13 @@ public enum class Provenance {
  *
  * Reviewers should treat any future addition of a string-bearing failure arm (e.g. an
  * "ErrorMessage" data class) as a security-policy change.
+ *
+ * Downstream wire-format note: at least one downstream module (today, the binder layer
+ * in `passes-pdf`) maps each arm to a stable wire code. Adding, removing, or renaming
+ * an arm here will fail downstream surface tests until those mapping tables are
+ * updated. Reordering arms is safe — the downstream mappings are exhaustive `when`
+ * tables over the enum values rather than `ordinal`-positional — but contributors
+ * should still expect downstream tests to gate the change.
  */
 public enum class DocumentRejectedKind {
     OversizedAtImport,

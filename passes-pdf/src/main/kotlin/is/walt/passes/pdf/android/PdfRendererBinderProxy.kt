@@ -45,7 +45,7 @@ internal class PdfRendererBinderProxy(
                 }
                 is ProbeResult.Rejected -> {
                     reply.writeInt(TAG_REJECTED)
-                    reply.writeInt(result.kind.ordinal)
+                    reply.writeInt(RejectedKindWire.encode(result.kind))
                 }
             }
         }
@@ -68,7 +68,7 @@ internal class PdfRendererBinderProxy(
                 }
                 is RenderResult.Rejected -> {
                     reply.writeInt(TAG_REJECTED)
-                    reply.writeInt(result.kind.ordinal)
+                    reply.writeInt(RejectedKindWire.encode(result.kind))
                 }
             }
         }

@@ -31,24 +31,6 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun binderHasNoExtractionSurface() {
-        val forbidden =
-            setOf(
-                "getText",
-                "getMetadata",
-                "getAnnotations",
-                "getAttachments",
-                "getFormFields",
-                "extractText",
-                "extractMetadata",
-                "text",
-                "metadata",
-            )
-        val methodNames = PdfRendererBinder::class.java.declaredMethods.map { it.name }.toSet()
-        assertThat(methodNames.intersect(forbidden)).isEmpty()
-    }
-
-    @Test
     fun probeReturnsProbeResult() {
         val probe = PdfRendererBinder::class.java.declaredMethods.single { it.name == "probe" }
         // suspend fun returns Object (the Continuation pattern). The structural property

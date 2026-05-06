@@ -22,6 +22,11 @@ import `is`.walt.passes.pdf.DocumentRejectedKind
  * a file path or a `String` payload; the file descriptor is duplicated by the binder and
  * the main process closes its copy. This is the second half of the D3 control: the
  * renderer cannot wander the filesystem because it has no path to wander to.
+ *
+ * PFD ownership: the caller retains ownership of the [ParcelFileDescriptor] passed in
+ * and is responsible for closing it after the call returns. The binder duplicates the
+ * underlying fd on the way across, so closing on the caller side does not affect the
+ * renderer's copy.
  */
 public interface PdfRendererBinder {
     public suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult
