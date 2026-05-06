@@ -18,10 +18,17 @@ import org.junit.Test
 class PdfRendererClientSurfaceTest {
     @Test
     fun clientHasExactlyProbeAndRender() {
+        // Filter synthetics: Kotlin generates `access$<field>$p` accessors when an
+        // anonymous lambda (e.g. the body of `withContext { ... }`) closes over a
+        // private property. Those are not part of the public surface — they are JVM
+        // visibility plumbing — and conflating them with author-written methods would
+        // make this test fragile to refactors that have nothing to do with the
+        // extraction-surface trust claim.
         val methodNames =
             PdfRendererClient::class
                 .java
                 .declaredMethods
+                .filterNot { it.isSynthetic }
                 .map { it.name }
                 .toSet()
         assertThat(methodNames).containsExactly("probe", "render")
@@ -31,23 +38,5 @@ class PdfRendererClientSurfaceTest {
     fun clientImplementsBinderContract() {
         val interfaces = PdfRendererClient::class.java.interfaces.map { it.name }.toSet()
         assertThat(interfaces).contains(PdfRendererBinder::class.java.name)
-    }
-
-    @Test
-    fun clientHasNoExtractionSurface() {
-        val forbidden =
-            setOf(
-                "getText",
-                "getMetadata",
-                "getAnnotations",
-                "getAttachments",
-                "getFormFields",
-                "extractText",
-                "extractMetadata",
-                "text",
-                "metadata",
-            )
-        val methodNames = PdfRendererClient::class.java.declaredMethods.map { it.name }.toSet()
-        assertThat(methodNames.intersect(forbidden)).isEmpty()
     }
 }

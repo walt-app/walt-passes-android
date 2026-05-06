@@ -101,11 +101,14 @@ class PdfRendererBinderRoundTripTest {
     }
 
     @Test
-    fun probeAndRenderUseDistinctTransactionCodes() {
-        // Pin the codes from the consumer's vantage: a contributor flipping
-        // CODE_PROBE / CODE_RENDER would silently swap probe and render on the wire.
+    fun transactionCodesArePinnedToTheirDocumentedValues() {
+        // Pin the absolute codes, not just their distinctness: a contributor flipping
+        // the +1 direction (or rebasing CODE_PROBE off a different IBinder constant)
+        // would silently swap probe and render on the wire.
         assertThat(PdfRendererBinderProxy.CODE_PROBE)
-            .isNotEqualTo(PdfRendererBinderProxy.CODE_RENDER)
+            .isEqualTo(android.os.IBinder.FIRST_CALL_TRANSACTION)
+        assertThat(PdfRendererBinderProxy.CODE_RENDER)
+            .isEqualTo(android.os.IBinder.FIRST_CALL_TRANSACTION + 1)
     }
 
     private fun clientFor(impl: PdfRendererBinder): PdfRendererClient =
