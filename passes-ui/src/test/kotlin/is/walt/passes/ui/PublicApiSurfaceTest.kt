@@ -7,7 +7,6 @@ import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
-import `is`.walt.passes.ui.theme.DocumentSemantics
 import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
 import `is`.walt.passes.ui.theme.PassesSemantics
 import `is`.walt.passes.ui.theme.SecuritySheetStyle
@@ -218,7 +217,7 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun passesSemanticsDataClassExposesAllFiveSlotFamilies() {
+    fun passesSemanticsDataClassExposesAllFourSlotFamilies() {
         val argb = ArgbColor(0xFF000000.toInt())
         val semantics = PassesSemantics(
             signatureBadge = SignatureBadgeColors(
@@ -252,26 +251,15 @@ class PublicApiSurfaceTest {
                 storeCard = argb,
                 generic = argb,
             ),
-            documents = DocumentSemantics(
-                captionBackground = argb,
-                captionForeground = argb,
-                tileBackground = argb,
-                tileForeground = argb,
-                tileLabelForeground = argb,
-                laneBackground = argb,
-                documentBadgeBackground = argb,
-                documentBadgeForeground = argb,
-            ),
         )
         // Reading every nested field forces them to remain in the public-API shape;
-        // a rename or removal breaks the test.
+        // a rename or removal breaks the test. Document tokens (caption / tile / lane
+        // / document badge) live on `passes-pdf-ui::DocumentSemantics` and are
+        // covered by `DocumentPublicApiSurfaceTest` over there (wpass-r4z).
         assertThat(semantics.signatureBadge.appleVerifiedBackground).isEqualTo(argb)
         assertThat(semantics.expiredBadge.scrimAlpha).isEqualTo(96)
         assertThat(semantics.securitySheet.confirmContainer).isEqualTo(argb)
         assertThat(semantics.categoryAccent.boardingPass).isEqualTo(argb)
-        assertThat(semantics.documents.captionBackground).isEqualTo(argb)
-        assertThat(semantics.documents.tileBackground).isEqualTo(argb)
-        assertThat(semantics.documents.documentBadgeBackground).isEqualTo(argb)
     }
 
     /**
@@ -317,26 +305,12 @@ class PublicApiSurfaceTest {
         }
     }
 
-    @Test
-    fun passesPdfCompiledClassesContainNoForbiddenStrings() {
-        // The same prohibition extends to passes-pdf: the renderer service must not
-        // grow a Share/Export passthrough either. passes-pdf-core is pure Kotlin and
-        // would never contain Intent strings, so we scan the Android-only module
-        // when its classes are reachable on this test's classpath.
-        val classFiles = classFilesUnder("is/walt/passes/pdf")
-        if (classFiles.isEmpty()) return // dependency not on the test's classpath.
-        val forbidden = listOf("android.intent.action.SEND", "application/pdf")
-        for (file in classFiles) {
-            if (file.name.startsWith("PublicApiSurfaceTest")) continue
-            val bytes = file.readBytes()
-            for (needle in forbidden) {
-                val needleBytes = needle.toByteArray(Charsets.UTF_8)
-                if (indexOf(bytes, needleBytes) >= 0) {
-                    error("Forbidden '$needle' found in ${file.absolutePath} (passes-pdf scan).")
-                }
-            }
-        }
-    }
+    // The equivalent scan for passes-pdf-ui (the Document* surfaces and the
+    // DocumentSemantics theme) lives in passes-pdf-ui::DocumentPublicApiSurfaceTest
+    // (wpass-r4z). The renderer service module (passes-pdf) is no longer on this
+    // test's classpath after the dep restructure; the scan-for-passes-pdf logic
+    // would always early-out and provided no real coverage anyway since
+    // passes-pdf's own PublicApiSurfaceTest already locks its surface.
 
     /**
      * Walk every classpath root that exposes [packagePath] and collect the .class

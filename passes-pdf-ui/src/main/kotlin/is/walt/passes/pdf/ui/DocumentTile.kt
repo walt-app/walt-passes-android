@@ -1,4 +1,4 @@
-package `is`.walt.passes.ui
+package `is`.walt.passes.pdf.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -26,8 +26,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.pdf.PdfDocument
-import `is`.walt.passes.ui.theme.LocalPassesSemantics
-import `is`.walt.passes.ui.theme.toComposeColor
+import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
+import `is`.walt.passes.ui.core.isolated
+import `is`.walt.passes.ui.core.toComposeColor
 
 /**
  * A single document entry in the Documents lane. Visually distinct from `PassFront`
@@ -37,13 +38,14 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *
  * The displayed [PdfDocument.displayLabel] is supplied by the consumer at import time
  * (typically the source filename) and is treated as user-controlled text. The label
- * is wrapped in U+2068/U+2069 (FSI/PDI) by [isolated] so a malicious filename
- * carrying directional-format characters cannot reorder surrounding chrome glyphs.
- * Same defense the security sheets apply to organisation names and verbatim URLs.
+ * is wrapped in U+2068/U+2069 (FSI/PDI) by `passes-ui-core::isolated` so a malicious
+ * filename carrying directional-format characters cannot reorder surrounding chrome
+ * glyphs. Same defense the security sheets apply to organisation names and verbatim
+ * URLs.
  *
  * No `share`, no `export`, no overflow menu, no metadata. ADR 0005 D8 (no share-out)
  * is enforced both behaviourally — there's nowhere on this tile to invoke
- * `Intent.ACTION_SEND` — and structurally by `PublicApiSurfaceTest.passesUiCompiledClassesContainNoForbiddenStrings`.
+ * `Intent.ACTION_SEND` — and structurally by `DocumentPublicApiSurfaceTest`.
  */
 @Composable
 public fun DocumentTile(
@@ -52,7 +54,7 @@ public fun DocumentTile(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val semantics = LocalPassesSemantics.current.documents
+    val semantics = LocalDocumentSemantics.current
     Surface(
         modifier = modifier
             .width(160.dp)
@@ -120,7 +122,7 @@ public fun DocumentTile(
 
 @Composable
 private fun DocumentBadge() {
-    val semantics = LocalPassesSemantics.current.documents
+    val semantics = LocalDocumentSemantics.current
     Text(
         text = DOCUMENT_BADGE_TEXT,
         style = MaterialTheme.typography.labelSmall,

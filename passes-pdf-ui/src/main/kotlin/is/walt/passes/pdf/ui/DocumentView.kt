@@ -1,4 +1,4 @@
-package `is`.walt.passes.ui
+package `is`.walt.passes.pdf.ui
 
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
@@ -31,9 +31,9 @@ import androidx.compose.ui.unit.dp
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
-import `is`.walt.passes.ui.internal.RenderedPageCache
-import `is`.walt.passes.ui.theme.LocalPassesSemantics
-import `is`.walt.passes.ui.theme.toComposeColor
+import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
+import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
+import `is`.walt.passes.ui.core.toComposeColor
 import java.nio.ByteBuffer
 
 /**
@@ -46,13 +46,13 @@ import java.nio.ByteBuffer
  *
  *  - The non-suppressible [DocumentTrustCaption] is rendered inside this view and is
  *    not gated by any parameter. There is no `DocumentView` overload that omits it.
- *    `ComposableSurfaceLockTest` pins the parameter shape; `TrustClaimSurfaceTest`
+ *    `DocumentSurfaceLockTest` pins the parameter shape; `DocumentTrustSurfaceTest`
  *    pins the visible-text contract.
  *  - The view displays only the rasterised page bitmaps and the caption. ADR 0005 D4:
  *    no PDF metadata, no extracted text, no annotation list, no attachment list.
  *  - The view exposes no share, export, print, or open-with affordance. ADR 0005 D8.
- *    `PublicApiSurfaceTest.passesUiCompiledClassesContainNoForbiddenStrings` enforces
- *    by scanning compiled bytecode for `android.intent.action.SEND` and the
+ *    `DocumentPublicApiSurfaceTest.passesPdfUiCompiledClassesContainNoForbiddenStrings`
+ *    enforces by scanning compiled bytecode for `android.intent.action.SEND` and the
  *    `application/pdf` MIME literal so a future contributor cannot quietly add either.
  *
  * Bitmap ownership: the LRU cache stores native [Bitmap]s and recycles them on
@@ -79,7 +79,7 @@ public fun DocumentView(
     renderer: PdfRendererBinder,
     modifier: Modifier = Modifier,
 ) {
-    val semantics = LocalPassesSemantics.current.documents
+    val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) {
         RenderedPageCache<Bitmap>(
             maxSize = LRU_PAGE_WINDOW,

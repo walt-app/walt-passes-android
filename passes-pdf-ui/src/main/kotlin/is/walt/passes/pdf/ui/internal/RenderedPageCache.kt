@@ -1,4 +1,4 @@
-package `is`.walt.passes.ui.internal
+package `is`.walt.passes.pdf.ui.internal
 
 import `is`.walt.passes.pdf.PdfDocumentId
 

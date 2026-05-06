@@ -1,4 +1,4 @@
-package `is`.walt.passes.ui
+package `is`.walt.passes.pdf.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,8 +9,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import `is`.walt.passes.ui.theme.LocalPassesSemantics
-import `is`.walt.passes.ui.theme.toComposeColor
+import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
+import `is`.walt.passes.ui.core.toComposeColor
 
 /**
  * The non-suppressible "this is a user-supplied document" caption that anchors the
@@ -21,21 +21,20 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * The composable has no `enabled` parameter, no theme token that hides it, and no
  * `DocumentView` overload that skips rendering it. Mirrors `ExpiredOverlay`'s shape:
  * the trust claim is structural, not a configuration. Adding a parameter to this
- * function fails `ComposableSurfaceLockTest`; adding an overload fails the same lock
+ * function fails `DocumentSurfaceLockTest`; adding an overload fails the same lock
  * (which counts the largest method named `DocumentTrustCaption` and asserts the
  * exact arity).
  *
  * The displayed text is a fixed English literal; no part of it comes from the
  * document. There is therefore no BiDi isolation here — nothing user-controlled to
  * isolate. The user-controlled `displayLabel` is wrapped by `DocumentTile` /
- * `DocumentView` at their own boundaries; see the FSI/PDI utility shared with
- * `SecuritySheets`.
+ * `DocumentView` at their own boundaries; see `passes-ui-core::isolated`.
  */
 @Composable
 public fun DocumentTrustCaption(
     modifier: Modifier = Modifier,
 ) {
-    val semantics = LocalPassesSemantics.current.documents
+    val semantics = LocalDocumentSemantics.current
     Text(
         text = TRUST_CAPTION_TEXT,
         style = MaterialTheme.typography.labelMedium,
