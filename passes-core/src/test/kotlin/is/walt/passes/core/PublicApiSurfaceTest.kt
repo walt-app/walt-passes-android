@@ -1,6 +1,7 @@
 package `is`.walt.passes.core
 
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.internal.SyntheticPkpass
 import org.junit.Test
 
 /**
@@ -168,10 +169,22 @@ class PublicApiSurfaceTest {
 
     @Test
     fun parserFactoryDoesNotThrow() {
-        // The skeleton parser intentionally throws on parse(); the *factory* must not, so
-        // construction is decoupled from implementation readiness.
+        // Construction is decoupled from any parsing work; the factory must not throw
+        // for any reason other than a developer-side ParserConfig misuse (which the
+        // public surface forbids by construction — the data class only exposes valid
+        // shapes).
         val parser = PassParser.create()
         assertThat(parser).isNotNull()
+    }
+
+    @Test
+    fun parserCanParseSyntheticPkpass() {
+        // Surface lock for the bead that wired the four implementation slices into
+        // PassParser.create(). Any future refactor that re-introduces a `throw` on the
+        // factory's parse() arm trips this test before any consumer-side test sees it.
+        val zip = SyntheticPkpass.unsigned(SyntheticPkpass.minimalPassJson("generic"))
+        val result = PassParser.create().parse(PassSource.Bytes(zip))
+        assertThat(result).isInstanceOf(ParseResult.Success::class.java)
     }
 
     /**

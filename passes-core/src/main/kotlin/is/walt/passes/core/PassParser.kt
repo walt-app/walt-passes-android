@@ -1,5 +1,6 @@
 package `is`.walt.passes.core
 
+import `is`.walt.passes.core.internal.DefaultPassParser
 import java.io.InputStream
 
 /**
@@ -13,20 +14,25 @@ import java.io.InputStream
  * UI must distinguish.
  */
 public fun interface PassParser {
+    /**
+     * Parse [source] into a [ParseResult]. Synchronous and CPU-bound: BouncyCastle's
+     * PKCS#7 verification, JSON tokenization, and zip extraction all run on the calling
+     * thread. Wrap with `withTimeout(...)` (kotlinx.coroutines) when invoking from a
+     * coroutine context that requires a per-call timeout — [ParserConfig] does not yet
+     * expose a built-in deadline knob and will not until the public surface freeze
+     * around ADR 0001 lifts.
+     *
+     * Never throws: every failure mode is encoded as a [ParseResult] arm.
+     */
     public fun parse(source: PassSource): ParseResult
 
     public companion object {
         /**
-         * Construct a parser bound to [config]. The default factory is intentionally not
-         * yet implemented; landing it is the next bead after this skeleton.
+         * Construct a parser bound to [config]. The returned instance is safe to call
+         * concurrently from multiple threads — it holds only the immutable [config] and
+         * delegates to stateless internal pipeline functions on each [parse] invocation.
          */
-        public fun create(config: ParserConfig = ParserConfig()): PassParser =
-            PassParser { _ ->
-                throw NotImplementedError(
-                    "PassParser implementation pending follow-up bead; this skeleton only " +
-                        "fixes the public API surface. config=$config",
-                )
-            }
+        public fun create(config: ParserConfig = ParserConfig()): PassParser = DefaultPassParser(config)
     }
 }
 

@@ -147,8 +147,6 @@ private sealed interface ManifestParse {
     data class Failed(val failure: ManifestFailure) : ManifestParse
 }
 
-private const val MANIFEST_FILE_NAME = "manifest.json"
-private const val SIGNATURE_FILE_NAME = "signature"
 private const val SHA1_ALGORITHM = "SHA-1"
 private const val SHA1_HEX_LENGTH = 40
 private val HEX: HexFormat = HexFormat.of()
