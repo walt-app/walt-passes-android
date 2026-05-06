@@ -4,13 +4,17 @@ import android.content.Context
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.core.toKind
+import `is`.walt.passes.storage.internal.DocumentInsertRequest
+import `is`.walt.passes.storage.internal.DocumentStore
 import `is`.walt.passes.storage.internal.PassStore
 import `is`.walt.passes.storage.internal.SqlCipherDatabaseFactory
+import `is`.walt.passes.storage.internal.SqlCipherDocumentStore
 import `is`.walt.passes.storage.internal.SqlCipherPassStore
 import `is`.walt.passes.storage.internal.toFailureKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +30,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 public class SqlCipherPassRepository internal constructor(
     private val store: PassStore,
+    private val documentStore: DocumentStore,
     private val telemetryGuard: StorageTelemetryGuard,
     private val ioDispatcher: CoroutineDispatcher,
     private val clock: () -> Long,
@@ -37,6 +42,9 @@ public class SqlCipherPassRepository internal constructor(
 
     private val _passes: MutableStateFlow<List<PassSummary>> = MutableStateFlow(store.listSummaries())
     override val passes: StateFlow<List<PassSummary>> = _passes.asStateFlow()
+
+    private val _documents: MutableStateFlow<List<DocumentRow>> =
+        MutableStateFlow(documentStore.listRows())
 
     init {
         telemetryGuard.onKeyProviderInitialized(keyBacking)
@@ -85,10 +93,102 @@ public class SqlCipherPassRepository internal constructor(
         StorageResult.Success(Unit)
     }
 
+    override suspend fun insertDocument(
+        label: String,
+        pdfBytes: ByteArray,
+        pageCount: Int,
+        thumbnailBytes: ByteArray,
+    ): StorageResult<DocumentRecordId> = runIo {
+        // byteCount is derived, not caller-asserted, so a stale size header cannot
+        // bypass the cap. The cost is a single property read.
+        val byteCount = pdfBytes.size.toLong()
+
+        rejectionKindOrNull(label, byteCount, pageCount)?.let { kind ->
+            return@runIo rejectDocument(kind)
+        }
+
+        val outcome = writeMutex.withLock {
+            val o = documentStore.insert(
+                DocumentInsertRequest(
+                    displayLabel = label,
+                    pdfBytes = pdfBytes,
+                    pageCount = pageCount,
+                    thumbnailBytes = thumbnailBytes,
+                    nowEpochMs = clock(),
+                ),
+            )
+            // Re-read the full ordered list rather than prepending in-memory: matches the
+            // pass-side `_passes.value = store.listSummaries()` pattern and avoids an
+            // unwritten "clock must be monotonic" invariant. The cost is one SELECT per
+            // insert, which is negligible for a non-hot path.
+            _documents.value = documentStore.listRows()
+            o
+        }
+        telemetryGuard.onDocumentImported(
+            DocumentImportedEvent(byteCount = byteCount, pageCount = pageCount),
+        )
+        StorageResult.Success(outcome.id)
+    }
+
+    override fun observeDocuments(): Flow<List<DocumentRow>> = _documents.asStateFlow()
+
+    override suspend fun loadDocumentBytes(id: DocumentRecordId): StorageResult<ByteArray> = runIo {
+        val bytes = documentStore.loadBytes(id)
+            ?: return@runIo failure(StorageError.IntegrityViolation(id))
+        StorageResult.Success(bytes)
+    }
+
+    override suspend fun loadDocumentThumbnail(id: DocumentRecordId): StorageResult<ByteArray> = runIo {
+        val bytes = documentStore.loadThumbnail(id)
+            ?: return@runIo failure(StorageError.IntegrityViolation(id))
+        StorageResult.Success(bytes)
+    }
+
+    override suspend fun deleteDocument(id: DocumentRecordId): StorageResult<Unit> = runIo {
+        val deleted = writeMutex.withLock {
+            val outcome = documentStore.delete(id) ?: return@withLock null
+            _documents.value = _documents.value.filterNot { it.id == id }
+            outcome
+        } ?: return@runIo failure(StorageError.IntegrityViolation(id))
+
+        telemetryGuard.onDocumentDeleted(DocumentDeletedEvent(byteCount = deleted.byteCount))
+        StorageResult.Success(Unit)
+    }
+
     override fun close() {
         if (closed.compareAndSet(false, true)) {
+            documentStore.close()
             store.close()
         }
+    }
+
+    /**
+     * Returns the storage-side rejection kind for an insert, or null if all caps pass.
+     * Checked in order: size, page count, label length.
+     */
+    private fun rejectionKindOrNull(
+        label: String,
+        byteCount: Long,
+        pageCount: Int,
+    ): DocumentStorageRejectedKind? = when {
+        byteCount > DocumentBounds.MAX_BYTES -> DocumentStorageRejectedKind.OversizedAtStorage
+        pageCount > DocumentBounds.MAX_PAGES -> DocumentStorageRejectedKind.TooManyPagesAtStorage
+        label.length > DocumentBounds.MAX_LABEL_CHARS ->
+            DocumentStorageRejectedKind.LabelTooLongAtStorage
+        else -> null
+    }
+
+    /**
+     * Single emission point for a defensive document rejection. Emits
+     * `onDocumentRejected(kind)` and returns the typed [StorageError.DocumentRejected]
+     * arm without going through [failure]: a rejection is not a generic storage failure,
+     * so [StorageTelemetryGuard.onStorageFailure] should NOT also fire. Routing through
+     * [failure] would double-emit and obscure the distinction between "we said no" and
+     * "the database errored."
+     */
+    private fun <T> rejectDocument(kind: DocumentStorageRejectedKind): StorageResult<T> {
+        telemetryGuard.onDocumentRejected(kind)
+        return StorageResult.Failure(StorageError.DocumentRejected(kind))
     }
 
     /**
@@ -171,8 +271,10 @@ public class SqlCipherPassRepository internal constructor(
                 }
             }
             val store = SqlCipherPassStore(db, telemetryGuard)
+            val documentStore = SqlCipherDocumentStore(db)
             val repo = SqlCipherPassRepository(
                 store = store,
+                documentStore = documentStore,
                 telemetryGuard = telemetryGuard,
                 ioDispatcher = ioDispatcher,
                 clock = clock,

@@ -377,6 +377,22 @@ class BackupRulesAssertionTest {
         assertThat(Section.DeviceTransfer.xmlElement).isEqualTo("device-transfer")
     }
 
+    @Test
+    fun documentTablesLiveInsideTheAlreadyExcludedDatabaseFile() {
+        // The v1 -> v2 migration added `documents` and `document_thumbnails` tables. They
+        // are inside walt_passes.db, which is already in [REQUIRED_EXCLUDES]; no XML
+        // change is needed. This test pins that audit trail: a future schema change that
+        // moves document data outside the excluded file (e.g., a sibling DB, a free
+        // file, a separate sharedpref) would have to add a new entry to REQUIRED_EXCLUDES
+        // before this assertion would still pass.
+        assertThat(Schema.Tables.DOCUMENTS).isEqualTo("documents")
+        assertThat(Schema.Tables.DOCUMENT_THUMBNAILS).isEqualTo("document_thumbnails")
+        assertThat(Schema.DATABASE_NAME).isEqualTo("walt_passes.db")
+        assertThat(BackupRulesContract.REQUIRED_EXCLUDES).contains(
+            RequiredExclude(domain = "database", path = "walt_passes.db"),
+        )
+    }
+
     private fun parse(xml: String): Map<Section, Set<RequiredExclude>> {
         val factory = XmlPullParserFactory.newInstance().apply { isNamespaceAware = false }
         val parser = factory.newPullParser()

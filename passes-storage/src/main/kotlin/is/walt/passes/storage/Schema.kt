@@ -14,13 +14,15 @@ package `is`.walt.passes.storage
 public object Schema {
     public const val DATABASE_NAME: String = "walt_passes.db"
 
-    public const val VERSION: Int = 1
+    public const val VERSION: Int = 2
 
     public object Tables {
         public const val SCHEMA_META: String = "schema_meta"
         public const val PASSES: String = "passes"
         public const val PASS_IMAGES: String = "pass_images"
         public const val PASS_LOCALES: String = "pass_locales"
+        public const val DOCUMENTS: String = "documents"
+        public const val DOCUMENT_THUMBNAILS: String = "document_thumbnails"
     }
 
     public object MetaKeys {
@@ -30,6 +32,33 @@ public object Schema {
         public const val KEY_ALIAS: String = "key_alias"
         public const val KEY_BACKING: String = "key_backing"
     }
+
+    /**
+     * Statements that introduce the v2 document tables. Referenced from both [DDL] (for
+     * fresh installs) and [MIGRATIONS]`[1]` (for v1 -> v2 upgrades) so the two paths can
+     * never drift. A `SchemaParityTest` asserts that a fresh-install DB and a
+     * v1-then-migrated DB land at the same `sqlite_master` shape.
+     */
+    private val V2_DOCUMENT_TABLES: List<String> = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS documents (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            display_label       TEXT    NOT NULL,
+            pdf_bytes           BLOB    NOT NULL,
+            byte_count          INTEGER NOT NULL,
+            page_count          INTEGER NOT NULL,
+            imported_at_epoch_ms INTEGER NOT NULL
+        )
+        """.trimIndent(),
+        "CREATE INDEX IF NOT EXISTS idx_documents_imported_at ON documents(imported_at_epoch_ms)",
+        """
+        CREATE TABLE IF NOT EXISTS document_thumbnails (
+            document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            bytes       BLOB    NOT NULL,
+            PRIMARY KEY (document_id)
+        )
+        """.trimIndent(),
+    )
 
     /**
      * The DDL block that brings a fresh database to [VERSION]. Statements are listed in
@@ -80,11 +109,19 @@ public object Schema {
             PRIMARY KEY (pass_id, locale_tag)
         )
         """.trimIndent(),
-    )
+    ) + V2_DOCUMENT_TABLES
 
     /**
-     * Schema migrations. Empty at version 1; future entries follow the shape
-     * `(fromVersion, listOf("ALTER ...", ...))`.
+     * Schema migrations, keyed by `fromVersion`. Forward-only per ADR 0002. Each entry's
+     * statements are executed inside a single transaction; the
+     * `schema_meta.schema_version` row is bumped to `fromVersion + 1` in the same
+     * transaction so a partial upgrade is impossible.
+     *
+     * v1 -> v2 introduces `documents` and `document_thumbnails` for PDF document support
+     * (ADR 0005). The new tables live in the same SQLCipher database, so no XML / Auto
+     * Backup change is needed: the file-level exclusion already covers them.
      */
-    public val MIGRATIONS: Map<Int, List<String>> = emptyMap()
+    public val MIGRATIONS: Map<Int, List<String>> = mapOf(
+        1 to V2_DOCUMENT_TABLES,
+    )
 }

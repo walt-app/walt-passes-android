@@ -63,9 +63,25 @@ internal object SqlCipherDatabaseFactory {
             onDiskVersion == Schema.VERSION -> return StorageResult.Success(db)
         }
 
+        val statements: List<String> = if (onDiskVersion == null) {
+            Schema.DDL
+        } else {
+            buildMigrationChain(onDiskVersion) ?: run {
+                // The DB is fine; the build is broken (someone bumped Schema.VERSION
+                // without adding a migration entry). Reporting this as DatabaseCorrupt
+                // would mislead telemetry into pointing at user data. The
+                // `migrationsCoverEveryHopFromV1ToCurrent` JVM test catches the mistake
+                // at CI time so this runtime path should never fire in a shipped build.
+                db.close()
+                return StorageResult.Failure(
+                    StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
+                )
+            }
+        }
+
         db.beginTransaction()
         try {
-            for (statement in Schema.DDL) {
+            for (statement in statements) {
                 db.execSQL(statement)
             }
             db.execSQL(
@@ -85,6 +101,21 @@ internal object SqlCipherDatabaseFactory {
         }
         db.endTransaction()
         return StorageResult.Success(db)
+    }
+
+    /**
+     * Builds the forward-only migration chain from `onDiskVersion` up to [Schema.VERSION],
+     * or returns null if any required hop is missing from [Schema.MIGRATIONS]. Bumping
+     * VERSION without adding a corresponding migration entry is the only way to hit the
+     * null branch; the surrounding code reports it as `DatabaseCorrupt`.
+     */
+    private fun buildMigrationChain(onDiskVersion: Int): List<String>? {
+        val chain = ArrayList<String>()
+        for (from in onDiskVersion until Schema.VERSION) {
+            val hop = Schema.MIGRATIONS[from] ?: return null
+            chain += hop
+        }
+        return chain
     }
 
     private fun readSchemaVersionIfPresent(db: SQLiteDatabase): Int? {

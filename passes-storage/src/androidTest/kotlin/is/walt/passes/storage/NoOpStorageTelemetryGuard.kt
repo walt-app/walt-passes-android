@@ -20,4 +20,7 @@ internal object NoOpStorageTelemetryGuard : StorageTelemetryGuard {
         kind: StorageFailureKind,
         unknownKind: UnknownStorageFailureKind?,
     ) = Unit
+    override fun onDocumentImported(event: DocumentImportedEvent) = Unit
+    override fun onDocumentRejected(kind: DocumentStorageRejectedKind) = Unit
+    override fun onDocumentDeleted(event: DocumentDeletedEvent) = Unit
 }

@@ -4,6 +4,7 @@ import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.SignatureStatus
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -55,6 +56,65 @@ public interface PassRepository {
     public suspend fun delete(id: PassRecordId): StorageResult<Unit>
 
     /**
+     * Insert a stored PDF document. Bytes and thumbnail bytes are written into the
+     * `documents` and `document_thumbnails` tables in the same transaction; the assigned
+     * row id is returned. The repository never decodes [pdfBytes] or [thumbnailBytes];
+     * they round-trip as opaque BLOBs. The persisted `byte_count` is `pdfBytes.size` —
+     * derived rather than caller-asserted, so a stale or zero size header from a future
+     * caller cannot bypass the cap.
+     *
+     * Defense in depth (ADR 0005 D7): rejects PDFs whose size exceeds
+     * [DocumentBounds.MAX_BYTES] with [DocumentStorageRejectedKind.OversizedAtStorage],
+     * page counts exceeding [DocumentBounds.MAX_PAGES] with
+     * [DocumentStorageRejectedKind.TooManyPagesAtStorage], and labels longer than
+     * [DocumentBounds.MAX_LABEL_CHARS] with
+     * [DocumentStorageRejectedKind.LabelTooLongAtStorage]. The renderer service in
+     * `passes-pdf-core` already enforces the size and page caps; storage carries them
+     * again so a future caller bug cannot land an oversized row. The label cap exists
+     * only at this layer: nothing upstream bounds the consumer-supplied display label.
+     *
+     * Returns [StorageError.DocumentRejected] when any cap is violated; the typed arm
+     * lets callers distinguish a defensive-rejection from a transient infra failure
+     * without listening to telemetry.
+     */
+    public suspend fun insertDocument(
+        label: String,
+        pdfBytes: ByteArray,
+        pageCount: Int,
+        thumbnailBytes: ByteArray,
+    ): StorageResult<DocumentRecordId>
+
+    /**
+     * Cold flow of document list-view rows, sorted by `imported_at_epoch_ms` descending.
+     * Emits the current snapshot on collect and re-emits when documents are inserted or
+     * deleted. The PDF and thumbnail blobs are NOT loaded by this flow; consumers fetch
+     * them with [loadDocumentBytes] / [loadDocumentThumbnail] on demand.
+     */
+    public fun observeDocuments(): Flow<List<DocumentRow>>
+
+    /**
+     * Loads the raw PDF bytes for the document with [id]. The bytes are returned to the
+     * caller untouched; the storage layer never parses, sniffs, decodes, or otherwise
+     * inspects them (ADR 0005 D4).
+     */
+    public suspend fun loadDocumentBytes(id: DocumentRecordId): StorageResult<ByteArray>
+
+    /**
+     * Loads the rendered thumbnail bytes for the document with [id]. Thumbnails are
+     * generated upstream by the isolated renderer service (ADR 0005 D3) and stored as
+     * opaque BLOBs.
+     */
+    public suspend fun loadDocumentThumbnail(id: DocumentRecordId): StorageResult<ByteArray>
+
+    /**
+     * Irreversible delete of a document row and its cascaded thumbnail row in one
+     * transaction (ADR 0002 D6). Mirrors [delete] for passes: no undo, no soft-delete,
+     * no VACUUM. After the transaction commits, the document StateFlow is updated and
+     * `onDocumentDeleted` is emitted.
+     */
+    public suspend fun deleteDocument(id: DocumentRecordId): StorageResult<Unit>
+
+    /**
      * Releases the underlying database connection. Idempotent: calling [close] more than
      * once is a no-op, and method calls after [close] return [StorageError.DatabaseLocked]
      * rather than throwing. Intended for consumer paths where the repository's lifetime is
@@ -99,9 +159,28 @@ public data class StoredPass(
 )
 
 /**
+ * Common surrogate-key surface shared by [PassRecordId] and [DocumentRecordId]. Carrying
+ * a sealed wrapper rather than a raw `Long` keeps [StorageError.IntegrityViolation] honest:
+ * the arm names which table the unknown id belongs to, so a future telemetry consumer or
+ * unit test cannot misread a document id as a pass id.
+ */
+public sealed interface RecordId {
+    public val value: Long
+}
+
+/**
  * Auto-incremented primary-key surrogate for a row in the `passes` table. Distinct from
  * the PKPASS identity tuple (`type`, `serialNumber`, `organizationName`) because the same
  * identity may legitimately be re-imported across the same `id` over time.
  */
 @JvmInline
-public value class PassRecordId(public val value: Long)
+public value class PassRecordId(public override val value: Long) : RecordId
+
+/**
+ * Auto-incremented primary-key surrogate for a row in the `documents` table. Mirrors
+ * [PassRecordId]'s role for the pass side. Wrapping the id in a value class prevents an
+ * accidental cross-domain substitution (e.g., passing a `PassRecordId` to
+ * [PassRepository.loadDocumentBytes]) at compile time rather than runtime.
+ */
+@JvmInline
+public value class DocumentRecordId(public override val value: Long) : RecordId

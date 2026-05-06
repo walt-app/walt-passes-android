@@ -59,7 +59,60 @@ public interface StorageTelemetryGuard {
         kind: StorageFailureKind,
         unknownKind: UnknownStorageFailureKind?,
     )
+
+    /**
+     * A PDF document row was inserted. Emitted after the transaction commits and after
+     * the document StateFlow is updated. Carries byte and page counts only. The display
+     * label, the PDF bytes, and the assigned id are intentionally NOT part of the event;
+     * the same PII discipline as `onPassUpserted` applies.
+     */
+    public fun onDocumentImported(event: DocumentImportedEvent)
+
+    /**
+     * A document insertion was rejected by the storage-side defense-in-depth check
+     * (ADR 0005 D7). Emitted before the row is created. The row never reaches disk.
+     */
+    public fun onDocumentRejected(kind: DocumentStorageRejectedKind)
+
+    /**
+     * A document row was deleted. Emitted after the transaction commits and after the
+     * document StateFlow is updated. Carries the byte count of the deleted PDF only.
+     */
+    public fun onDocumentDeleted(event: DocumentDeletedEvent)
 }
+
+/**
+ * Telemetry event emitted on a successful document insert. Intentionally narrow: byte
+ * count and page count are the only signals storage observes about the document. The
+ * display label is excluded because it is user-facing free-form text (filename or
+ * date-derived fallback) and would defeat the no-PII-in-telemetry trust claim.
+ */
+public data class DocumentImportedEvent(
+    public val byteCount: Long,
+    public val pageCount: Int,
+)
+
+/**
+ * Why a storage-side document insert was rejected. The two arms mirror the renderer
+ * service's import-time checks; storage refuses to land out-of-bounds rows so a future
+ * caller bug cannot bypass the cap. The arms are deliberately suffixed `AtStorage` so
+ * they cannot be confused with `passes-pdf-core`'s import-time `DocumentRejectedKind`,
+ * which fires before bytes ever reach the storage layer.
+ */
+public enum class DocumentStorageRejectedKind {
+    OversizedAtStorage,
+    TooManyPagesAtStorage,
+    LabelTooLongAtStorage,
+}
+
+/**
+ * Telemetry event emitted on a successful document delete. Carries the byte count of
+ * the deleted PDF; the id and label are intentionally omitted (the row is gone, and
+ * carrying a label here would re-link telemetry to user data).
+ */
+public data class DocumentDeletedEvent(
+    public val byteCount: Long,
+)
 
 /**
  * Stable telemetry projection of [StorageError]. Mirrors the sealed-interface arms
@@ -72,6 +125,7 @@ public enum class StorageFailureKind {
     IntegrityViolation,
     Unsupported,
     Unknown,
+    DocumentRejected,
 }
 
 public enum class MigrationFailureKind {
