@@ -315,6 +315,47 @@ class PassParserTest {
     }
 
     @Test
+    fun pngPixelCountLimitTripsForU32MaxIhdrWithoutOverflowing() {
+        // Regression: an IHDR declaring near-u32-max width and height would, with a
+        // naive `dim.width * dim.height` over signed Long, wrap negative and slip past
+        // the cap. The axis-pre-check forces the trip without even multiplying.
+        val attackPng = SyntheticPkpass.fakePng(widthDeclared = Int.MAX_VALUE, heightDeclared = Int.MAX_VALUE)
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries = mapOf("icon.png" to attackPng),
+            )
+        // Default cap; both axes already exceed it, so overflow never gets a chance.
+        val result = PassParser.create().parse(PassSource.Bytes(zip))
+        assertThat(result)
+            .isEqualTo(
+                ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.ImagePixelCount)),
+            )
+    }
+
+    @Test
+    fun streamSourceWithoutSizeHintReportsExtractedBytesOnTelemetry() {
+        // Stream sources without a caller-supplied sizeHint used to telemeter
+        // archiveBytes = 0; the extractor now plumbs its measured byte count through
+        // ExtractResult.Success so downstream observability has an honest number.
+        val zip = SyntheticPkpass.unsigned(SyntheticPkpass.minimalPassJson("generic"))
+        val recorder = RecordingTelemetryGuard()
+        val parser = PassParser.create(ParserConfig().copy(telemetryGuard = recorder))
+
+        val result =
+            parser.parse(PassSource.Stream(stream = zip.inputStream(), sizeHintBytes = null))
+
+        assertThat(result).isInstanceOf(ParseResult.Success::class.java)
+        val succeeded = recorder.events[1] as RecordedEvent.Succeeded
+        // Bounded counter stops a few bytes shy of the file's total length (zip's
+        // central directory + EOCD trail is not consumed by ZipInputStream past the
+        // first signature byte the loop sees), so we only assert "non-zero and not
+        // larger than the archive."
+        assertThat(succeeded.event.archiveBytes).isGreaterThan(0L)
+        assertThat(succeeded.event.archiveBytes).isAtMost(zip.size.toLong())
+    }
+
+    @Test
     fun streamSourceWithSizeHintReportsThatSizeOnTelemetry() {
         // PassSource.Stream lets a caller stream a pkpass without holding the whole
         // archive in a ByteArray. The telemetry path records sizeHintBytes verbatim;

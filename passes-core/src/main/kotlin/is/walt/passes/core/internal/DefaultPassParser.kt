@@ -8,7 +8,6 @@ import `is`.walt.passes.core.ParseFailedEvent
 import `is`.walt.passes.core.ParseResult
 import `is`.walt.passes.core.ParseSucceededEvent
 import `is`.walt.passes.core.ParserConfig
-import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.PassParser
 import `is`.walt.passes.core.PassSource
@@ -47,72 +46,74 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
     override fun parse(source: PassSource): ParseResult {
         val started = System.nanoTime()
         config.telemetryGuard.onParseStarted()
-        val archiveBytes = sourceArchiveBytesOrZero(source)
-        val result = pipeline(source)
-        emit(result, started, archiveBytes)
-        return result
+        val outcome = runPipeline(source)
+        emit(outcome.result, started, outcome.archiveBytes)
+        return outcome.result
     }
 
     /**
-     * Sequenced as a chain of helpers (rather than a single body with seven `return`
-     * statements) so each stage's failure routing is local to its own helper. The
-     * chain order — extract → manifest → signature → pass.json → strings → images →
-     * assemble — is the trust hierarchy in code: a structural failure can never
-     * surface as tampering and a tampering signal can never be coalesced with
-     * malformedness.
+     * The full pipeline as a flat sequence of stages. Each stage either continues with
+     * its produced value or returns the [PipelineOutcome] holding the [ParseResult] and
+     * the best available archive-bytes count for telemetry. The branches are
+     * deliberately one-screen-tall and read top-to-bottom: a chain of `withX` helpers
+     * obscures that the trust hierarchy is just a linear sequence.
+     *
+     * The `@Suppress("ReturnCount")` is intentional: the pipeline has six stage
+     * boundaries, each with its own short-circuit; collapsing them into ≤2 returns
+     * either re-introduces the helper-chain or hides the early-exit shape behind a
+     * generic monadic plumbing whose payoff for six stages is not obviously worth the
+     * indirection.
      */
-    private fun pipeline(source: PassSource): ParseResult =
-        when (val r = extractSafely(source, config)) {
-            is ExtractResult.Failure -> ParseResult.Malformed(r.reason)
-            is ExtractResult.Success -> withEntries(r.entries)
-        }
-
-    private fun withEntries(entries: Map<String, ByteArray>): ParseResult =
-        when (val r = verifyManifest(entries)) {
-            is ManifestVerifyResult.Failed -> manifestFailureToResult(r.failure)
-            is ManifestVerifyResult.Ok -> withVerifiedManifest(entries, r.manifestBytes)
-        }
-
-    private fun withVerifiedManifest(
-        entries: Map<String, ByteArray>,
-        manifestBytes: ByteArray,
-    ): ParseResult =
-        when (val r = resolveSignature(entries, manifestBytes)) {
-            is SignaturePhaseResult.Failure -> r.parseResult
-            is SignaturePhaseResult.Status -> withSignatureStatus(entries, r.status)
-        }
-
-    private fun withSignatureStatus(
-        entries: Map<String, ByteArray>,
-        status: SignatureStatus,
-    ): ParseResult =
-        when (val r = decodePassJson(entries, config)) {
-            is PassJsonDecodeResult.Failed -> passJsonFailureToResult(r.failure)
-            is PassJsonDecodeResult.Ok -> assemble(entries, r.pass, status)
-        }
-
-    private fun assemble(
-        entries: Map<String, ByteArray>,
-        pass: Pass,
-        status: SignatureStatus,
-    ): ParseResult =
-        when (val locales = collectLocales(entries)) {
-            is LocaleCollect.Failure -> locales.parseResult
-            is LocaleCollect.Ok ->
-                when (val images = collectImages(entries)) {
-                    is ImageCollect.Failure -> images.parseResult
-                    is ImageCollect.Ok ->
-                        ParseResult.Success(
-                            pass = pass.copy(images = images.map, locales = locales.map),
-                            signatureStatus = status,
-                        )
-                }
-        }
+    @Suppress("ReturnCount")
+    private fun runPipeline(source: PassSource): PipelineOutcome {
+        val extracted =
+            when (val r = extractSafely(source, config)) {
+                is ExtractResult.Failure -> return PipelineOutcome(ParseResult.Malformed(r.reason), 0L)
+                is ExtractResult.Success -> r
+            }
+        val archiveBytes = computeArchiveBytes(source, extracted.archiveBytes)
+        val entries = extracted.entries
+        val manifestBytes =
+            when (val r = verifyManifest(entries)) {
+                is ManifestVerifyResult.Failed ->
+                    return PipelineOutcome(manifestFailureToResult(r.failure), archiveBytes)
+                is ManifestVerifyResult.Ok -> r.manifestBytes
+            }
+        val signatureStatus =
+            when (val r = resolveSignature(entries, manifestBytes)) {
+                is Phase.Halt -> return PipelineOutcome(r.result, archiveBytes)
+                is Phase.Continue -> r.value
+            }
+        val pass =
+            when (val r = decodePassJson(entries, config)) {
+                is PassJsonDecodeResult.Failed ->
+                    return PipelineOutcome(passJsonFailureToResult(r.failure), archiveBytes)
+                is PassJsonDecodeResult.Ok -> r.pass
+            }
+        val locales =
+            when (val r = collectLocales(entries)) {
+                is Phase.Halt -> return PipelineOutcome(r.result, archiveBytes)
+                is Phase.Continue -> r.value
+            }
+        val images =
+            when (val r = collectImages(entries)) {
+                is Phase.Halt -> return PipelineOutcome(r.result, archiveBytes)
+                is Phase.Continue -> r.value
+            }
+        return PipelineOutcome(
+            result =
+                ParseResult.Success(
+                    pass = pass.copy(images = images, locales = locales),
+                    signatureStatus = signatureStatus,
+                ),
+            archiveBytes = archiveBytes,
+        )
+    }
 
     private fun resolveSignature(
         entries: Map<String, ByteArray>,
         manifestBytes: ByteArray,
-    ): SignaturePhaseResult {
+    ): Phase<SignatureStatus> {
         val signatureBytes = entries[SIGNATURE_FILE_NAME]
         if (signatureBytes == null) {
             // No signature blob. The lenient default surfaces this as Unsigned; strict
@@ -122,20 +123,18 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
             // refuses to trust unsigned cryptographic provenance, which is the same
             // category of refusal as "the bytes did not parse as a CMS envelope."
             return if (config.acceptUnsignedArchives) {
-                SignaturePhaseResult.Status(SignatureStatus.Unsigned)
+                Phase.Continue(SignatureStatus.Unsigned)
             } else {
-                SignaturePhaseResult.Failure(
-                    ParseResult.Tampered(TamperReason.SignatureCryptoFailure),
-                )
+                Phase.Halt(ParseResult.Tampered(TamperReason.SignatureCryptoFailure))
             }
         }
         return when (val r = verifySignature(signatureBytes, manifestBytes, config)) {
-            is SignatureVerifyResult.Ok -> SignaturePhaseResult.Status(r.status)
-            is SignatureVerifyResult.Failed -> SignaturePhaseResult.Failure(ParseResult.Tampered(r.reason))
+            is SignatureVerifyResult.Ok -> Phase.Continue(r.status)
+            is SignatureVerifyResult.Failed -> Phase.Halt(ParseResult.Tampered(r.reason))
         }
     }
 
-    private fun collectLocales(entries: Map<String, ByteArray>): LocaleCollect {
+    private fun collectLocales(entries: Map<String, ByteArray>): Phase<LocaleMap> {
         // Two-pass over the entries: first identify the locale-bearing names so the cap
         // can fire before any .strings parsing happens, then parse. Doing the cap check
         // up-front avoids parsing N strings files just to reject N+1.
@@ -146,7 +145,7 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
                     locale to bytes
                 }
         return if (stringsEntries.size > config.maxLocaleCount) {
-            LocaleCollect.Failure(
+            Phase.Halt(
                 ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.LocaleCount)),
             )
         } else {
@@ -154,7 +153,7 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
         }
     }
 
-    private fun parseStringsEntries(stringsEntries: List<Pair<String, ByteArray>>): LocaleCollect {
+    private fun parseStringsEntries(stringsEntries: List<Pair<String, ByteArray>>): Phase<LocaleMap> {
         val map = LinkedHashMap<PassLocale, LocalizedStrings>(stringsEntries.size)
         var failure: ParseResult? = null
         for ((locale, bytes) in stringsEntries) {
@@ -164,10 +163,10 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
                 is StringsResult.Failed -> failure = stringsFailureToResult(r.failure)
             }
         }
-        return failure?.let(LocaleCollect::Failure) ?: LocaleCollect.Ok(map)
+        return failure?.let { Phase.Halt(it) } ?: Phase.Continue(map)
     }
 
-    private fun collectImages(entries: Map<String, ByteArray>): ImageCollect {
+    private fun collectImages(entries: Map<String, ByteArray>): Phase<Map<ImageRole, ImageBytes>> {
         // Pre-filter to top-level role images so the loop body has a single jump
         // statement (the break-on-failure). Localized images (under `<locale>.lproj/`)
         // are silently dropped — ADR 0001 does not yet model locale-aware image
@@ -184,7 +183,7 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
             val limitTrip = pngPixelLimitFailure(bytes)
             if (limitTrip != null) failure = limitTrip else map[role] = ImageBytes(bytes)
         }
-        return failure?.let(ImageCollect::Failure) ?: ImageCollect.Ok(map)
+        return failure?.let { Phase.Halt(it) } ?: Phase.Continue(map)
     }
 
     private fun topLevelImageRole(name: String): ImageRole? {
@@ -199,8 +198,17 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
         // upstream. Rejecting on unreadable IHDR would force the parser to police PNG
         // structural validity, which is outside its remit.
         val dim = readPngDimensions(bytes) ?: return null
-        val pixels = dim.width * dim.height
-        return if (pixels > config.maxImagePixelCount.toLong()) {
+        val limit = config.maxImagePixelCount.toLong()
+        // Defense against u32 IHDR width × height overflowing Long. A signed-Long
+        // multiplication of two values near u32 max would wrap silently — and a
+        // wrapped (negative) result would compare ≤ limit, bypassing the cap. The
+        // axis-pre-check rules out that path: if either axis already exceeds the
+        // cap, the product certainly does. Otherwise both axes are ≤ limit ≤
+        // Int.MAX_VALUE (the field's declared type is `Int`), so the product is at
+        // most ~4.6×10¹⁸, comfortably under Long.MAX_VALUE ≈ 9.22×10¹⁸.
+        val exceedsAxis = dim.width > limit || dim.height > limit
+        val exceedsProduct = !exceedsAxis && dim.width * dim.height > limit
+        return if (exceedsAxis || exceedsProduct) {
             ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.ImagePixelCount))
         } else {
             null
@@ -240,24 +248,47 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
         }
     }
 
-    private sealed interface SignaturePhaseResult {
-        data class Status(val status: SignatureStatus) : SignaturePhaseResult
+    /**
+     * The pipeline carries both the [result] and the archive-bytes count separately
+     * because telemetry's [ParseSucceededEvent.archiveBytes] is populated only on
+     * success, but the count is computed at extraction time — before the call site
+     * knows which arm of [ParseResult] it will return.
+     */
+    private data class PipelineOutcome(val result: ParseResult, val archiveBytes: Long)
 
-        data class Failure(val parseResult: ParseResult) : SignaturePhaseResult
-    }
+    /**
+     * Continuation outcome of any pipeline stage that can short-circuit with a
+     * pre-baked [ParseResult]. Replaces what was previously three near-identical
+     * sealed types ([resolveSignature]'s, locale-collection's, image-collection's
+     * outputs) — the shape is the same in every case, so factoring out the type
+     * removes duplicated arms whose only difference was the wrapped value's static
+     * type.
+     */
+    private sealed interface Phase<out T> {
+        data class Continue<out T>(val value: T) : Phase<T>
 
-    private sealed interface LocaleCollect {
-        data class Ok(val map: Map<PassLocale, LocalizedStrings>) : LocaleCollect
-
-        data class Failure(val parseResult: ParseResult) : LocaleCollect
-    }
-
-    private sealed interface ImageCollect {
-        data class Ok(val map: Map<ImageRole, ImageBytes>) : ImageCollect
-
-        data class Failure(val parseResult: ParseResult) : ImageCollect
+        data class Halt(val result: ParseResult) : Phase<Nothing>
     }
 }
+
+/**
+ * Resolves the archive-bytes value reported on [ParseSucceededEvent]. Sources we know
+ * exactly (a [PassSource.Bytes] holds the whole array; a [PassSource.Stream] with a
+ * caller-supplied [PassSource.Stream.sizeHintBytes] asserts its full length) report
+ * that exact number; a hint-less [PassSource.Stream] falls back to the extractor's
+ * measured count, which is "bytes consumed by the zip pipeline" — not perfectly
+ * equal to the file's on-disk length (the central directory + EOCD record is
+ * truncated when [java.util.zip.ZipInputStream] sees the central-directory signature)
+ * but far closer to truth than the prior `0L` placeholder.
+ */
+private fun computeArchiveBytes(
+    source: PassSource,
+    extractedBytes: Long,
+): Long =
+    when (source) {
+        is PassSource.Bytes -> source.bytes.size.toLong()
+        is PassSource.Stream -> source.sizeHintBytes ?: extractedBytes
+    }
 
 /**
  * Maps a top-level PKPASS image basename onto its [ImageRole]. Unknown basenames return
@@ -324,12 +355,6 @@ private fun lprojStringsLocaleOrNull(name: String): String? {
     return locale.takeUnless { it.isEmpty() || '/' in it }
 }
 
-private fun sourceArchiveBytesOrZero(source: PassSource): Long =
-    when (source) {
-        is PassSource.Bytes -> source.bytes.size.toLong()
-        is PassSource.Stream -> source.sizeHintBytes ?: 0L
-    }
-
 private val ROLE_BY_BASENAME: Map<String, ImageRole> =
     mapOf(
         "logo.png" to ImageRole.Logo,
@@ -352,7 +377,14 @@ private val ROLE_BY_BASENAME: Map<String, ImageRole> =
         "footer@3x.png" to ImageRole.FooterSuperRetina,
     )
 
-private const val SIGNATURE_FILE_NAME = "signature"
+/**
+ * Local typealiases keep the [Phase] generic instantiations short enough to fit on a
+ * single function-signature line, which the project's combined ktlint /detekt rules
+ * (multi-line argument lists must trail-comma; single-line signatures must fit under
+ * the line cap) otherwise force into incompatible shapes.
+ */
+private typealias LocaleMap = Map<`is`.walt.passes.core.PassLocale, `is`.walt.passes.core.LocalizedStrings>
+
 private const val PNG_EXTENSION = ".png"
 private const val LPROJ_STRINGS_SUFFIX = ".lproj/pass.strings"
 private const val NANOS_PER_MILLI = 1_000_000L

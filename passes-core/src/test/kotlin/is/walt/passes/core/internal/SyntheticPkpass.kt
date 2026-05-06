@@ -1,23 +1,7 @@
 package `is`.walt.passes.core.internal
 
-import org.bouncycastle.asn1.x500.X500Name
-import org.bouncycastle.cert.jcajce.JcaCertStore
-import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
-import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
-import org.bouncycastle.cms.CMSProcessableByteArray
-import org.bouncycastle.cms.CMSSignedDataGenerator
-import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder
-import org.bouncycastle.jce.provider.BouncyCastleProvider
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder
-import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder
 import java.io.ByteArrayOutputStream
-import java.math.BigInteger
-import java.security.KeyPairGenerator
 import java.security.MessageDigest
-import java.security.PrivateKey
-import java.security.Security
-import java.security.cert.X509Certificate
-import java.util.Date
 import java.util.HexFormat
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
@@ -36,16 +20,13 @@ import java.util.zip.ZipOutputStream
  *     drifting against an Apple-issued cert that would expire and start failing the suite
  *     out of band.
  *
- * The signing path here mirrors [SignatureVerifierTest]'s helpers so the two suites stay
- * structurally identical; a failure in one is therefore informative about the other.
+ * Cryptographic primitives (RSA key generation, X.509 self-signing, CMS detached
+ * signature production) are delegated to [TestCryptoSupport]. That keeps the signing
+ * math identical between this fixture and [SignatureVerifierTest]: a regression in one
+ * suite is informative about the same path in the other, with no risk of the two
+ * implementations drifting.
  */
 internal object SyntheticPkpass {
-    init {
-        if (Security.getProvider("BC") == null) {
-            Security.addProvider(BouncyCastleProvider())
-        }
-    }
-
     /**
      * Build an unsigned pkpass: zip with `pass.json`, `manifest.json`, optional images
      * and `<locale>.lproj/pass.strings` files, and no `signature` entry. Suitable for
@@ -59,7 +40,7 @@ internal object SyntheticPkpass {
         members[PASS_JSON] = passJson.toByteArray(Charsets.UTF_8)
         members.putAll(extraEntries)
         val manifest = buildManifest(members)
-        members[MANIFEST_JSON] = manifest
+        members[MANIFEST_FILE_NAME] = manifest
         return zip(members)
     }
 
@@ -77,8 +58,8 @@ internal object SyntheticPkpass {
         members[PASS_JSON] = passJson.toByteArray(Charsets.UTF_8)
         members.putAll(extraEntries)
         val manifest = buildManifest(members)
-        members[MANIFEST_JSON] = manifest
-        members[SIGNATURE] = signCms(manifest)
+        members[MANIFEST_FILE_NAME] = manifest
+        members[SIGNATURE_FILE_NAME] = buildSelfSignedSignature(manifest)
         return zip(members)
     }
 
@@ -92,7 +73,7 @@ internal object SyntheticPkpass {
         val manifest = buildManifest(linkedMapOf(PASS_JSON to passBytes))
         // Swap one byte in pass.json AFTER the manifest captured its hash.
         val tampered = passBytes.copyOf().also { it[0] = (it[0] + 1).toByte() }
-        return zip(linkedMapOf(PASS_JSON to tampered, MANIFEST_JSON to manifest))
+        return zip(linkedMapOf(PASS_JSON to tampered, MANIFEST_FILE_NAME to manifest))
     }
 
     /**
@@ -100,7 +81,7 @@ internal object SyntheticPkpass {
      * "eventTicket", "coupon", "storeCard", "generic"). Required top-level fields
      * (formatVersion, serialNumber, description, organizationName) are populated; the
      * style sub-object is empty, which is the smallest pass.json that decodes to the
-     * named [PassType].
+     * named [`is`.walt.passes.core.PassType].
      */
     fun minimalPassJson(
         type: String,
@@ -119,7 +100,7 @@ internal object SyntheticPkpass {
         """.trimIndent()
 
     /**
-     * Build a syntactically valid 8x8 PNG with arbitrary IHDR-declared dimensions —
+     * Build a syntactically valid PNG with arbitrary IHDR-declared dimensions —
      * useful for exercising the pixel-cap check without serializing a real pixel grid.
      * The IHDR chunk is what the parser inspects; downstream chunks (IDAT, IEND) are
      * present so the byte stream looks like a PNG to any reader that walks past the
@@ -195,51 +176,17 @@ internal object SyntheticPkpass {
         return baos.toByteArray()
     }
 
-    private fun signCms(manifest: ByteArray): ByteArray {
-        val keyGen = KeyPairGenerator.getInstance("RSA", "BC")
-        keyGen.initialize(RSA_KEY_BITS)
-        val keys = keyGen.generateKeyPair()
-        val cert = selfSignedCertificate(keys.private, keys.public, "CN=Test Synthetic Signer")
-        val signer =
-            JcaContentSignerBuilder(SIG_ALGO).setProvider("BC").build(keys.private)
-        val infoGen =
-            JcaSignerInfoGeneratorBuilder(
-                JcaDigestCalculatorProviderBuilder().setProvider("BC").build(),
-            ).build(signer, cert)
-        val gen =
-            CMSSignedDataGenerator().apply {
-                addSignerInfoGenerator(infoGen)
-                addCertificates(JcaCertStore(listOf(cert)))
-            }
-        return gen.generate(CMSProcessableByteArray(manifest), false).encoded
-    }
-
-    private fun selfSignedCertificate(
-        privateKey: PrivateKey,
-        publicKey: java.security.PublicKey,
-        subjectDn: String,
-    ): X509Certificate {
-        val now = System.currentTimeMillis()
-        val name = X500Name(subjectDn)
-        val builder =
-            JcaX509v3CertificateBuilder(
-                name,
-                BigInteger.valueOf(now),
-                Date(now - ONE_HOUR_MILLIS),
-                Date(now + ONE_YEAR_MILLIS),
-                name,
-                publicKey,
-            )
-        val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider("BC").build(privateKey)
-        return JcaX509CertificateConverter().setProvider("BC").getCertificate(builder.build(signer))
+    private fun buildSelfSignedSignature(manifest: ByteArray): ByteArray {
+        val keys = newRsaKeyPair()
+        val cert = selfSignedCertificate(keys, "CN=Test Synthetic Signer")
+        return cmsDetachedSignature(
+            content = manifest,
+            signerCert = cert,
+            signerKey = keys.private,
+            includedCerts = listOf(cert),
+        )
     }
 
     private const val PASS_JSON = "pass.json"
-    private const val MANIFEST_JSON = "manifest.json"
-    private const val SIGNATURE = "signature"
-    private const val SIG_ALGO = "SHA256withRSA"
-    private const val RSA_KEY_BITS = 2048
     private const val IHDR_DATA_LENGTH = 13
-    private const val ONE_HOUR_MILLIS = 60L * 60L * 1000L
-    private const val ONE_YEAR_MILLIS = 365L * 24L * ONE_HOUR_MILLIS
 }

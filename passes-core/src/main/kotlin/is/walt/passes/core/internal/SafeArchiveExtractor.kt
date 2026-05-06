@@ -106,7 +106,15 @@ private fun runZipPipeline(
     if (magicCheck != null) return ExtractResult.Failure(magicCheck)
     val bounded = BoundedInputStream(sniffer, config.maxArchiveBytes)
     return try {
-        ZipInputStream(bounded).use { zis -> extractAllEntries(zis, config) }
+        // [BoundedInputStream.bytesRead] is read post-`use`: it accumulates as
+        // [ZipInputStream] pulls bytes through and is final once the stream closes.
+        // Plumbed into [ExtractResult.Success.archiveBytes] for telemetry on stream
+        // sources whose size hint was absent.
+        val outcome = ZipInputStream(bounded).use { zis -> extractAllEntries(zis, config) }
+        when (outcome) {
+            is ExtractResult.Success -> outcome.copy(archiveBytes = bounded.bytesRead)
+            is ExtractResult.Failure -> outcome
+        }
     } catch (_: ArchiveSizeExceededException) {
         ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.ArchiveSize))
     } catch (_: ZipException) {
@@ -151,7 +159,9 @@ private fun extractAllEntries(
         val entry = zis.nextEntry ?: break
         failure = processEntry(zis, entry, entries, config)
     }
-    return failure ?: ExtractResult.Success(entries.toMap())
+    // archiveBytes is filled in by the caller from the BoundedInputStream counter
+    // after the ZipInputStream closes; the value here is a placeholder.
+    return failure ?: ExtractResult.Success(entries.toMap(), archiveBytes = 0L)
 }
 
 private fun processEntry(
@@ -278,6 +288,13 @@ private class BoundedInputStream(
 ) : FilterInputStream(delegate) {
     private var count: Long = 0
 
+    /**
+     * Cumulative bytes pulled through this wrapper. Read after the wrapping
+     * [ZipInputStream] closes to recover an honest "bytes consumed" count for
+     * telemetry on stream sources without a caller-supplied size hint.
+     */
+    val bytesRead: Long get() = count
+
     override fun read(): Int {
         val b = `in`.read()
         if (b != -1) {
@@ -315,7 +332,6 @@ private class NonClosingInputStream(delegate: InputStream) : FilterInputStream(d
 private class ArchiveSizeExceededException : IOException()
 
 private const val READ_BUFFER_SIZE = 8 * 1024
-private const val SIGNATURE_FILE_NAME = "signature"
 private const val MAGIC_PREFIX_LENGTH = 4
 private val LOCAL_FILE_HEADER_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 private val END_OF_CENTRAL_DIR_MAGIC = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
