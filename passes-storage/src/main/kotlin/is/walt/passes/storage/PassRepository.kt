@@ -4,6 +4,7 @@ import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.SignatureStatus
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -53,6 +54,56 @@ public interface PassRepository {
      * Confirmation UI is the caller's responsibility; the repository trusts the call.
      */
     public suspend fun delete(id: PassRecordId): StorageResult<Unit>
+
+    /**
+     * Insert a stored PDF document. Bytes and thumbnail bytes are written into the
+     * `documents` and `document_thumbnails` tables in the same transaction; the assigned
+     * row id is returned. The repository never decodes [pdfBytes] or [thumbnailBytes];
+     * they round-trip as opaque BLOBs.
+     *
+     * Defense in depth (ADR 0005 D7): rejects [byteCount] > 25 MB with
+     * [DocumentStorageRejectedKind.OversizedAtStorage] and [pageCount] > 10 with
+     * [DocumentStorageRejectedKind.TooManyPagesAtStorage]. The renderer service in
+     * `passes-pdf-core` already enforces both caps; storage carries them again so a
+     * future caller bug cannot land an oversized row.
+     */
+    public suspend fun insertDocument(
+        label: String,
+        pdfBytes: ByteArray,
+        byteCount: Long,
+        pageCount: Int,
+        thumbnailBytes: ByteArray,
+    ): StorageResult<Long>
+
+    /**
+     * Cold flow of document list-view rows, sorted by `imported_at_epoch_ms` descending.
+     * Emits the current snapshot on collect and re-emits when documents are inserted or
+     * deleted. The PDF and thumbnail blobs are NOT loaded by this flow; consumers fetch
+     * them with [loadDocumentBytes] / [loadDocumentThumbnail] on demand.
+     */
+    public fun observeDocuments(): Flow<List<DocumentRow>>
+
+    /**
+     * Loads the raw PDF bytes for the document with [id]. The bytes are returned to the
+     * caller untouched; the storage layer never parses, sniffs, decodes, or otherwise
+     * inspects them (ADR 0005 D4).
+     */
+    public suspend fun loadDocumentBytes(id: Long): StorageResult<ByteArray>
+
+    /**
+     * Loads the rendered thumbnail bytes for the document with [id]. Thumbnails are
+     * generated upstream by the isolated renderer service (ADR 0005 D3) and stored as
+     * opaque BLOBs.
+     */
+    public suspend fun loadDocumentThumbnail(id: Long): StorageResult<ByteArray>
+
+    /**
+     * Irreversible delete of a document row and its cascaded thumbnail row in one
+     * transaction (ADR 0002 D6). Mirrors [delete] for passes: no undo, no soft-delete,
+     * no VACUUM. After the transaction commits, the document StateFlow is updated and
+     * `onDocumentDeleted` is emitted.
+     */
+    public suspend fun deleteDocument(id: Long): StorageResult<Unit>
 
     /**
      * Releases the underlying database connection. Idempotent: calling [close] more than

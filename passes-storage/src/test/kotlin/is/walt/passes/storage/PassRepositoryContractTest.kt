@@ -18,6 +18,10 @@ import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.storage.internal.DeleteOutcome
+import `is`.walt.passes.storage.internal.DocumentDeleteOutcome
+import `is`.walt.passes.storage.internal.DocumentInsertOutcome
+import `is`.walt.passes.storage.internal.DocumentInsertRequest
+import `is`.walt.passes.storage.internal.DocumentStore
 import `is`.walt.passes.storage.internal.PassStore
 import `is`.walt.passes.storage.internal.UpsertOutcome
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -54,6 +58,7 @@ class PassRepositoryContractTest {
         val telemetry = RecordingGuard()
         val repo = SqlCipherPassRepository(
             store = store,
+            documentStore = NoOpDocumentStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_000L },
@@ -69,6 +74,7 @@ class PassRepositoryContractTest {
         val telemetry = RecordingGuard()
         val repo = SqlCipherPassRepository(
             store = store,
+            documentStore = NoOpDocumentStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_000L },
@@ -92,6 +98,7 @@ class PassRepositoryContractTest {
         val telemetry = RecordingGuard()
         val repo = SqlCipherPassRepository(
             store = store,
+            documentStore = NoOpDocumentStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_000L },
@@ -117,6 +124,7 @@ class PassRepositoryContractTest {
         val telemetry = RecordingGuard()
         val repo = SqlCipherPassRepository(
             store = store,
+            documentStore = NoOpDocumentStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1L },
@@ -139,6 +147,7 @@ class PassRepositoryContractTest {
         val telemetry = RecordingGuard()
         val repo = SqlCipherPassRepository(
             store = store,
+            documentStore = NoOpDocumentStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1L },
@@ -274,6 +283,28 @@ class PassRepositoryContractTest {
         ) {
             events += "failure:${kind.name}:${unknownKind?.name ?: "n/a"}"
         }
+        override fun onDocumentImported(event: DocumentImportedEvent) {
+            events += "doc-imported:${event.byteCount}:${event.pageCount}"
+        }
+        override fun onDocumentRejected(kind: DocumentStorageRejectedKind) {
+            events += "doc-rejected:${kind.name}"
+        }
+        override fun onDocumentDeleted(event: DocumentDeletedEvent) {
+            events += "doc-deleted:${event.byteCount}"
+        }
+    }
+
+    /**
+     * In-memory [DocumentStore] used by the pass-side contract tests; the document-side
+     * contract tests use their own richer fake (see DocumentRepositoryTest).
+     */
+    private object NoOpDocumentStore : DocumentStore {
+        override fun listRows(): List<DocumentRow> = emptyList()
+        override fun insert(request: DocumentInsertRequest): DocumentInsertOutcome =
+            error("unused in pass-side tests")
+        override fun loadBytes(id: Long): ByteArray? = null
+        override fun loadThumbnail(id: Long): ByteArray? = null
+        override fun delete(id: Long): DocumentDeleteOutcome? = null
     }
 
     private companion object {

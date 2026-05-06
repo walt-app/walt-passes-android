@@ -63,9 +63,20 @@ internal object SqlCipherDatabaseFactory {
             onDiskVersion == Schema.VERSION -> return StorageResult.Success(db)
         }
 
+        val statements: List<String> = if (onDiskVersion == null) {
+            Schema.DDL
+        } else {
+            buildMigrationChain(onDiskVersion) ?: run {
+                db.close()
+                return StorageResult.Failure(
+                    StorageError.Unknown(kind = UnknownStorageFailureKind.DatabaseCorrupt),
+                )
+            }
+        }
+
         db.beginTransaction()
         try {
-            for (statement in Schema.DDL) {
+            for (statement in statements) {
                 db.execSQL(statement)
             }
             db.execSQL(
@@ -85,6 +96,21 @@ internal object SqlCipherDatabaseFactory {
         }
         db.endTransaction()
         return StorageResult.Success(db)
+    }
+
+    /**
+     * Builds the forward-only migration chain from `onDiskVersion` up to [Schema.VERSION],
+     * or returns null if any required hop is missing from [Schema.MIGRATIONS]. Bumping
+     * VERSION without adding a corresponding migration entry is the only way to hit the
+     * null branch; the surrounding code reports it as `DatabaseCorrupt`.
+     */
+    private fun buildMigrationChain(onDiskVersion: Int): List<String>? {
+        val chain = ArrayList<String>()
+        for (from in onDiskVersion until Schema.VERSION) {
+            val hop = Schema.MIGRATIONS[from] ?: return null
+            chain += hop
+        }
+        return chain
     }
 
     private fun readSchemaVersionIfPresent(db: SQLiteDatabase): Int? {

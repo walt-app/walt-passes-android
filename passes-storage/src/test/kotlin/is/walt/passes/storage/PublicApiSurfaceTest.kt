@@ -130,15 +130,18 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun schemaDeclaresFourTablesAndIsAtVersionOne() {
-        assertThat(Schema.VERSION).isEqualTo(1)
+    fun schemaDeclaresSixTablesAndIsAtVersionTwo() {
+        assertThat(Schema.VERSION).isEqualTo(2)
         assertThat(Schema.Tables.SCHEMA_META).isEqualTo("schema_meta")
         assertThat(Schema.Tables.PASSES).isEqualTo("passes")
         assertThat(Schema.Tables.PASS_IMAGES).isEqualTo("pass_images")
         assertThat(Schema.Tables.PASS_LOCALES).isEqualTo("pass_locales")
-        // 1 schema_meta + 1 passes + 3 indexes + 1 pass_images + 1 pass_locales = 7 statements.
-        assertThat(Schema.DDL).hasSize(7)
-        assertThat(Schema.MIGRATIONS).isEmpty()
+        assertThat(Schema.Tables.DOCUMENTS).isEqualTo("documents")
+        assertThat(Schema.Tables.DOCUMENT_THUMBNAILS).isEqualTo("document_thumbnails")
+        // schema_meta + passes + 3 pass-side indexes + pass_images + pass_locales
+        // + documents + 1 document index + document_thumbnails = 10 statements.
+        assertThat(Schema.DDL).hasSize(10)
+        assertThat(Schema.MIGRATIONS.keys).containsExactly(1)
     }
 
     @Test
@@ -220,12 +223,27 @@ class PublicApiSurfaceTest {
             ) {
                 recorded += "failure:${kind.name}:${unknownKind?.name ?: "n/a"}"
             }
+
+            override fun onDocumentImported(event: DocumentImportedEvent) {
+                recorded += "doc-imported:${event.byteCount}:${event.pageCount}"
+            }
+
+            override fun onDocumentRejected(kind: DocumentStorageRejectedKind) {
+                recorded += "doc-rejected:${kind.name}"
+            }
+
+            override fun onDocumentDeleted(event: DocumentDeletedEvent) {
+                recorded += "doc-deleted:${event.byteCount}"
+            }
         }
         guard.onKeyProviderInitialized(KeyBacking.StrongBox)
         guard.onPassUpserted(PassType.BoardingPass, SignatureStatusKind.AppleVerified, false)
         guard.onPassDeleted(PassType.EventTicket, SignatureStatusKind.SelfSigned)
         guard.onMigrationRowDropped(MigrationFailureKind.JsonShapeMismatch)
         guard.onStorageFailure(StorageFailureKind.Unknown, UnknownStorageFailureKind.DiskFull)
+        guard.onDocumentImported(DocumentImportedEvent(byteCount = 1024L, pageCount = 3))
+        guard.onDocumentRejected(DocumentStorageRejectedKind.OversizedAtStorage)
+        guard.onDocumentDeleted(DocumentDeletedEvent(byteCount = 2048L))
 
         assertThat(recorded).containsExactly(
             "init:StrongBox",
@@ -233,6 +251,25 @@ class PublicApiSurfaceTest {
             "delete:EventTicket:SelfSigned",
             "drop:JsonShapeMismatch",
             "failure:Unknown:DiskFull",
+            "doc-imported:1024:3",
+            "doc-rejected:OversizedAtStorage",
+            "doc-deleted:2048",
         ).inOrder()
+    }
+
+    @Test
+    fun documentStorageRejectedKindCoversTheTwoStorageSideArms() {
+        assertThat(DocumentStorageRejectedKind.entries.map { it.name }).containsExactly(
+            "OversizedAtStorage",
+            "TooManyPagesAtStorage",
+        ).inOrder()
+    }
+
+    @Test
+    fun documentBoundsMirrorAdr0005D7Caps() {
+        // The `passes-pdf-core` renderer-service enforces these. Storage carries them
+        // again so a future caller bug cannot land an oversized row.
+        assertThat(DocumentBounds.MAX_BYTES).isEqualTo(25L * 1024 * 1024)
+        assertThat(DocumentBounds.MAX_PAGES).isEqualTo(10)
     }
 }

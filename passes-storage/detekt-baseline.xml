@@ -2,6 +2,7 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
+    <ID>ComplexInterface:PassRepository.kt$PassRepository</ID>
     <ID>CyclomaticComplexMethod:SqlCipherPassStore.kt$SqlCipherPassStore$override fun upsert( pass: Pass, signatureStatus: SignatureStatus, nowEpochMs: Long, ): UpsertOutcome</ID>
     <ID>LongMethod:SqlCipherPassStore.kt$SqlCipherPassStore$override fun upsert( pass: Pass, signatureStatus: SignatureStatus, nowEpochMs: Long, ): UpsertOutcome</ID>
     <ID>MatchingDeclarationName:PassJson.kt$PassJsonCodec</ID>

@@ -29,7 +29,7 @@ class SchemaDdlTest {
     }
 
     @Test
-    fun ddlExecutesCleanlyAndCreatesTheFourDocumentedTables() {
+    fun ddlExecutesCleanlyAndCreatesTheSixDocumentedTables() {
         applyDdl().use { conn ->
             val tables = mutableSetOf<String>()
             conn.createStatement().use { stmt ->
@@ -41,12 +41,14 @@ class SchemaDdlTest {
                 Schema.Tables.PASSES,
                 Schema.Tables.PASS_IMAGES,
                 Schema.Tables.PASS_LOCALES,
+                Schema.Tables.DOCUMENTS,
+                Schema.Tables.DOCUMENT_THUMBNAILS,
             )
         }
     }
 
     @Test
-    fun ddlCreatesTheThreeDocumentedIndexes() {
+    fun ddlCreatesTheFourDocumentedIndexes() {
         applyDdl().use { conn ->
             val indexes = mutableSetOf<String>()
             conn.createStatement().use { stmt ->
@@ -59,6 +61,7 @@ class SchemaDdlTest {
                 "idx_passes_type",
                 "idx_passes_expiration",
                 "idx_passes_identity",
+                "idx_documents_imported_at",
             )
         }
     }
