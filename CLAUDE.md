@@ -10,12 +10,14 @@ The trust claim: every security-and-privacy-critical behavior Walt makes about p
 
 ## Architecture Rules
 
-- Three Gradle modules:
+- Five Gradle modules:
   - `passes-core` — pure Kotlin/JVM. Parser, model, signature verifier, `.strings` parser, `TelemetryGuard` interface. NO Android framework dependencies.
+  - `passes-pdf-core` — pure Kotlin/JVM. PdfDocument model, header sniffer, import config, `DocumentTelemetryGuard` interface. NO Android framework dependencies.
+  - `passes-pdf` — Android-only. Isolated-process PDF renderer service (ADR 0005 D3). Wraps Android's `PdfRenderer` behind a hand-rolled binder with no extraction surface.
   - `passes-storage` — Android-only. SQLCipher with Keystore-sourced key, Android Auto Backup exclusion, irreversible deletion logic.
   - `passes-ui` — Android + Compose. Pass front/back composables, B3 URL confirmation sheet, expired badge, bounded image rendering. Themable via tokens passed in by the consumer.
-- `passes-core` has NO Android framework dependencies (KMP-friendly).
-- `passes-storage` and `passes-ui` are independent of each other.
+- `passes-core` and `passes-pdf-core` have NO Android framework dependencies (KMP-friendly).
+- `passes-storage`, `passes-pdf`, and `passes-ui` are independent of each other.
 - DECISIVE CONSTRAINT: walt-android consumes this code directly; trust-claim-bearing logic lives ONLY here, never reimplemented in walt-android.
 
 ## Code Style

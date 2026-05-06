@@ -102,7 +102,13 @@ private fun renderToSharedMemory(
     heightPx: Int,
 ): RenderResult =
     PdfRenderer(pdf).use { renderer ->
-        if (page < 0 || page >= renderer.pageCount) {
+        // Defense-in-depth: doProbe also enforces MAX_PAGES, but the binder does not
+        // require probe before render and there is no per-document state. Re-checking
+        // here means a 5 000-page PDF cannot be rasterised even if the consumer skips
+        // probe or asks for a page beyond MAX_PAGES.
+        val pageCountOk = renderer.pageCount in 0..PdfRendererService.MAX_PAGES
+        val pageOk = page in 0 until renderer.pageCount && page < PdfRendererService.MAX_PAGES
+        if (!pageCountOk || !pageOk) {
             RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
         } else {
             renderer.openPage(page).use { p -> rasterise(p, widthPx, heightPx) }
