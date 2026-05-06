@@ -55,6 +55,13 @@ public enum class Provenance {
  *
  * Reviewers should treat any future addition of a string-bearing failure arm (e.g. an
  * "ErrorMessage" data class) as a security-policy change.
+ *
+ * WIRE-FORMAT COUPLING: the binder proxy in `passes-pdf` (`RejectedKindWire`) maps each
+ * arm to a stable Int code. Adding, removing, or renaming an arm requires a matching
+ * update to that mapping table; `RejectedKindWireSurfaceTest` fails closed if the two
+ * drift apart. Reordering arms here is safe because the wire mapping is by name, not by
+ * `ordinal` — but the surface test still pins the mapping shape so a reordering does
+ * not lull a contributor into thinking the wire is order-coupled.
  */
 public enum class DocumentRejectedKind {
     OversizedAtImport,
