@@ -1,7 +1,7 @@
 [versions]
 agp = "9.0.1"
 kotlin = "2.2.21"
-kotlinxSerialization = "1.7.3"
+kotlinxSerialization = "1.11.0"
 kotlinxCoroutines = "1.10.2"
 junit = "4.13.2"
 truth = "1.4.5"
