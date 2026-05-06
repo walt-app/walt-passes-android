@@ -4,7 +4,7 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 /**
- * Locks the public API surface of `passes-pdf`. There is no renderer or import implementation
+ * Locks the public API surface of `passes-pdf-core`. There is no renderer or import implementation
  * yet (those land in wpass-5v9 / wpass-pdf.renderer-service); these tests target two things:
  *
  *  1. Drift detection — every sealed arm and enum value referenced by the import contract is

@@ -261,10 +261,10 @@ therefore independent invariants that do not interact on `minSdk`.
 | D3 (F.1) | classpath-scan test: no `java.io.File` / `java.io.FileOutputStream` / `java.io.RandomAccessFile` / `java.nio.file.Files` write APIs inside `passes-pdf`'s renderer-handoff code path. The handoff path is structurally forbidden from touching the filesystem. |
 | Consequences (G.1) | unit test: import entry point on `Build.VERSION.SDK_INT < 34` returns the "Android 14 or newer required" rejection without invoking the renderer service. |
 
-## Addendum 2026-05-06: model name and header version-range wording
+## Addendum 2026-05-06: model name, version-range wording, module split
 
 Editorial reconciliation, not a substantive policy change. PR #34 review
-flagged two drift points between this ADR and the implementation in
+flagged three drift points between this ADR and the implementation in
 `wpass-jsb`. The implementation names are the correct ones; the ADR text
 is amended here.
 
@@ -295,3 +295,38 @@ the system PDFium supports.
 
 Read the D7 row as: "first 8 bytes not `%PDF-X.Y` where `X` is `1` or `2`
 and `Y` is any ASCII digit."
+
+### Module split: `passes-pdf-core` (pure Kotlin) and `passes-pdf` (Android)
+
+The "Module changes" section described "a new `passes-pdf` Android Gradle
+module" hosting the renderer service, the `PdfDocument` model, and
+import-time validation. PR #34 split this single module into two, matching
+the existing `passes-core` / `passes-storage` precedent in the project:
+
+- **`passes-pdf-core`** — pure Kotlin/JVM. Hosts `PdfDocument`,
+  `PdfImportConfig`, `PdfImportResult`, `DocumentRejectedKind`,
+  `Provenance`, `DocumentTelemetryGuard`, and the `isPdfHeader` magic-byte
+  gate. No Android framework dependencies. Audit-readable in isolation.
+- **`passes-pdf`** — Android. Hosts the `android:isolatedProcess`
+  renderer service, the `MemFdAllocator` plus `memfd.cpp` JNI shim, the
+  binder API, and the import-time validation that needs Android types.
+
+The split moves the single-source-of-truth contract types out of an
+Android module so they can be reasoned about, tested, and audited without
+the Android Gradle Plugin in the loop, the same way `passes-core` is.
+
+Read the references in this ADR as follows:
+
+- "`PdfDocument` model" / "`DocumentTelemetryGuard`" / "import-time
+  validation" / "`PublicApiSurfaceTest`" → **`passes-pdf-core`**.
+- "renderer service" / "`MemFdAllocator`" / "`memfd.cpp`" / "binder API"
+  / "`MemFdAllocatorJniSurfaceTest`" / "G.1 runtime API-34 gate" →
+  **`passes-pdf`**.
+
+Tests that scan a module's classpath or symbols (D2's third-party-PDF-lib
+exclusion, D5's no-`verifySignature` symbol, D8's no-`ACTION_SEND`
+construction) apply to **both** modules. The exclusions only hold if
+neither module hosts the forbidden surface.
+
+The Android-side renderer module remains tracked under `wpass-5v9`. Its
+manifest, JNI source, and binder code land there.
