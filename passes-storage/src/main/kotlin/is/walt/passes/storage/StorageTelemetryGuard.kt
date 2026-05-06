@@ -102,6 +102,7 @@ public data class DocumentImportedEvent(
 public enum class DocumentStorageRejectedKind {
     OversizedAtStorage,
     TooManyPagesAtStorage,
+    LabelTooLongAtStorage,
 }
 
 /**
@@ -124,6 +125,7 @@ public enum class StorageFailureKind {
     IntegrityViolation,
     Unsupported,
     Unknown,
+    DocumentRejected,
 }
 
 public enum class MigrationFailureKind {

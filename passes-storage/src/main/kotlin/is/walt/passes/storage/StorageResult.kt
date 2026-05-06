@@ -42,9 +42,22 @@ public sealed interface StorageError {
 
     /**
      * A row failed to deserialize at load time and was dropped (e.g. schema-migration
-     * partial failure for that row). The repository continues to serve other rows.
+     * partial failure for that row). The repository continues to serve other rows. The
+     * [recordId] is a [RecordId], so the wrapper names which table the unknown id
+     * belongs to (passes vs documents) without requiring a free-form String.
      */
-    public data class IntegrityViolation(public val recordId: PassRecordId) : StorageError
+    public data class IntegrityViolation(public val recordId: RecordId) : StorageError
+
+    /**
+     * A document insert was rejected by the storage-side defense-in-depth check
+     * (ADR 0005 D7). Carries the same [DocumentStorageRejectedKind] as the matching
+     * `onDocumentRejected` telemetry event so callers can distinguish a defensive
+     * rejection from a transient infra failure without listening to telemetry. The row
+     * never reaches disk.
+     */
+    public data class DocumentRejected(
+        public val kind: DocumentStorageRejectedKind,
+    ) : StorageError
 
     /**
      * The schema version on disk is newer than this build of `passes-storage` understands.

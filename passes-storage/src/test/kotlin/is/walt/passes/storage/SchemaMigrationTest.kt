@@ -140,6 +140,63 @@ class SchemaMigrationTest {
     }
 
     @Test
+    fun migrationsCoverEveryHopFromV1ToCurrent() {
+        // Compile-time-equivalent guard: bumping Schema.VERSION without adding the
+        // matching migration entry is a developer-side mistake, not a user-data
+        // condition. This assertion catches it at CI time so the runtime branch in
+        // SqlCipherDatabaseFactory.buildMigrationChain (which reports Other) should
+        // never fire in a shipped build.
+        val expected = (1 until Schema.VERSION).toSet()
+        assertThat(Schema.MIGRATIONS.keys).containsExactlyElementsIn(expected)
+    }
+
+    @Test
+    fun freshInstallAndV1ToV2MigrationLandAtTheSameSchema() {
+        // DDL drift guard: Schema.DDL (fresh install) and the v1 -> v2 migration must
+        // produce the same `sqlite_master` rows for tables and indexes. A future
+        // refactor that touches one path and misses the other would silently produce
+        // divergent shapes between fresh installs and migrated installs; this test
+        // surfaces the divergence at JVM-test time.
+        val freshShape = openMemoryDb().use { conn ->
+            conn.createStatement().use { stmt ->
+                for (sql in Schema.DDL) stmt.execute(sql)
+            }
+            schemaShape(conn)
+        }
+        val migratedShape = openMemoryDb().use { conn ->
+            applyV1Ddl(conn)
+            for (sql in Schema.MIGRATIONS.getValue(1)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+            schemaShape(conn)
+        }
+        assertThat(migratedShape).isEqualTo(freshShape)
+    }
+
+    private fun schemaShape(conn: Connection): Set<String> {
+        val out = mutableSetOf<String>()
+        conn.createStatement().use { stmt ->
+            // `sql` is the DDL the engine reconstructed; comparing it catches column,
+            // ordering, and constraint drift across both creation paths. Auto-named
+            // sqlite_* internal indexes are excluded since their names are nondeterministic.
+            val rs = stmt.executeQuery(
+                "SELECT type, name, tbl_name, sql FROM sqlite_master " +
+                    "WHERE name NOT LIKE 'sqlite_%' " +
+                    "ORDER BY type, name",
+            )
+            while (rs.next()) {
+                out += listOf(
+                    rs.getString(1),
+                    rs.getString(2),
+                    rs.getString(3),
+                    rs.getString(4) ?: "",
+                ).joinToString("|")
+            }
+        }
+        return out
+    }
+
+    @Test
     fun preexistingV1DataSurvivesMigration() {
         openMemoryDb().use { conn ->
             applyV1Ddl(conn)

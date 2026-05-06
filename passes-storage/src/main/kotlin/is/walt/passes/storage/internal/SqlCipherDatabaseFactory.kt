@@ -67,9 +67,14 @@ internal object SqlCipherDatabaseFactory {
             Schema.DDL
         } else {
             buildMigrationChain(onDiskVersion) ?: run {
+                // The DB is fine; the build is broken (someone bumped Schema.VERSION
+                // without adding a migration entry). Reporting this as DatabaseCorrupt
+                // would mislead telemetry into pointing at user data. The
+                // `migrationsCoverEveryHopFromV1ToCurrent` JVM test catches the mistake
+                // at CI time so this runtime path should never fire in a shipped build.
                 db.close()
                 return StorageResult.Failure(
-                    StorageError.Unknown(kind = UnknownStorageFailureKind.DatabaseCorrupt),
+                    StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
                 )
             }
         }

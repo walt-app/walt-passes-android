@@ -57,7 +57,6 @@ class DocumentRepositoryTest {
         val result = repo.insertDocument(
             label = "boarding-pass.pdf",
             pdfBytes = pdf,
-            byteCount = pdf.size.toLong(),
             pageCount = 2,
             thumbnailBytes = thumb,
         )
@@ -83,7 +82,6 @@ class DocumentRepositoryTest {
         val insert = repo.insertDocument(
             label = "x.pdf",
             pdfBytes = ByteArray(2048),
-            byteCount = 2048L,
             pageCount = 1,
             thumbnailBytes = ByteArray(32),
         )
@@ -95,7 +93,7 @@ class DocumentRepositoryTest {
 
         assertThat(repo.observeDocuments().first()).isEmpty()
         // CASCADE: the thumbnail row was dropped alongside the document row.
-        assertThat(docs.thumbnailExists(id)).isFalse()
+        assertThat(docs.exists(id)).isFalse()
         assertThat(telemetry.events).containsExactly(
             "init:Tee",
             "doc-imported:2048:1",
@@ -109,10 +107,12 @@ class DocumentRepositoryTest {
         val telemetry = RecordingGuard()
         val repo = repo(docs, telemetry)
 
-        val result = repo.deleteDocument(404L)
+        val result = repo.deleteDocument(DocumentRecordId(404L))
 
         check(result is StorageResult.Failure)
-        check(result.error is StorageError.IntegrityViolation)
+        val violation = result.error as StorageError.IntegrityViolation
+        check(violation.recordId is DocumentRecordId)
+        assertThat(violation.recordId.value).isEqualTo(404L)
         assertThat(telemetry.events).containsExactly(
             "init:Tee",
             "failure:IntegrityViolation:n/a",
@@ -125,30 +125,34 @@ class DocumentRepositoryTest {
         val telemetry = RecordingGuard()
         val repo = repo(docs, telemetry)
 
-        // 25 MB exact passes.
+        // Exact byte cap passes; +1 byte rejected. byteCount is derived from
+        // pdfBytes.size, so the test must allocate accordingly.
         val ok = repo.insertDocument(
             label = "a",
-            pdfBytes = ByteArray(0),
-            byteCount = DocumentBounds.MAX_BYTES,
+            pdfBytes = ByteArray(DocumentBounds.MAX_BYTES.toInt()),
             pageCount = 1,
             thumbnailBytes = ByteArray(0),
         )
         check(ok is StorageResult.Success)
 
-        // 25 MB + 1 byte rejected. The PDF bytes themselves are not allocated; only the
-        // byteCount header check matters here.
         val rejected = repo.insertDocument(
             label = "b",
-            pdfBytes = ByteArray(0),
-            byteCount = DocumentBounds.MAX_BYTES + 1,
+            pdfBytes = ByteArray(DocumentBounds.MAX_BYTES.toInt() + 1),
             pageCount = 1,
             thumbnailBytes = ByteArray(0),
         )
         check(rejected is StorageResult.Failure)
-        check(rejected.error is StorageError.Unknown)
+        val rejectedError = rejected.error as StorageError.DocumentRejected
+        assertThat(rejectedError.kind).isEqualTo(DocumentStorageRejectedKind.OversizedAtStorage)
 
-        assertThat(telemetry.events).contains("doc-rejected:OversizedAtStorage")
-        // Only the accepted row was persisted.
+        // The rejection emits exactly `doc-rejected`; it does NOT also emit
+        // `failure:DocumentRejected:...`. A defensive rejection is not a generic
+        // storage failure.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "doc-imported:${DocumentBounds.MAX_BYTES}:1",
+            "doc-rejected:OversizedAtStorage",
+        ).inOrder()
         assertThat(repo.observeDocuments().first()).hasSize(1)
     }
 
@@ -158,28 +162,57 @@ class DocumentRepositoryTest {
         val telemetry = RecordingGuard()
         val repo = repo(docs, telemetry)
 
-        // 10 pages exact passes.
         val ok = repo.insertDocument(
             label = "a",
-            pdfBytes = ByteArray(0),
-            byteCount = 1L,
+            pdfBytes = ByteArray(1),
             pageCount = DocumentBounds.MAX_PAGES,
             thumbnailBytes = ByteArray(0),
         )
         check(ok is StorageResult.Success)
 
-        // 11 pages rejected.
         val rejected = repo.insertDocument(
             label = "b",
-            pdfBytes = ByteArray(0),
-            byteCount = 1L,
+            pdfBytes = ByteArray(1),
             pageCount = DocumentBounds.MAX_PAGES + 1,
             thumbnailBytes = ByteArray(0),
         )
         check(rejected is StorageResult.Failure)
-        check(rejected.error is StorageError.Unknown)
+        val rejectedError = rejected.error as StorageError.DocumentRejected
+        assertThat(rejectedError.kind).isEqualTo(DocumentStorageRejectedKind.TooManyPagesAtStorage)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "doc-imported:1:${DocumentBounds.MAX_PAGES}",
+            "doc-rejected:TooManyPagesAtStorage",
+        ).inOrder()
+        assertThat(repo.observeDocuments().first()).hasSize(1)
+    }
 
-        assertThat(telemetry.events).contains("doc-rejected:TooManyPagesAtStorage")
+    @Test
+    fun maxLabelCharsExactBoundaryIsAcceptedAndPlusOneIsRejected() = runTest {
+        val docs = FakeDocumentStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(docs, telemetry)
+
+        val okLabel = "a".repeat(DocumentBounds.MAX_LABEL_CHARS)
+        val ok = repo.insertDocument(
+            label = okLabel,
+            pdfBytes = ByteArray(1),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(ok is StorageResult.Success)
+
+        val tooLong = "a".repeat(DocumentBounds.MAX_LABEL_CHARS + 1)
+        val rejected = repo.insertDocument(
+            label = tooLong,
+            pdfBytes = ByteArray(1),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(rejected is StorageResult.Failure)
+        val rejectedError = rejected.error as StorageError.DocumentRejected
+        assertThat(rejectedError.kind).isEqualTo(DocumentStorageRejectedKind.LabelTooLongAtStorage)
+        assertThat(telemetry.events).contains("doc-rejected:LabelTooLongAtStorage")
         assertThat(repo.observeDocuments().first()).hasSize(1)
     }
 
@@ -194,7 +227,6 @@ class DocumentRepositoryTest {
         val insert = repo.insertDocument(
             label = "foo.pdf",
             pdfBytes = pdf,
-            byteCount = pdf.size.toLong(),
             pageCount = 1,
             thumbnailBytes = thumb,
         )
@@ -213,9 +245,19 @@ class DocumentRepositoryTest {
     @Test
     fun loadOfUnknownIdReturnsIntegrityViolation() = runTest {
         val repo = repo(FakeDocumentStore(), RecordingGuard())
-        val result = repo.loadDocumentBytes(999L)
+        val result = repo.loadDocumentBytes(DocumentRecordId(999L))
         check(result is StorageResult.Failure)
-        check(result.error is StorageError.IntegrityViolation)
+        val violation = result.error as StorageError.IntegrityViolation
+        check(violation.recordId is DocumentRecordId)
+    }
+
+    @Test
+    fun closeReleasesBothPassAndDocumentStores() = runTest {
+        val docs = FakeDocumentStore()
+        val repo = repo(docs, RecordingGuard())
+        repo.close()
+        repo.close() // idempotent
+        assertThat(docs.closeCount).isEqualTo(1)
     }
 
     private fun repo(docs: FakeDocumentStore, telemetry: StorageTelemetryGuard): SqlCipherPassRepository =
@@ -243,37 +285,43 @@ class DocumentRepositoryTest {
 
         private val entries: LinkedHashMap<Long, Entry> = LinkedHashMap()
         private var nextId: Long = 0L
+        var closeCount: Int = 0
+            private set
 
-        fun thumbnailExists(id: Long): Boolean = entries.containsKey(id)
+        fun exists(id: DocumentRecordId): Boolean = entries.containsKey(id.value)
 
         override fun listRows(): List<DocumentRow> =
             entries.values.map { it.row }
                 .sortedWith(
                     compareByDescending<DocumentRow> { it.importedAtEpochMs }
-                        .thenByDescending { it.id },
+                        .thenByDescending { it.id.value },
                 )
 
         override fun insert(request: DocumentInsertRequest): DocumentInsertOutcome {
-            val id = ++nextId
+            val id = DocumentRecordId(++nextId)
             val row = DocumentRow(
                 id = id,
                 displayLabel = request.displayLabel,
-                byteCount = request.byteCount,
+                byteCount = request.pdfBytes.size.toLong(),
                 pageCount = request.pageCount,
                 importedAtEpochMs = request.nowEpochMs,
             )
-            entries[id] = Entry(row, request.pdfBytes.copyOf(), request.thumbnailBytes.copyOf())
+            entries[id.value] = Entry(row, request.pdfBytes.copyOf(), request.thumbnailBytes.copyOf())
             return DocumentInsertOutcome(id = id, row = row)
         }
 
-        override fun loadBytes(id: Long): ByteArray? = entries[id]?.pdfBytes?.copyOf()
+        override fun loadBytes(id: DocumentRecordId): ByteArray? =
+            entries[id.value]?.pdfBytes?.copyOf()
 
-        override fun loadThumbnail(id: Long): ByteArray? = entries[id]?.thumbnailBytes?.copyOf()
+        override fun loadThumbnail(id: DocumentRecordId): ByteArray? =
+            entries[id.value]?.thumbnailBytes?.copyOf()
 
-        override fun delete(id: Long): DocumentDeleteOutcome? {
-            val entry = entries.remove(id) ?: return null
+        override fun delete(id: DocumentRecordId): DocumentDeleteOutcome? {
+            val entry = entries.remove(id.value) ?: return null
             return DocumentDeleteOutcome(byteCount = entry.row.byteCount)
         }
+
+        override fun close() { closeCount++ }
     }
 
     /**

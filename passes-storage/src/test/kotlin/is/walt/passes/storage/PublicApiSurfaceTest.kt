@@ -33,26 +33,34 @@ class PublicApiSurfaceTest {
             StorageError.KeyUnwrapFailed,
             StorageError.DatabaseLocked,
             StorageError.IntegrityViolation(PassRecordId(1L)),
+            StorageError.IntegrityViolation(DocumentRecordId(2L)),
             StorageError.Unsupported(onDiskSchemaVersion = 99),
             StorageError.Unknown(UnknownStorageFailureKind.DiskFull),
+            StorageError.DocumentRejected(DocumentStorageRejectedKind.OversizedAtStorage),
         )
         val labels = errors.map { error ->
             when (error) {
                 StorageError.KeyUnavailable -> "key-unavailable"
                 StorageError.KeyUnwrapFailed -> "key-unwrap-failed"
                 StorageError.DatabaseLocked -> "db-locked"
-                is StorageError.IntegrityViolation -> "integrity:${error.recordId.value}"
+                is StorageError.IntegrityViolation -> when (val id = error.recordId) {
+                    is PassRecordId -> "integrity-pass:${id.value}"
+                    is DocumentRecordId -> "integrity-doc:${id.value}"
+                }
                 is StorageError.Unsupported -> "unsupported:${error.onDiskSchemaVersion}"
                 is StorageError.Unknown -> "unknown:${error.kind.name}"
+                is StorageError.DocumentRejected -> "doc-rejected:${error.kind.name}"
             }
         }
         assertThat(labels).containsExactly(
             "key-unavailable",
             "key-unwrap-failed",
             "db-locked",
-            "integrity:1",
+            "integrity-pass:1",
+            "integrity-doc:2",
             "unsupported:99",
             "unknown:DiskFull",
+            "doc-rejected:OversizedAtStorage",
         ).inOrder()
     }
 
@@ -115,6 +123,7 @@ class PublicApiSurfaceTest {
             StorageError.IntegrityViolation(PassRecordId(1L)),
             StorageError.Unsupported(0),
             StorageError.Unknown(UnknownStorageFailureKind.Other),
+            StorageError.DocumentRejected(DocumentStorageRejectedKind.OversizedAtStorage),
         )
         val kinds = errors.map { error ->
             when (error) {
@@ -124,9 +133,25 @@ class PublicApiSurfaceTest {
                 is StorageError.IntegrityViolation -> StorageFailureKind.IntegrityViolation
                 is StorageError.Unsupported -> StorageFailureKind.Unsupported
                 is StorageError.Unknown -> StorageFailureKind.Unknown
+                is StorageError.DocumentRejected -> StorageFailureKind.DocumentRejected
             }
         }
         assertThat(kinds.toSet()).containsExactlyElementsIn(StorageFailureKind.entries)
+    }
+
+    @Test
+    fun recordIdSealedArmsAreExhaustive() {
+        // Pinning the sealed surface: adding a third RecordId variant requires updating
+        // every consumer that pattern-matches on it (StorageError.IntegrityViolation
+        // routing in tests, telemetry projections, etc.).
+        val ids: List<RecordId> = listOf(PassRecordId(1L), DocumentRecordId(2L))
+        val labels = ids.map { id ->
+            when (id) {
+                is PassRecordId -> "pass:${id.value}"
+                is DocumentRecordId -> "doc:${id.value}"
+            }
+        }
+        assertThat(labels).containsExactly("pass:1", "doc:2").inOrder()
     }
 
     @Test
@@ -258,18 +283,23 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun documentStorageRejectedKindCoversTheTwoStorageSideArms() {
+    fun documentStorageRejectedKindCoversTheThreeStorageSideArms() {
         assertThat(DocumentStorageRejectedKind.entries.map { it.name }).containsExactly(
             "OversizedAtStorage",
             "TooManyPagesAtStorage",
+            "LabelTooLongAtStorage",
         ).inOrder()
     }
 
     @Test
-    fun documentBoundsMirrorAdr0005D7Caps() {
-        // The `passes-pdf-core` renderer-service enforces these. Storage carries them
-        // again so a future caller bug cannot land an oversized row.
+    fun documentBoundsMirrorAdr0005D7CapsAndCarryALabelLengthCap() {
+        // The `passes-pdf-core` renderer-service enforces MAX_BYTES and MAX_PAGES.
+        // Storage carries them again so a future caller bug cannot land an oversized
+        // row. MAX_LABEL_CHARS is enforced only at this layer; nothing upstream bounds
+        // the consumer-supplied display label, so a multi-MB string would inflate the
+        // indexed list-view query without this cap.
         assertThat(DocumentBounds.MAX_BYTES).isEqualTo(25L * 1024 * 1024)
         assertThat(DocumentBounds.MAX_PAGES).isEqualTo(10)
+        assertThat(DocumentBounds.MAX_LABEL_CHARS).isEqualTo(256)
     }
 }

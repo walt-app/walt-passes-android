@@ -299,12 +299,15 @@ class PassRepositoryContractTest {
      * contract tests use their own richer fake (see DocumentRepositoryTest).
      */
     private object NoOpDocumentStore : DocumentStore {
+        var closeCount: Int = 0
+            private set
         override fun listRows(): List<DocumentRow> = emptyList()
         override fun insert(request: DocumentInsertRequest): DocumentInsertOutcome =
             error("unused in pass-side tests")
-        override fun loadBytes(id: Long): ByteArray? = null
-        override fun loadThumbnail(id: Long): ByteArray? = null
-        override fun delete(id: Long): DocumentDeleteOutcome? = null
+        override fun loadBytes(id: DocumentRecordId): ByteArray? = null
+        override fun loadThumbnail(id: DocumentRecordId): ByteArray? = null
+        override fun delete(id: DocumentRecordId): DocumentDeleteOutcome? = null
+        override fun close() { closeCount++ }
     }
 
     private companion object {

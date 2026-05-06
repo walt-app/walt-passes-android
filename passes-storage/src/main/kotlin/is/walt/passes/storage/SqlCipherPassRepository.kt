@@ -96,21 +96,15 @@ public class SqlCipherPassRepository internal constructor(
     override suspend fun insertDocument(
         label: String,
         pdfBytes: ByteArray,
-        byteCount: Long,
         pageCount: Int,
         thumbnailBytes: ByteArray,
-    ): StorageResult<Long> = runIo {
-        if (byteCount > DocumentBounds.MAX_BYTES) {
-            telemetryGuard.onDocumentRejected(DocumentStorageRejectedKind.OversizedAtStorage)
-            return@runIo failure(
-                StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
-            )
-        }
-        if (pageCount > DocumentBounds.MAX_PAGES) {
-            telemetryGuard.onDocumentRejected(DocumentStorageRejectedKind.TooManyPagesAtStorage)
-            return@runIo failure(
-                StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
-            )
+    ): StorageResult<DocumentRecordId> = runIo {
+        // byteCount is derived, not caller-asserted, so a stale size header cannot
+        // bypass the cap. The cost is a single property read.
+        val byteCount = pdfBytes.size.toLong()
+
+        rejectionKindOrNull(label, byteCount, pageCount)?.let { kind ->
+            return@runIo rejectDocument(kind)
         }
 
         val outcome = writeMutex.withLock {
@@ -118,13 +112,15 @@ public class SqlCipherPassRepository internal constructor(
                 DocumentInsertRequest(
                     displayLabel = label,
                     pdfBytes = pdfBytes,
-                    byteCount = byteCount,
                     pageCount = pageCount,
                     thumbnailBytes = thumbnailBytes,
                     nowEpochMs = clock(),
                 ),
             )
-            _documents.value = documentStore.listRows()
+            // Documents are insert-only and ordered by `imported_at_epoch_ms DESC, id DESC`;
+            // because [clock] is monotonic and the new id is the largest, prepending the
+            // freshly-returned row matches the SQL ordering without re-issuing listRows().
+            _documents.value = listOf(o.row) + _documents.value
             o
         }
         telemetryGuard.onDocumentImported(
@@ -135,24 +131,24 @@ public class SqlCipherPassRepository internal constructor(
 
     override fun observeDocuments(): Flow<List<DocumentRow>> = _documents.asStateFlow()
 
-    override suspend fun loadDocumentBytes(id: Long): StorageResult<ByteArray> = runIo {
+    override suspend fun loadDocumentBytes(id: DocumentRecordId): StorageResult<ByteArray> = runIo {
         val bytes = documentStore.loadBytes(id)
-            ?: return@runIo failure(StorageError.IntegrityViolation(PassRecordId(id)))
+            ?: return@runIo failure(StorageError.IntegrityViolation(id))
         StorageResult.Success(bytes)
     }
 
-    override suspend fun loadDocumentThumbnail(id: Long): StorageResult<ByteArray> = runIo {
+    override suspend fun loadDocumentThumbnail(id: DocumentRecordId): StorageResult<ByteArray> = runIo {
         val bytes = documentStore.loadThumbnail(id)
-            ?: return@runIo failure(StorageError.IntegrityViolation(PassRecordId(id)))
+            ?: return@runIo failure(StorageError.IntegrityViolation(id))
         StorageResult.Success(bytes)
     }
 
-    override suspend fun deleteDocument(id: Long): StorageResult<Unit> = runIo {
+    override suspend fun deleteDocument(id: DocumentRecordId): StorageResult<Unit> = runIo {
         val deleted = writeMutex.withLock {
             val outcome = documentStore.delete(id) ?: return@withLock null
             _documents.value = _documents.value.filterNot { it.id == id }
             outcome
-        } ?: return@runIo failure(StorageError.IntegrityViolation(PassRecordId(id)))
+        } ?: return@runIo failure(StorageError.IntegrityViolation(id))
 
         telemetryGuard.onDocumentDeleted(DocumentDeletedEvent(byteCount = deleted.byteCount))
         StorageResult.Success(Unit)
@@ -160,8 +156,39 @@ public class SqlCipherPassRepository internal constructor(
 
     override fun close() {
         if (closed.compareAndSet(false, true)) {
+            documentStore.close()
             store.close()
         }
+    }
+
+    /**
+     * Returns the storage-side rejection kind for an insert, or null if all caps pass.
+     * Order is byte count, then label length, then page count: the cheaper checks first
+     * so a single oversized blob doesn't cost a string scan.
+     */
+    private fun rejectionKindOrNull(
+        label: String,
+        byteCount: Long,
+        pageCount: Int,
+    ): DocumentStorageRejectedKind? = when {
+        byteCount > DocumentBounds.MAX_BYTES -> DocumentStorageRejectedKind.OversizedAtStorage
+        pageCount > DocumentBounds.MAX_PAGES -> DocumentStorageRejectedKind.TooManyPagesAtStorage
+        label.length > DocumentBounds.MAX_LABEL_CHARS ->
+            DocumentStorageRejectedKind.LabelTooLongAtStorage
+        else -> null
+    }
+
+    /**
+     * Single emission point for a defensive document rejection. Emits
+     * `onDocumentRejected(kind)` and returns the typed [StorageError.DocumentRejected]
+     * arm without going through [failure]: a rejection is not a generic storage failure,
+     * so [StorageTelemetryGuard.onStorageFailure] should NOT also fire. Routing through
+     * [failure] would double-emit and obscure the distinction between "we said no" and
+     * "the database errored."
+     */
+    private fun <T> rejectDocument(kind: DocumentStorageRejectedKind): StorageResult<T> {
+        telemetryGuard.onDocumentRejected(kind)
+        return StorageResult.Failure(StorageError.DocumentRejected(kind))
     }
 
     /**

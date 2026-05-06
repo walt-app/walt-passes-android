@@ -34,6 +34,33 @@ public object Schema {
     }
 
     /**
+     * Statements that introduce the v2 document tables. Referenced from both [DDL] (for
+     * fresh installs) and [MIGRATIONS]`[1]` (for v1 -> v2 upgrades) so the two paths can
+     * never drift. A `SchemaParityTest` asserts that a fresh-install DB and a
+     * v1-then-migrated DB land at the same `sqlite_master` shape.
+     */
+    private val V2_DOCUMENT_TABLES: List<String> = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS documents (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            display_label       TEXT    NOT NULL,
+            pdf_bytes           BLOB    NOT NULL,
+            byte_count          INTEGER NOT NULL,
+            page_count          INTEGER NOT NULL,
+            imported_at_epoch_ms INTEGER NOT NULL
+        )
+        """.trimIndent(),
+        "CREATE INDEX IF NOT EXISTS idx_documents_imported_at ON documents(imported_at_epoch_ms)",
+        """
+        CREATE TABLE IF NOT EXISTS document_thumbnails (
+            document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            bytes       BLOB    NOT NULL,
+            PRIMARY KEY (document_id)
+        )
+        """.trimIndent(),
+    )
+
+    /**
      * The DDL block that brings a fresh database to [VERSION]. Statements are listed in
      * dependency order (parent tables before child tables); they are executed in a single
      * transaction by the implementation.
@@ -82,25 +109,7 @@ public object Schema {
             PRIMARY KEY (pass_id, locale_tag)
         )
         """.trimIndent(),
-        """
-        CREATE TABLE IF NOT EXISTS documents (
-            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-            display_label       TEXT    NOT NULL,
-            pdf_bytes           BLOB    NOT NULL,
-            byte_count          INTEGER NOT NULL,
-            page_count          INTEGER NOT NULL,
-            imported_at_epoch_ms INTEGER NOT NULL
-        )
-        """.trimIndent(),
-        "CREATE INDEX IF NOT EXISTS idx_documents_imported_at ON documents(imported_at_epoch_ms)",
-        """
-        CREATE TABLE IF NOT EXISTS document_thumbnails (
-            document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-            bytes       BLOB    NOT NULL,
-            PRIMARY KEY (document_id)
-        )
-        """.trimIndent(),
-    )
+    ) + V2_DOCUMENT_TABLES
 
     /**
      * Schema migrations, keyed by `fromVersion`. Forward-only per ADR 0002. Each entry's
@@ -113,25 +122,6 @@ public object Schema {
      * Backup change is needed: the file-level exclusion already covers them.
      */
     public val MIGRATIONS: Map<Int, List<String>> = mapOf(
-        1 to listOf(
-            """
-            CREATE TABLE IF NOT EXISTS documents (
-                id                  INTEGER PRIMARY KEY AUTOINCREMENT,
-                display_label       TEXT    NOT NULL,
-                pdf_bytes           BLOB    NOT NULL,
-                byte_count          INTEGER NOT NULL,
-                page_count          INTEGER NOT NULL,
-                imported_at_epoch_ms INTEGER NOT NULL
-            )
-            """.trimIndent(),
-            "CREATE INDEX IF NOT EXISTS idx_documents_imported_at ON documents(imported_at_epoch_ms)",
-            """
-            CREATE TABLE IF NOT EXISTS document_thumbnails (
-                document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
-                bytes       BLOB    NOT NULL,
-                PRIMARY KEY (document_id)
-            )
-            """.trimIndent(),
-        ),
+        1 to V2_DOCUMENT_TABLES,
     )
 }
