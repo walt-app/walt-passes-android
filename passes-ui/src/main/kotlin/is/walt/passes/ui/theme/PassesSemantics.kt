@@ -34,6 +34,7 @@ public data class PassesSemantics(
     public val expiredBadge: ExpiredBadgeStyle,
     public val securitySheet: SecuritySheetStyle,
     public val categoryAccent: CategoryAccentColors,
+    public val documents: DocumentSemantics,
 )
 
 /**

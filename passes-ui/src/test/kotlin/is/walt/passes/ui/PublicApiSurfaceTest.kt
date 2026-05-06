@@ -7,12 +7,14 @@ import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
+import `is`.walt.passes.ui.theme.DocumentSemantics
 import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
 import `is`.walt.passes.ui.theme.PassesSemantics
 import `is`.walt.passes.ui.theme.SecuritySheetStyle
 import `is`.walt.passes.ui.theme.SignatureBadgeColors
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
+import java.io.File
 
 /**
  * Locks the public API surface of `passes-ui`. Mirrors `passes-core` and
@@ -216,7 +218,7 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun passesSemanticsDataClassExposesAllFourSlotFamilies() {
+    fun passesSemanticsDataClassExposesAllFiveSlotFamilies() {
         val argb = ArgbColor(0xFF000000.toInt())
         val semantics = PassesSemantics(
             signatureBadge = SignatureBadgeColors(
@@ -250,6 +252,16 @@ class PublicApiSurfaceTest {
                 storeCard = argb,
                 generic = argb,
             ),
+            documents = DocumentSemantics(
+                captionBackground = argb,
+                captionForeground = argb,
+                tileBackground = argb,
+                tileForeground = argb,
+                tileLabelForeground = argb,
+                laneBackground = argb,
+                documentBadgeBackground = argb,
+                documentBadgeForeground = argb,
+            ),
         )
         // Reading every nested field forces them to remain in the public-API shape;
         // a rename or removal breaks the test.
@@ -257,6 +269,108 @@ class PublicApiSurfaceTest {
         assertThat(semantics.expiredBadge.scrimAlpha).isEqualTo(96)
         assertThat(semantics.securitySheet.confirmContainer).isEqualTo(argb)
         assertThat(semantics.categoryAccent.boardingPass).isEqualTo(argb)
+        assertThat(semantics.documents.captionBackground).isEqualTo(argb)
+        assertThat(semantics.documents.tileBackground).isEqualTo(argb)
+        assertThat(semantics.documents.documentBadgeBackground).isEqualTo(argb)
+    }
+
+    /**
+     * Bytecode scan that fails closed if any compiled `is.walt.passes.ui.*` class
+     * carries a string constant that would let a contributor wire a Share / Export
+     * action or a PDF-MIME callsite. ADR 0005 D8 (no share-out) and D4 (no PDF
+     * extraction surface) are the policies; this test is the structural lock.
+     *
+     * The needles are scanned as raw UTF-8 byte sequences inside the .class files,
+     * which surfaces both Kotlin string literals and Java reflection fragments. A
+     * legitimate use (none today) would have to deliberately update the allow-list
+     * in the test, making the security-policy edit auditable.
+     */
+    @Test
+    fun passesUiCompiledClassesContainNoForbiddenStrings() {
+        val classFiles = classFilesUnder("is/walt/passes/ui")
+        assertThat(classFiles).isNotEmpty()
+
+        val forbidden = listOf(
+            "android.intent.action.SEND" to "Intent.ACTION_SEND",
+            "android.intent.action.SEND_MULTIPLE" to "Intent.ACTION_SEND_MULTIPLE",
+            "application/pdf" to "PDF MIME literal",
+        )
+        for (file in classFiles) {
+            // The test class itself embeds the needle byte sequences in order to
+            // search for them. Skip its own .class files (and any inner-class
+            // companions Kotlin emits beside it) to avoid a self-trip.
+            if (file.name.startsWith("PublicApiSurfaceTest")) continue
+            val bytes = file.readBytes()
+            for ((needle, label) in forbidden) {
+                val needleBytes = needle.toByteArray(Charsets.UTF_8)
+                val index = indexOf(bytes, needleBytes)
+                if (index >= 0) {
+                    error(
+                        "Forbidden $label string '$needle' found at offset $index in " +
+                            "${file.absolutePath}. ADR 0005 D8 forbids share-out; ADR " +
+                            "0005 D4 forbids PDF MIME / metadata surfaces in passes-ui. " +
+                            "If this addition is intentional, raise it as a security-" +
+                            "policy change.",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun passesPdfCompiledClassesContainNoForbiddenStrings() {
+        // The same prohibition extends to passes-pdf: the renderer service must not
+        // grow a Share/Export passthrough either. passes-pdf-core is pure Kotlin and
+        // would never contain Intent strings, so we scan the Android-only module
+        // when its classes are reachable on this test's classpath.
+        val classFiles = classFilesUnder("is/walt/passes/pdf")
+        if (classFiles.isEmpty()) return // dependency not on the test's classpath.
+        val forbidden = listOf("android.intent.action.SEND", "application/pdf")
+        for (file in classFiles) {
+            if (file.name.startsWith("PublicApiSurfaceTest")) continue
+            val bytes = file.readBytes()
+            for (needle in forbidden) {
+                val needleBytes = needle.toByteArray(Charsets.UTF_8)
+                if (indexOf(bytes, needleBytes) >= 0) {
+                    error("Forbidden '$needle' found in ${file.absolutePath} (passes-pdf scan).")
+                }
+            }
+        }
+    }
+
+    /**
+     * Walk every classpath root that exposes [packagePath] and collect the .class
+     * files. Using [ClassLoader.getResources] (plural) instead of getResource gets
+     * us both the main-classes and test-classes roots in a Gradle test JVM, so the
+     * scan covers production code rather than just the first match.
+     */
+    private fun classFilesUnder(packagePath: String): List<File> {
+        val urls = javaClass.classLoader!!.getResources(packagePath).toList()
+        return urls.flatMap { url ->
+            val file = runCatching { File(url.toURI()) }.getOrNull() ?: return@flatMap emptyList()
+            if (!file.isDirectory) return@flatMap emptyList()
+            file.walkTopDown().filter { it.isFile && it.name.endsWith(".class") }.toList()
+        }
+    }
+
+    /**
+     * Naive byte-substring search. The needles are short (≤ 30 bytes) and the haystacks
+     * are class files in the low-tens-of-kilobytes; an exact-substring KMP would be
+     * faster but invisible at this scale. Returning the first match's offset gives the
+     * failure message a useful jump-to point.
+     */
+    private fun indexOf(haystack: ByteArray, needle: ByteArray): Int {
+        if (needle.isEmpty() || haystack.size < needle.size) return -1
+        val limit = haystack.size - needle.size
+        var found = -1
+        outer@ for (i in 0..limit) {
+            for (j in needle.indices) {
+                if (haystack[i + j] != needle[j]) continue@outer
+            }
+            found = i
+            break
+        }
+        return found
     }
 
     private fun passFixture(
