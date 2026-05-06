@@ -117,10 +117,11 @@ public class SqlCipherPassRepository internal constructor(
                     nowEpochMs = clock(),
                 ),
             )
-            // Documents are insert-only and ordered by `imported_at_epoch_ms DESC, id DESC`;
-            // because [clock] is monotonic and the new id is the largest, prepending the
-            // freshly-returned row matches the SQL ordering without re-issuing listRows().
-            _documents.value = listOf(o.row) + _documents.value
+            // Re-read the full ordered list rather than prepending in-memory: matches the
+            // pass-side `_passes.value = store.listSummaries()` pattern and avoids an
+            // unwritten "clock must be monotonic" invariant. The cost is one SELECT per
+            // insert, which is negligible for a non-hot path.
+            _documents.value = documentStore.listRows()
             o
         }
         telemetryGuard.onDocumentImported(
@@ -163,8 +164,7 @@ public class SqlCipherPassRepository internal constructor(
 
     /**
      * Returns the storage-side rejection kind for an insert, or null if all caps pass.
-     * Order is byte count, then label length, then page count: the cheaper checks first
-     * so a single oversized blob doesn't cost a string scan.
+     * Checked in order: size, page count, label length.
      */
     private fun rejectionKindOrNull(
         label: String,

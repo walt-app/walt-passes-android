@@ -13,9 +13,10 @@ package `is`.walt.passes.storage
  *
  * Hardcoded here (rather than imported from `passes-pdf-core`) because `passes-storage`
  * does not depend on `passes-pdf-core`: the `PdfDocument <-> documents-table` mapping is
- * a consumer-defined seam. A cross-module test in the consumer is the recommended way to
- * keep [MAX_BYTES] / [MAX_PAGES] in lockstep with the renderer's caps; see
- * `DocumentBounds`'s test in `PublicApiSurfaceTest`.
+ * a consumer-defined seam. `PublicApiSurfaceTest` locks the storage-side values only;
+ * a cross-module parity test asserting `RendererService.MAX_BYTES == DocumentBounds.MAX_BYTES`
+ * is tracked separately (`wpass-kej`) so a future cap change in `passes-pdf-core` cannot
+ * silently diverge from this module.
  */
 public object DocumentBounds {
     public const val MAX_BYTES: Long = 25L * 1024 * 1024
