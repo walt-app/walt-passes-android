@@ -136,3 +136,101 @@ Each decision maps to at least one test:
 - PDF digital signature display ("this PDF is signed by Foo Inc."). The format's signature semantics do not justify the chrome.
 - Sharing PDFs out of Walt. See D8.
 - Inter-document linking, search, or tagging. Documents are sorted by import date only.
+
+## Addendum 2026-05-06: FD transport + Mainline-floor refinement
+
+Tracks: `wpass-0dq` (this addendum) under parent epic `wpass-i2r`. Source:
+empirical findings F and G in `docs/research/pdf-renderer-validation.md`
+(`wpass-6m9`).
+
+The renderer-validation pass surfaced two architectural details that the
+original ADR text under-specified. Both refinements are recorded here as
+amendments to D3 and to the Consequences section, respectively. The rest
+of the ADR stands as written.
+
+### Amendment to D3: FD transport is `memfd_create` with write-seal
+
+D3 mandates that the renderer runs in an isolated process and receives the
+PDF bytes via `ParcelFileDescriptor` over binder. The original text did
+not specify the *backing* of that FD. Empirical analysis showed the
+obvious candidates fail Walt's invariants:
+
+- `MemoryFile` exposes its FD only via reflection on a hidden API; the
+  hidden-api list closes that path on API 28+.
+- `SharedMemory.fileDescriptor` returns an ashmem FD that does not satisfy
+  PDFium's `lseek` + `pread64` access pattern.
+- `File.createTempFile` in `cacheDir` works but writes plaintext PDF
+  bytes to disk for the lifetime of the render call, defeating the
+  at-rest encryption guarantee that SQLCipher provides.
+- `ParcelFileDescriptor.fromSocket` returns a non-seekable FD; PDFium
+  rejects it.
+
+D3 is therefore amended to specify **F.1: `memfd_create`-backed
+`ParcelFileDescriptor`**. The main process allocates a memfd via the NDK
+syscall `syscall(__NR_memfd_create, name, MFD_CLOEXEC | MFD_ALLOW_SEALING)`,
+writes the SQLCipher-decrypted PDF bytes into it, then issues
+`fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK)`
+before adopting the int FD into a `ParcelFileDescriptor` and transferring
+it to the renderer service over binder. The seal is load-bearing: it
+makes the buffer structurally read-only post-handoff, so a hypothetical
+PDFium write-via-mmap primitive in the renderer cannot mutate bytes the
+main process still holds in its own mapping.
+
+The implementation lives in `passes-pdf` as a small `MemFdAllocator`
+Kotlin class plus one JNI source file
+(`passes-pdf/src/main/cpp/memfd.cpp`, ~30 lines). `passes-pdf` thereby
+gains its first JNI surface; the audit story stays contained because the
+surface is a single function with documented arguments and no buffer
+handling. No plaintext PDF reaches the filesystem at any point.
+
+The renderer service binder API stays at exactly two methods (`probe`,
+`render`). The transport choice does not widen the binder surface that D4
+locks down.
+
+A `MemFdAllocatorJniSurfaceTest` pins the constraint that `passes-pdf`
+declares exactly one native method. Adding a second is a security-policy
+change requiring a follow-up addendum.
+
+### Amendment to Consequences: Mainline floor is API 34, not API 13
+
+The original Consequences text stated: "Users running Android versions
+older than 13 do not benefit from PDFium Mainline updates; PDFium fixes
+ship via full-OS updates only on those versions." That threshold is
+wrong.
+
+Source-level analysis of `packages/providers/MediaProvider/pdf/`
+established that the Mainline-backed PDFium binary is reachable on
+**API 34 and above** via the legacy `android.graphics.pdf.PdfRenderer`
+class. On API 35 the platform additionally exposes `PdfRendererPreV`,
+which is also Mainline-backed but raises the call-site requirement to
+API 35; using it does not buy back user reach. On **API 30-33 there is
+no path that exposes a Mainline-backed PDFium**: those releases predate
+the MediaProvider apex, so `libpdfium.so` is the platform-bundled copy
+and updates only via full-OS security patches.
+
+The Consequences section is therefore amended by replacing "older than
+13" with "older than 14 (API 34)" and by adopting **G.1: PDF import is
+feature-gated on `Build.VERSION.SDK_INT >= 34`**.
+
+The Walt app's overall `minSdk` does not change. The PDF feature gate is
+a runtime check at the single import entry point in `passes-pdf`. Users
+on API 26-33 see the existing PKPASS import path and an explicit "Android
+14 or newer required" message when attempting PDF import. This guarantees
+that every PDF Walt renders goes through a Mainline-updated PDFium with
+current CVE coverage, which was the security argument for system-renderer-only
+in the first place. Accepting a stale-PDFium tail on older devices would
+have weakened that argument; G.1 closes the exposure window instead.
+
+`passes-pdf`'s `minSdk` follows the project default. The API 34
+requirement is enforced as a runtime gate, not a manifest floor. F.1's
+`memfd_create` syscall works at the project minSdk (kernel ≥3.17,
+guaranteed by Android API 26+), so F.1 and G.1 are independent
+invariants that do not interact on minSdk.
+
+### Tests pinning the amendments
+
+| Decision | Test                                                                                                  |
+|----------|-------------------------------------------------------------------------------------------------------|
+| D3 (F.1) | `MemFdAllocatorJniSurfaceTest`: `passes-pdf` declares exactly one native method (`memfd_create` shim).|
+| D3 (F.1) | classpath-scan test: no `File.createTempFile` call inside `passes-pdf`'s renderer-handoff code path.  |
+| Consequences (G.1) | unit test: import entry point on `Build.VERSION.SDK_INT < 34` returns the "Android 14 or newer required" rejection without invoking the renderer service. |
