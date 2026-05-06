@@ -1,6 +1,10 @@
 package `is`.walt.passes.pdf.android
 
+import android.os.Binder
+import android.os.IBinder
+import android.os.Parcel
 import android.os.ParcelFileDescriptor
+import android.os.RemoteException
 import android.os.SharedMemory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
@@ -101,6 +105,26 @@ class PdfRendererBinderRoundTripTest {
     }
 
     @Test
+    fun probeFoldsRemoteExceptionIntoRendererFailed() = runTest {
+        // RenderWatchdog.guard kills the renderer process on timeout; the main process
+        // observes the dropped binder as a RemoteException from `transact`. The
+        // watchdog's KDoc explicitly promises consumers see RendererFailed; this test
+        // is where that promise is honoured for the probe path.
+        val client = PdfRendererClient(DeadBinder())
+        val result = client.probe(pipeRead)
+        assertThat(result).isEqualTo(ProbeResult.Rejected(DocumentRejectedKind.RendererFailed))
+    }
+
+    @Test
+    fun renderFoldsRemoteExceptionIntoRendererFailed() = runTest {
+        // Same contract as probe; the render path is the more common watchdog target
+        // (probe is bounded by page-count, render is bounded by render time).
+        val client = PdfRendererClient(DeadBinder())
+        val result = client.render(pipeRead, page = 0, widthPx = WIDTH_PX, heightPx = HEIGHT_PX)
+        assertThat(result).isEqualTo(RenderResult.Rejected(DocumentRejectedKind.RendererFailed))
+    }
+
+    @Test
     fun transactionCodesArePinnedToTheirDocumentedValues() {
         // Pin the absolute codes, not just their distinctness: a contributor flipping
         // the +1 direction (or rebasing CODE_PROBE off a different IBinder constant)
@@ -113,6 +137,20 @@ class PdfRendererBinderRoundTripTest {
 
     private fun clientFor(impl: PdfRendererBinder): PdfRendererClient =
         PdfRendererClient(PdfRendererBinderProxy(impl))
+
+    /**
+     * Stand-in for an [IBinder] whose remote process is gone: every transact throws
+     * [RemoteException]. Same shape the consumer would observe after `RenderWatchdog`
+     * kills the isolated renderer.
+     */
+    private class DeadBinder : Binder() {
+        override fun onTransact(
+            code: Int,
+            data: Parcel,
+            reply: Parcel?,
+            flags: Int,
+        ): Boolean = throw RemoteException("simulated watchdog kill")
+    }
 
     private class StaticImpl(
         private val probeResult: ProbeResult = ProbeResult.Rejected(DocumentRejectedKind.RendererFailed),

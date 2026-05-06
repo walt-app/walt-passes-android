@@ -2,6 +2,7 @@ package `is`.walt.passes.pdf.android
 
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
+import java.lang.reflect.Modifier
 
 /**
  * Locks the public surface of [PdfRendererClient] to the exact [PdfRendererBinder]
@@ -18,16 +19,19 @@ import org.junit.Test
 class PdfRendererClientSurfaceTest {
     @Test
     fun clientHasExactlyProbeAndRender() {
-        // Filter synthetics: Kotlin generates `access$<field>$p` accessors when an
-        // anonymous lambda (e.g. the body of `withContext { ... }`) closes over a
-        // private property. Those are not part of the public surface — they are JVM
-        // visibility plumbing — and conflating them with author-written methods would
-        // make this test fragile to refactors that have nothing to do with the
-        // extraction-surface trust claim.
+        // Restrict to the *callable* surface: public, non-synthetic methods. Private
+        // helpers (e.g. a Parcel-decoding utility) are implementation details of the
+        // contract this test pins, not extensions of the contract itself; a contributor
+        // adding a `getText` passthrough would have to make it public to be useful as
+        // an extraction backdoor, so the trust claim is preserved by checking only the
+        // public surface. Synthetics are filtered for the same reason — Kotlin's
+        // `access$<field>$p` accessor (generated when a lambda closes over a private
+        // property) is JVM visibility plumbing, not author surface.
         val methodNames =
             PdfRendererClient::class
                 .java
                 .declaredMethods
+                .filter { Modifier.isPublic(it.modifiers) }
                 .filterNot { it.isSynthetic }
                 .map { it.name }
                 .toSet()
