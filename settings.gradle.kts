@@ -30,5 +30,6 @@ dependencyResolutionManagement {
 rootProject.name = "walt-passes-android"
 
 include(":passes-core")
+include(":passes-pdf")
 include(":passes-storage")
 include(":passes-ui")
