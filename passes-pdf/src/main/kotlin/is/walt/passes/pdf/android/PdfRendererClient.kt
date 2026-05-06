@@ -36,29 +36,30 @@ import kotlinx.coroutines.withContext
  * returns. The authoritative timeout for runaway renders lives on the *server* side via
  * `RenderWatchdog`; the client cannot abort an in-flight binder call.
  *
- * Renderer-failure posture: every renderer-side failure mode the consumer can observe
- * is folded into `Rejected(DocumentRejectedKind.RendererFailed)`. That includes:
+ * Failure-mode posture — runtime vs. wire invariants:
  *
  *  - The [RemoteException] thrown by [IBinder.transact] when the renderer process is
- *    gone — which is the *expected* shape of a watchdog timeout. `RenderWatchdog` is
- *    engineered to terminate the isolated renderer when a render exceeds its
- *    `timeoutMs`, and its KDoc explicitly promises "the main process then observes the
- *    dropped binder as a RemoteException and surfaces RendererFailed." This client is
- *    where that promise is honoured.
- *  - A `false` return from [IBinder.transact] — the shape `Binder.onTransact` produces
- *    when it bails before writing to the reply parcel (e.g. the proxy could not read a
- *    [ParcelFileDescriptor] out of the request). Without this branch, the client would
- *    decode an empty reply parcel as if it were `TAG_OK` (an empty parcel reads `0`,
- *    which is the value of `TAG_OK`) and surface a phantom `Ok(0)`.
- *  - An unrecognised reply tag or unrecognised rejection-kind code, which would only
- *    occur from a wire-format regression or a compromised isolated process writing
- *    garbage to the reply parcel. Both are folded into `RendererFailed` as a
- *    defense-in-depth against a hostile renderer destabilising the wallet via a
- *    malformed reply; the same regressions are caught structurally at unit-test time
- *    by [PdfRendererBinderRoundTripTest] and [RejectedKindWireSurfaceTest].
- *
- * The consumer's vocabulary is therefore the [DocumentRejectedKind] arm set, not the
- * binder failure-mode set.
+ *    gone is the *designed* runtime failure mode. `RenderWatchdog` is engineered to
+ *    terminate the isolated renderer when a render exceeds its `timeoutMs`, and its
+ *    KDoc explicitly promises "the main process then observes the dropped binder as a
+ *    RemoteException and surfaces RendererFailed." This client is where that promise
+ *    is honoured: the exception is caught and folded into
+ *    [DocumentRejectedKind.RendererFailed].
+ *  - A `false` return from [IBinder.transact] is treated the same way, defensively.
+ *    The shape would arise from a proxy `onTransact` that bailed before writing the
+ *    reply parcel; in practice the only path that returns false is the proxy failing
+ *    to read a [ParcelFileDescriptor] out of a parcel it just received, which is a
+ *    wire-invariant violation (same module, same build) rather than a real runtime
+ *    condition. Folding it in costs one line and avoids the alternative — decoding an
+ *    empty reply parcel where `readInt()` returns `0`, which equals `TAG_OK`, would
+ *    surface a phantom `Ok(0)`.
+ *  - Unrecognised reply tags, missing SharedMemory on a `TAG_OK` render reply, and
+ *    unrecognised rejection-kind codes are wire-invariant assertions and fail-fast
+ *    via [error]. Same-module proxy and client are required to agree on the wire
+ *    format by construction; a disagreement is a programmer error to be caught at the
+ *    nearest test run, not silently absorbed by the consumer. The structural gate is
+ *    [PdfRendererBinderRoundTripTest] (wire shape) and [RejectedKindWireSurfaceTest]
+ *    (rejection-kind table).
  */
 public class PdfRendererClient(
     private val binder: IBinder,
@@ -78,10 +79,10 @@ public class PdfRendererClient(
                 if (!accepted) {
                     return@withContext ProbeResult.Rejected(DocumentRejectedKind.RendererFailed)
                 }
-                when (reply.readInt()) {
+                when (val tag = reply.readInt()) {
                     TAG_OK -> ProbeResult.Ok(reply.readInt())
-                    TAG_REJECTED -> ProbeResult.Rejected(decodeRejectedKindOrFallback(reply))
-                    else -> ProbeResult.Rejected(DocumentRejectedKind.RendererFailed)
+                    TAG_REJECTED -> ProbeResult.Rejected(RejectedKindWire.decode(reply.readInt()))
+                    else -> error("Unknown probe reply tag: $tag")
                 }
             } finally {
                 reply.recycle()
@@ -112,24 +113,20 @@ public class PdfRendererClient(
                 if (!accepted) {
                     return@withContext RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
                 }
-                when (reply.readInt()) {
+                when (val tag = reply.readInt()) {
                     TAG_OK -> {
                         val sm = reply.readTypedObject(SharedMemory.CREATOR)
-                            ?: return@withContext RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
+                            ?: error("Render reply missing SharedMemory")
                         val w = reply.readInt()
                         val h = reply.readInt()
                         RenderResult.Ok(sm, w, h)
                     }
-                    TAG_REJECTED -> RenderResult.Rejected(decodeRejectedKindOrFallback(reply))
-                    else -> RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
+                    TAG_REJECTED -> RenderResult.Rejected(RejectedKindWire.decode(reply.readInt()))
+                    else -> error("Unknown render reply tag: $tag")
                 }
             } finally {
                 reply.recycle()
                 data.recycle()
             }
         }
-
-    private fun decodeRejectedKindOrFallback(reply: Parcel): DocumentRejectedKind =
-        runCatching { RejectedKindWire.decode(reply.readInt()) }
-            .getOrDefault(DocumentRejectedKind.RendererFailed)
 }
