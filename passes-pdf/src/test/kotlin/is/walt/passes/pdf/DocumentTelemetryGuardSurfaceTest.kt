@@ -8,10 +8,16 @@ import java.lang.reflect.Type
 
 /**
  * The structural lock that makes [DocumentTelemetryGuard] a security control rather than a
- * convenience interface: no method on the guard, and no constructor of any event data
- * class that flows through it, may accept a `String`, `CharSequence`, `ByteArray`, or
- * `Map`. Adding such a parameter is precisely the policy change reviewers should catch
- * before code merges, so this test fails compilation-or-assertion if it ever happens.
+ * convenience interface. The KDoc on the guard claims "enums, counts, and durations only";
+ * this test enforces that claim by *allowlist*, not denylist.
+ *
+ * Allowlist over denylist is deliberate. A denylist test ("no `String` parameter") leaks
+ * past the obvious smuggling routes — `List<String>`, `Set<String>`, `Map<Enum, String>`,
+ * `Pair<String, Long>`, `Array<String>`. Each of those slips a `String` into telemetry
+ * while resolving to a raw class (`List`, `Map`, `Pair`, `Array`) that the denylist would
+ * not flag. An allowlist that names every legitimate parameter shape (Long, Int, enums,
+ * and the event classes themselves) closes that gap structurally: anything else is a
+ * test failure, including things future contributors have not invented yet.
  *
  * Reflection is the right tool here because the test is asserting a property of the
  * *shape* of the API rather than a behavior. A behavior test could never close the gap of
@@ -19,53 +25,125 @@ import java.lang.reflect.Type
  */
 class DocumentTelemetryGuardSurfaceTest {
     @Test
-    fun guardMethodsRejectFreeFormPayloadTypes() {
+    fun guardMethodsAcceptOnlyEventClassParameters() {
         val violations = mutableListOf<String>()
         for (method in DocumentTelemetryGuard::class.java.declaredMethods) {
-            method.collectViolations(violations)
+            method.collectViolations(violations, allowed = AllowedTypes.GuardMethod)
         }
         assertThat(violations).isEmpty()
     }
+
+    /**
+     * Meta-test demonstrating the lock is not vacuous: every smuggling shape the PR
+     * review enumerated (`List<String>`, `Set<String>`, `Map<Enum, String>`,
+     * `Pair<String, Long>`, `Array<String>`, `ByteArray`) is rejected by the allowlist.
+     * If a future refactor accidentally weakens the lock, this test fails first and
+     * surfaces the issue inside the same file as the rule it protects.
+     */
+    @Test
+    fun allowlistRejectsKnownStringSmugglingShapes() {
+        val bad: List<Class<*>> =
+            listOf(
+                BadListOfString::class.java,
+                BadSetOfString::class.java,
+                BadMapEnumToString::class.java,
+                BadPairOfStringLong::class.java,
+                BadArrayOfString::class.java,
+                BadByteArray::class.java,
+            )
+        for (klass in bad) {
+            val violations = mutableListOf<String>()
+            klass.collectCtorViolations(violations, allowed = AllowedTypes.EventCtor)
+            assertThat(violations).isNotEmpty()
+        }
+    }
+
+    private data class BadListOfString(val tags: List<String>, val durationMillis: Long)
+
+    private data class BadSetOfString(val tags: Set<String>, val durationMillis: Long)
+
+    private data class BadMapEnumToString(
+        val tags: Map<DocumentRejectedKind, String>,
+        val durationMillis: Long,
+    )
+
+    private data class BadPairOfStringLong(val tag: Pair<String, Long>, val durationMillis: Long)
+
+    private data class BadArrayOfString(val tags: Array<String>, val durationMillis: Long)
+
+    private data class BadByteArray(val payload: ByteArray, val durationMillis: Long)
 
     @Test
-    fun eventConstructorsRejectFreeFormPayloadTypes() {
+    fun eventConstructorsAcceptOnlyEnumsAndCountsAndDurations() {
         val violations = mutableListOf<String>()
         for (klass in eventClasses) {
-            klass.collectCtorViolations(violations)
-            klass.collectMethodViolations(violations)
+            klass.collectCtorViolations(violations, allowed = AllowedTypes.EventCtor)
+            klass.collectMethodViolations(violations, allowed = AllowedTypes.EventCtor)
         }
         assertThat(violations).isEmpty()
     }
 
-    private fun Class<*>.collectCtorViolations(violations: MutableList<String>) {
+    private fun Class<*>.collectCtorViolations(
+        violations: MutableList<String>,
+        allowed: AllowedTypes,
+    ) {
         for (ctor in declaredConstructors) {
             for ((index, paramType) in ctor.genericParameterTypes.withIndex()) {
-                if (paramType.isForbidden()) {
-                    violations += "$simpleName ctor parameter $index is forbidden type $paramType"
+                if (!paramType.isAllowed(allowed)) {
+                    violations += "$simpleName ctor parameter $index has disallowed type $paramType"
                 }
             }
         }
     }
 
-    private fun Class<*>.collectMethodViolations(violations: MutableList<String>) {
+    private fun Class<*>.collectMethodViolations(
+        violations: MutableList<String>,
+        allowed: AllowedTypes,
+    ) {
         for (method in declaredMethods) {
-            if (method.name.startsWith("component") || method.name == "copy") continue
-            method.collectViolations(violations)
+            if (method.isSyntheticOrInherited()) continue
+            method.collectViolations(violations, allowed)
         }
     }
 
-    private fun Method.collectViolations(violations: MutableList<String>) {
+    // Data classes generate componentN, copy, copy$default (synthetic), equals, hashCode,
+    // and toString. None of them are surface a contributor would add a String to in
+    // practice; they are mechanical compiler output from the data class declaration. The
+    // ctor parameters, which are the actual contributor-author-able shape, are checked
+    // separately by collectCtorViolations.
+    private fun Method.isSyntheticOrInherited(): Boolean =
+        isSynthetic ||
+            name.startsWith("component") ||
+            name == "copy" ||
+            name == "equals" ||
+            name == "hashCode" ||
+            name == "toString"
+
+    private fun Method.collectViolations(
+        violations: MutableList<String>,
+        allowed: AllowedTypes,
+    ) {
         for ((index, paramType) in genericParameterTypes.withIndex()) {
-            if (paramType.isForbidden()) {
-                violations += "${declaringClass.simpleName}.$name parameter $index is forbidden type $paramType"
+            if (!paramType.isAllowed(allowed)) {
+                violations += "${declaringClass.simpleName}.$name parameter $index has disallowed type $paramType"
             }
         }
     }
 
-    private fun Type.isForbidden(): Boolean {
-        val raw: Class<*> = rawClassOrNull() ?: return false
-        val isByteArray = raw.isArray && raw.componentType == java.lang.Byte.TYPE
-        return isByteArray || forbiddenClasses.any { it.isAssignableFrom(raw) }
+    private fun Type.isAllowed(allowed: AllowedTypes): Boolean {
+        // Generic type arguments (List<String>, Map<*, String>, etc.) are not on the
+        // allowlist and are caught by rawClassOrNull returning the erased class. Any
+        // ParameterizedType collapses to its raw and then must clear the same bar.
+        val raw = rawClassOrNull() ?: return false
+        return when (allowed) {
+            AllowedTypes.GuardMethod -> raw in eventClasses
+            AllowedTypes.EventCtor ->
+                raw == java.lang.Long.TYPE ||
+                    raw == java.lang.Integer.TYPE ||
+                    raw == java.lang.Long::class.java ||
+                    raw == java.lang.Integer::class.java ||
+                    raw.isEnum
+        }
     }
 
     private fun Type.rawClassOrNull(): Class<*>? =
@@ -75,16 +153,11 @@ class DocumentTelemetryGuardSurfaceTest {
             else -> null
         }
 
+    private enum class AllowedTypes { GuardMethod, EventCtor }
+
     private val eventClasses: List<Class<*>> =
         listOf(
             DocumentImportSucceededEvent::class.java,
             DocumentImportFailedEvent::class.java,
-        )
-
-    private val forbiddenClasses: List<Class<*>> =
-        listOf(
-            String::class.java,
-            CharSequence::class.java,
-            Map::class.java,
         )
 }
