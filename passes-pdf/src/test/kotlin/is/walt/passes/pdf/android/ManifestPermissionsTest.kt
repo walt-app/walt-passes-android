@@ -26,7 +26,7 @@ import javax.xml.parsers.DocumentBuilderFactory
 class ManifestPermissionsTest {
     @Test
     fun sourceManifestDeclaresZeroUsesPermission() {
-        val manifest = File("src/main/AndroidManifest.xml")
+        val manifest = manifestFile()
         assertThat(manifest.exists()).isTrue()
 
         val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
@@ -42,7 +42,7 @@ class ManifestPermissionsTest {
 
     @Test
     fun rendererServiceIsIsolatedAndNotExported() {
-        val manifest = File("src/main/AndroidManifest.xml")
+        val manifest = manifestFile()
         val factory = DocumentBuilderFactory.newInstance().apply { isNamespaceAware = true }
         val doc = factory.newDocumentBuilder().parse(InputSource(manifest.inputStream()))
         // Manifest elements live in the default namespace; only their attributes carry
@@ -53,6 +53,21 @@ class ManifestPermissionsTest {
         assertThat(svc.getAttributeNS(ANDROID_NS, "isolatedProcess")).isEqualTo("true")
         assertThat(svc.getAttributeNS(ANDROID_NS, "exported")).isEqualTo("false")
         assertThat(svc.getAttributeNS(ANDROID_NS, "name")).isEqualTo(".android.PdfRendererService")
+    }
+
+    /**
+     * The module directory is injected as a system property by `passes-pdf/build.gradle.kts`.
+     * Gradle's test runner happens to set the JVM cwd to the module root, but IDE
+     * runners and future build-tool migrations don't promise that; resolving against
+     * an explicit path means the test is unambiguous about which manifest it pins.
+     * The `?: "."` fallback covers the rare case of a runner that does not honour the
+     * Gradle injection, in which case the cwd-relative path is the closest available
+     * approximation; the [java.io.File.exists] assertion in each test then surfaces a
+     * loud failure rather than a silent green if the file cannot be located.
+     */
+    private fun manifestFile(): File {
+        val moduleDir = System.getProperty("walt.passes.pdf.moduleDir") ?: "."
+        return File(moduleDir, "src/main/AndroidManifest.xml")
     }
 
     private companion object {
