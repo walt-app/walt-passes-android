@@ -26,6 +26,7 @@ Pre-alpha. Architecture and design phase. No releases yet.
 | Back-field URLs go through a visible-confirmation flow before opening | `passes-ui` — `UrlConfirmationSheet` composable |
 | Pass deletion is irreversible; caches are wiped | `passes-storage` — deletion logic |
 | Expired passes show an "Expired" badge but are not auto-deleted | `passes-ui` + `passes-storage` |
+| PDF document import is contained in an isolated renderer process; bytes are never extracted, parsed for fields, or shared back out | [`docs/PDF_THREAT_MODEL.md`](docs/PDF_THREAT_MODEL.md); [`docs/adr/0005-pdf-document-support.md`](docs/adr/0005-pdf-document-support.md); `passes-pdf` (forthcoming) |
 
 (These point to *intended* locations; modules are not yet implemented.)
 
@@ -42,6 +43,7 @@ Pre-alpha. Architecture and design phase. No releases yet.
 - PKPASS file import via OS-level intent filter and in-app file picker.
 - Front + back fields displayed; barcode/QR rendering; full localization (all locales retained, re-render on locale change); expired badge; visible-URL confirmation for back-field actionables.
 - Encrypted local storage; irreversible deletion.
+- PDF document import (e.g., concert tickets distributed as PDF) as a sibling concept to PKPASS, in a separate "Documents" lane. Rendering happens in an isolated process; PDF bytes are never extracted, parsed for fields, or shared back out. See [`docs/PDF_THREAT_MODEL.md`](docs/PDF_THREAT_MODEL.md) and [`docs/adr/0005-pdf-document-support.md`](docs/adr/0005-pdf-document-support.md).
 
 **Out:**
 - NFC / transit passes (HCE conflict with payment).
