@@ -19,7 +19,7 @@ rather than re-stating the rationale.
 
 **C1. System renderer only (`android.graphics.pdf.PdfRenderer`).** Walt does
 not bundle a PDF parser. PDFium ships in Android's MediaProvider Mainline
-module on Android 13+ and updates via Play System Updates, so PDFium CVE
+module on Android 14+ (API 34) and updates via Play System Updates, so PDFium CVE
 response is decoupled from Walt's release cadence. The API surface is narrow
 (`ParcelFileDescriptor` in, `Bitmap` out) and the API explicitly does not
 execute JavaScript, does not process `URI` / `Launch` / `SubmitForm` actions
@@ -145,8 +145,8 @@ process has no DB, no Keystore session, no filesystem write outside its
 bitmap output, and no network. The blast radius of a successful exploit is
 "the user re-taps to view the document; the rendering service rebinds."
 
-C1: PDFium ships in MediaProvider Mainline on Android 13+, so codec fixes
-flow via Play System Updates without a Walt release.
+C1: PDFium ships in MediaProvider Mainline on Android 14+ (API 34), so
+codec fixes flow via Play System Updates without a Walt release.
 
 **Status.** Mitigated against persistence and lateral movement; CVE-window
 exposure in the renderer process itself is the residual risk and is
