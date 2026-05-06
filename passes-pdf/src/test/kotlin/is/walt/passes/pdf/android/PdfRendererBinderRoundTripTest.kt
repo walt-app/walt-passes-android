@@ -125,6 +125,25 @@ class PdfRendererBinderRoundTripTest {
     }
 
     @Test
+    fun probeFoldsTransactFalseIntoRendererFailed() = runTest {
+        // Binder.transact returns the boolean from onTransact. The proxy returns false
+        // when it cannot read a PFD out of the request parcel — at which point the
+        // reply was never written. Decoding an empty reply parcel as TAG_OK (an empty
+        // parcel reads 0, which is TAG_OK) would surface a phantom ProbeResult.Ok(0);
+        // the client must instead translate the false return into RendererFailed.
+        val client = PdfRendererClient(RejectingBinder())
+        val result = client.probe(pipeRead)
+        assertThat(result).isEqualTo(ProbeResult.Rejected(DocumentRejectedKind.RendererFailed))
+    }
+
+    @Test
+    fun renderFoldsTransactFalseIntoRendererFailed() = runTest {
+        val client = PdfRendererClient(RejectingBinder())
+        val result = client.render(pipeRead, page = 0, widthPx = WIDTH_PX, heightPx = HEIGHT_PX)
+        assertThat(result).isEqualTo(RenderResult.Rejected(DocumentRejectedKind.RendererFailed))
+    }
+
+    @Test
     fun transactionCodesArePinnedToTheirDocumentedValues() {
         // Pin the absolute codes, not just their distinctness: a contributor flipping
         // the +1 direction (or rebasing CODE_PROBE off a different IBinder constant)
@@ -150,6 +169,21 @@ class PdfRendererBinderRoundTripTest {
             reply: Parcel?,
             flags: Int,
         ): Boolean = throw RemoteException("simulated watchdog kill")
+    }
+
+    /**
+     * Stand-in for the proxy's "couldn't read the request parcel" path: onTransact
+     * returns false without writing to reply, so [IBinder.transact] also returns false
+     * and the reply parcel is empty. The client must translate that into
+     * RendererFailed rather than decoding an empty parcel.
+     */
+    private class RejectingBinder : Binder() {
+        override fun onTransact(
+            code: Int,
+            data: Parcel,
+            reply: Parcel?,
+            flags: Int,
+        ): Boolean = false
     }
 
     private class StaticImpl(

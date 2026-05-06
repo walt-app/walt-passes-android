@@ -45,6 +45,11 @@ import kotlinx.coroutines.withContext
  *    `timeoutMs`, and its KDoc explicitly promises "the main process then observes the
  *    dropped binder as a RemoteException and surfaces RendererFailed." This client is
  *    where that promise is honoured.
+ *  - A `false` return from [IBinder.transact] — the shape `Binder.onTransact` produces
+ *    when it bails before writing to the reply parcel (e.g. the proxy could not read a
+ *    [ParcelFileDescriptor] out of the request). Without this branch, the client would
+ *    decode an empty reply parcel as if it were `TAG_OK` (an empty parcel reads `0`,
+ *    which is the value of `TAG_OK`) and surface a phantom `Ok(0)`.
  *  - An unrecognised reply tag or unrecognised rejection-kind code, which would only
  *    occur from a wire-format regression or a compromised isolated process writing
  *    garbage to the reply parcel. Both are folded into `RendererFailed` as a
@@ -64,9 +69,13 @@ public class PdfRendererClient(
             val reply = Parcel.obtain()
             try {
                 data.writeTypedObject(pdf, 0)
-                try {
-                    binder.transact(CODE_PROBE, data, reply, 0)
-                } catch (_: RemoteException) {
+                val accepted =
+                    try {
+                        binder.transact(CODE_PROBE, data, reply, 0)
+                    } catch (_: RemoteException) {
+                        return@withContext ProbeResult.Rejected(DocumentRejectedKind.RendererFailed)
+                    }
+                if (!accepted) {
                     return@withContext ProbeResult.Rejected(DocumentRejectedKind.RendererFailed)
                 }
                 when (reply.readInt()) {
@@ -94,9 +103,13 @@ public class PdfRendererClient(
                 data.writeInt(page)
                 data.writeInt(widthPx)
                 data.writeInt(heightPx)
-                try {
-                    binder.transact(CODE_RENDER, data, reply, 0)
-                } catch (_: RemoteException) {
+                val accepted =
+                    try {
+                        binder.transact(CODE_RENDER, data, reply, 0)
+                    } catch (_: RemoteException) {
+                        return@withContext RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
+                    }
+                if (!accepted) {
                     return@withContext RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
                 }
                 when (reply.readInt()) {
