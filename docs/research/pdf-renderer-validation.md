@@ -88,12 +88,21 @@ class NetworkProbeVpnService : VpnService() {
         while (true) {
             val n = input.read(buf)
             if (n <= 0) break
-            // log src/dst port, dst IP from IPv4 header at buf[0..19]
+            // srcPort / dstIp / dstPort are 4-line IPv4-header stubs the
+            // maintainer fills in (offsets 12-19 for src/dst IPv4, 20-23 for
+            // TCP/UDP ports). Kept as stubs here to keep the snippet short.
             ProbeLog.event("net.pkt", srcPort(buf), dstIp(buf), dstPort(buf), n)
         }
     }
 }
 ```
+
+The probe service binder is described by a one-method-per-action AIDL
+under `research/pdf-probe/src/main/aidl/IRendererProbe.aidl` with two
+parcelable result classes (`ProbeResult` = `Ok(int pageCount) |
+RejectedEncrypted(String) | RejectedMalformed(String)`; `RenderResult`
+= `Ok(SharedMemory) | Failed(String)`). Standard AIDL boilerplate; the
+shape is implied by the `Stub()` body below.
 
 The probe `Service` runs the renderer:
 
@@ -121,7 +130,12 @@ class RendererProbeService : Service() {
                 r.openPage(page).use { p ->
                     val bmp = Bitmap.createBitmap(p.width, p.height, Bitmap.Config.ARGB_8888)
                     p.render(bmp, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    RenderResult.Ok(SharedMemory.fromBitmap(bmp))
+                    val size = bmp.rowBytes * bmp.height
+                    val sm = SharedMemory.create("probe-bitmap", size)
+                    val buf = sm.mapReadWrite()
+                    bmp.copyPixelsToBuffer(buf)
+                    SharedMemory.unmap(buf)
+                    RenderResult.Ok(sm, bmp.width, bmp.height, bmp.rowBytes)
                 }
             }
         }
@@ -270,14 +284,15 @@ update added implicit egress, the kernel would block the socket.
    originating from the `:probe_renderer` process during the render
    call. (Filter by `/proc/<pid>/net/tcp` and `udp` snapshots taken
    immediately before and after the call.)
-3. As a stronger check, set
-   `setprocattr(0, "current", "u:r:isolated_app:s0", ...)`-equivalent —
-   on Android this is automatic for `isolatedProcess` services — and
-   attempt a manual `Socket("8.8.8.8", 53)` from the probe service.
-   Confirm `SecurityException` (the kernel SELinux label
-   `isolated_app` is denied `node:tcp_socket` and
-   `network_node:udp_socket` in the AOSP base policy at
-   `system/sepolicy/private/isolated_app.te`).
+3. As a stronger check, attempt a manual `Socket("8.8.8.8", 53)` from
+   the probe service. The service runs in SELinux domain
+   `isolated_app` by virtue of the `android:isolatedProcess="true"`
+   manifest flag (no runtime relabeling is involved or permitted —
+   AOSP base policy denies dyntransition into `isolated_app`). The
+   `isolated_app` domain is denied `node:tcp_socket` and
+   `node:udp_socket` access by AOSP base policy at
+   `system/sepolicy/private/isolated_app.te`, so the connect attempt
+   surfaces as `SecurityException`.
 
 **Empirical (per device).** _PENDING._ The `isolated_app` SELinux label
 is AOSP-baseline; OEM SEPolicy customizations in theory could weaken it
@@ -368,7 +383,9 @@ revises that target.
 1. Bind the probe service. Confirm `pgrep -f :probe_renderer` returns a
    distinct PID from the main process.
 2. `cat /proc/<pid>/status` and confirm `Uid:` is in the
-   `99000`-`99999` isolated-app UID range.
+   `90000`-`99999` isolated-app UID range
+   (`Process.FIRST_ISOLATED_UID` = 90000, `LAST_ISOLATED_UID` = 99999
+   in `frameworks/base/core/java/android/os/Process.java`).
 3. From the probe service, attempt `File("/data/data/${packageName}").
    listFiles()`. Confirm `null` or `SecurityException`.
 4. From the probe service, attempt
@@ -419,7 +436,7 @@ before parsing the xref table.
 |-----------------------------------------------|----------|---------------------|------------|-------|
 | `MemoryFile` + reflected `getParcelFileDescriptor()` | yes | no (ashmem) | hidden / `@hide` | Reflection on `MemoryFile` is restricted by `hidden-api-list` since API 28; reflection is a non-starter for a published library. |
 | `SharedMemory` (`API 27+`) `setProtect(PROT_READ).fileDescriptor` | partial — see notes | no (ashmem) | public | Returns a `FileDescriptor`, not a `ParcelFileDescriptor`. Wrapping via `ParcelFileDescriptor.dup(fd)` is possible but the resulting FD is **not seekable in the way `pread64` expects**: ashmem honors `mmap`, not seek-and-read. PDFium's `FPDF_LoadCustomDocument` works against arbitrary readers via callback; the framework binding `nativeOpen` uses `FPDF_LoadCustomDocument` internally, but exposes only the FD-seek path. |
-| `ParcelFileDescriptor.fromFd(memfd_create_fd)` via NDK syscall | yes | no (memfd) | NDK-only, requires `syscall(__NR_memfd_create)` | Public NDK syscall on API 30+ (Linux kernel ≥4.14, guaranteed by minSdk). Seek and pread work normally; no disk path. **This is the viable transport.** |
+| `ParcelFileDescriptor.adoptFd(memfd_create_fd)` via NDK syscall | yes | no (memfd) | NDK-only, requires `syscall(__NR_memfd_create)` | Public NDK syscall on API 30+ (Linux kernel ≥4.14, guaranteed by minSdk). Seek and pread work normally; no disk path. The wrapper takes ownership of the int FD via `ParcelFileDescriptor.adoptFd(int)`; `fromFd` does not exist on `ParcelFileDescriptor`. **This is the viable transport.** |
 | Temp file in main-process `cacheDir` (`File.createTempFile`) | yes | **YES** | public | Plaintext PDF momentarily on disk in `/data/data/<app>/cache/`. Defeats the at-rest encryption guarantee for the lifetime of the render call. |
 | `ParcelFileDescriptor.fromSocket(s)` | no | no | public | Pipes / sockets fail PDFium's seek probe. |
 
@@ -430,20 +447,32 @@ forces a choice between:
 - **F.1 (preferred): `memfd_create` via NDK syscall**, wrapped in a
   `ParcelFileDescriptor` for binder transport. Implementation lives in
   `passes-pdf` as a small `MemFdAllocator` Kotlin class with one JNI
-  method (`syscall(__NR_memfd_create, name, flags)` returning an int
-  fd). The fd backs an mmap region into which the main process writes
-  the SQLCipher-decrypted PDF bytes, then transfers the
-  `ParcelFileDescriptor` over binder. Receiver side calls `pread64`
-  through the framework as normal. No on-disk plaintext at any point.
-  - Cost: one JNI method, ~30 lines of native code under
-    `passes-pdf/src/main/cpp/memfd.cpp`. minSdk-clean (memfd_create
-    syscall available since kernel 3.17; Android minSdk for
-    `passes-pdf` should be set to API 26 or higher per ADR 0005, and
-    the syscall is universally available).
+  method (`syscall(__NR_memfd_create, name, MFD_CLOEXEC |
+  MFD_ALLOW_SEALING)` returning an int fd, then
+  `ParcelFileDescriptor.adoptFd(intFd)`). The fd backs an mmap region
+  into which the main process writes the SQLCipher-decrypted PDF
+  bytes; immediately after the write, the main process calls
+  `fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_GROW |
+  F_SEAL_SHRINK)` so that the renderer cannot mutate the buffer the
+  main process also holds. The `ParcelFileDescriptor` is transferred
+  over binder. Receiver side calls `pread64` through the framework as
+  normal. No on-disk plaintext at any point.
+  - Cost: one JNI source file (`memfd_create` + `fcntl` seal call),
+    ~30 lines of native code under `passes-pdf/src/main/cpp/memfd.cpp`.
+    minSdk-clean for the syscall itself (kernel ≥3.17; the seal
+    extension is in kernel ≥3.17 as well; both are guaranteed by
+    Android API 26+).
   - Risk: introduces native code into a module that previously had
     none. `passes-pdf` becomes the only Walt module with a JNI
     surface; the audit story stays clean because the surface is one
     function with documented arguments and no buffer handling.
+  - **Defense-in-depth.** Sealing the FD with `F_SEAL_WRITE |
+    F_SEAL_GROW | F_SEAL_SHRINK` is what makes F.1 safe against a
+    hypothetical future PDFium write-via-mmap primitive. Without
+    sealing, a renderer compromise could mutate the bytes the main
+    process still holds in its own mapping. With sealing,
+    `mmap(PROT_WRITE)` from the renderer side fails with `EPERM` and
+    the buffer is structurally read-only post-handoff.
 
 - **F.2 (fallback): plaintext temp file with explicit at-rest
   exception.** Document the temporary plaintext exposure in
@@ -481,28 +510,54 @@ recorded against `wpass-i2r`.**
 ### G. PDFium ships in MediaProvider Mainline; CVE updates flow without OS update
 
 **Source-level finding: refined yes — but the API floor for the
-Mainline path is API 34, not API 33 as the threat model asserts.**
+Mainline path is API 34 via the legacy class, or API 35 via
+`PdfRendererPreV`. The bead's threat-model claim of "Android 13+" is
+not accurate for either path.**
 
 The Mainline migration of the PdfRenderer subsystem is recent and
 specific. Source path:
-`packages/providers/MediaProvider/pdf/`. The migration introduced two
-parallel APIs at API 34:
+`packages/providers/MediaProvider/pdf/`. There are now two routes
+into the Mainline-backed PDFium implementation:
 
-- `android.graphics.pdf.PdfRenderer` (the legacy class, still public,
-  bridged to the Mainline implementation on API 34+).
-- `android.graphics.pdf.PdfRendererPreV` (a new public class providing
-  a subset of the same API for older minSdk apps that opt into the
-  Mainline-backed path).
+- `android.graphics.pdf.PdfRenderer` (the legacy class, public since
+  API 21). On API 34+ this class is bridged to the Mainline
+  implementation; on API ≤33 it links against the platform-bundled
+  `libpdfium.so`. The class itself is callable on API 21+, but the
+  Mainline backing only exists at runtime on API 34+.
+- `android.graphics.pdf.PdfRendererPreV` (added in API 35). This is
+  the platform's *explicit* answer to "let apps reach the
+  Mainline-backed PDFium implementation on devices that have the
+  apex." It is callable from API 35+ and runs against the Mainline
+  apex on devices that ship it. Critically, this class is API 35+ at
+  the *call site* — apps with `minSdk = 30` cannot link against
+  `PdfRendererPreV` at compile time and cannot reach it at runtime on
+  an API 30-34 device.
+
+Practical consequence for Walt: there is no path that exposes
+Mainline-backed PDFium on **API 30-33 devices at all**, irrespective
+of which class the calling code uses. The Mainline apex was not
+present on those releases. On API 34, Mainline-backed PDFium is
+reachable via the legacy `PdfRenderer`. On API 35+, it is reachable
+via either the legacy class or `PdfRendererPreV`.
+
+The honest framing is therefore: **G.1's API 34 floor is not a "we
+chose to ignore PdfRendererPreV" decision; it is the lowest API at
+which a Mainline-backed PDFium binary exists on any device.**
+`PdfRendererPreV`'s API 35 floor would be a *higher* bar, not a lower
+one, so engaging with it does not buy back user reach.
 
 Below API 34, `libpdfium.so` ships **as part of the platform**, not as
 an apex. Updates to PDFium on API 21-33 flow only via full-OS security
 patches (the carrier / OEM monthly update), not via Play System
 Updates.
 
-The Mainline apex package is `com.google.android.mediaprovider`
-(GMS-blessed builds) or `com.android.mediaprovider` (AOSP-baseline);
-not, as the bead text suggests, `com.google.android.providers.media.module`.
-This is a labelling issue, not a structural one.
+The Mainline apex name is `com.google.android.mediaprovider`
+(GMS-blessed builds) or `com.android.mediaprovider` (AOSP-baseline).
+The bead text refers to `com.google.android.providers.media.module`,
+which is the **APK package name inside the apex**, not the apex name
+itself. The two are easy to confuse because Android exposes both via
+`pm path` queries; the doc reproduction recipe below queries by apex
+name, which is the correct identifier.
 
 The **Pixel** flow is unambiguous: API 34+ Pixel devices receive
 PDFium updates via Google Play System Updates as part of the
@@ -531,7 +586,7 @@ choices follow:
   PDF engine shipped with your Android version. Security updates
   require a full Android update from your phone manufacturer." This
   preserves user reach at the cost of the architectural simplicity of
-  C1.
+  G.1.
 
 **Recommendation.** Adopt G.1. The Walt-side product cost (PDF import
 gated on Android 14+) is real but limited; the security argument for
@@ -606,17 +661,40 @@ against `wpass-i2r`.
    through a Mainline-updated PDFium. Older devices see the existing
    PKPASS path and an explicit "Android 14 or newer required" gate.
 
-3. **Both decisions require an ADR 0005 addendum** before
+3. **Module minSdk is unchanged; the API 34 floor is a runtime gate.**
+   F.1 and G.1 are not in conflict on minSdk. The `passes-pdf`
+   module's `minSdk` follows the project default (per ADR 0001 / the
+   existing modules' configuration); the API 34 requirement is
+   enforced as a `Build.VERSION.SDK_INT >= 34` runtime check at the
+   single import entry point in `passes-pdf`. The memfd_create syscall
+   in F.1 works at minSdk; the Mainline-backed PDFium needed for G.1
+   is checked at runtime. Both invariants are independent.
+
+4. **Both decisions require an ADR 0005 addendum** before
    `wpass-5v9` (renderer service) starts implementation. The addendum
    updates D3 (transport spec) and the Consequences section
    (minSdk window).
 
-4. **Empirical device runs are a release-gate, not an
+5. **Empirical device runs are a release-gate, not an
    architecture-gate.** Source-level analysis of A-E is sufficient to
    begin `wpass-jsb` (passes-pdf core model) and `wpass-pti` (storage
    schema), since neither touches the renderer service or its FD
    transport. The empirical matrix must be filled in before
    `wpass-5v9` ships.
+
+6. **Bitmap-size cap is a `wpass-5v9` concern, flagged here so it is
+   not lost.** The renderer reads `pageW * pageH` from PDFium and
+   would otherwise allocate a CPU-side bitmap of that size. The
+   allocation crosses back to the main process via `SharedMemory`. ADR
+   0005 D7 already caps per-page rasterized bitmaps at 4 MP, but the
+   *enforcement* of that cap belongs in the renderer service code
+   (`wpass-5v9`): clamp `pageW * pageH > 4_000_000` to the 4 MP
+   ceiling and downscale before render. Without this, a hostile PDF
+   declaring a 100k × 100k page would not compromise the isolated
+   process but would request a ~40 GB bitmap allocation in the main
+   process at handoff. This is a defense-in-depth note, not a new
+   finding; recording it here so the implementation ticket carries
+   the test pin.
 
 ## Follow-up tickets to file against `wpass-i2r`
 
