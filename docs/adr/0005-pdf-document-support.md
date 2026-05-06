@@ -29,7 +29,7 @@ Rationale: the trust contract differs structurally. Mixing PDFs into the `Pass` 
 
 Rendering uses the platform `android.graphics.pdf.PdfRenderer` API. No third-party PDF library is bundled.
 
-PDFium ships in the MediaProvider Mainline module on Android 13+ and updates via Play System Updates, decoupling PDFium CVE response from Walt release cadence. The API is structurally narrow: open `ParcelFileDescriptor`, render page N to `Bitmap`. No JavaScript execution path. No `URI` / `Launch` / `SubmitForm` action processing during page render. No network. The PDF cannot paint outside the bitmap Walt provides.
+PDFium ships in the MediaProvider Mainline module on Android 14+ (API 34) and updates via Play System Updates, decoupling PDFium CVE response from Walt release cadence. (See [Addendum 2026-05-06](#addendum-2026-05-06-fd-transport--mainline-floor-refinement) for the threshold rationale and the resulting `Build.VERSION.SDK_INT >= 34` runtime gate.) The API is structurally narrow: open `ParcelFileDescriptor`, render page N to `Bitmap`. No JavaScript execution path. No `URI` / `Launch` / `SubmitForm` action processing during page render. No network. The PDF cannot paint outside the bitmap Walt provides.
 
 Alternatives considered:
 
@@ -166,15 +166,36 @@ obvious candidates fail Walt's invariants:
   rejects it.
 
 D3 is therefore amended to specify **F.1: `memfd_create`-backed
-`ParcelFileDescriptor`**. The main process allocates a memfd via the NDK
-syscall `syscall(__NR_memfd_create, name, MFD_CLOEXEC | MFD_ALLOW_SEALING)`,
-writes the SQLCipher-decrypted PDF bytes into it, then issues
-`fcntl(fd, F_ADD_SEALS, F_SEAL_WRITE | F_SEAL_GROW | F_SEAL_SHRINK)`
-before adopting the int FD into a `ParcelFileDescriptor` and transferring
-it to the renderer service over binder. The seal is load-bearing: it
-makes the buffer structurally read-only post-handoff, so a hypothetical
-PDFium write-via-mmap primitive in the renderer cannot mutate bytes the
-main process still holds in its own mapping.
+`ParcelFileDescriptor`**. The main process allocates a memfd via
+`syscall(__NR_memfd_create, name, MFD_CLOEXEC | MFD_ALLOW_SEALING)`,
+populates it via `write(2)` of the SQLCipher-decrypted PDF bytes (no
+writable `mmap` is ever taken in the main process), then issues
+`fcntl(fd, F_ADD_SEALS, F_SEAL_SEAL | F_SEAL_WRITE | F_SEAL_GROW |
+F_SEAL_SHRINK)` before adopting the int FD into a
+`ParcelFileDescriptor` and transferring it to the renderer service over
+binder.
+
+The seal sequence is load-bearing and the order matters:
+
+- `F_SEAL_WRITE` is what makes the buffer read-only across **future**
+  mappings. A `mmap(PROT_WRITE)` against the FD from the renderer side
+  fails with `EPERM`; a `write(2)` against the FD fails with `EPERM`.
+  This is what protects against a hypothetical PDFium write-via-mmap
+  primitive in the renderer mutating bytes the main process still
+  holds.
+- `F_SEAL_GROW` / `F_SEAL_SHRINK` pin the size, so a renderer compromise
+  cannot resize the backing buffer underneath the main process.
+- `F_SEAL_SEAL` prevents future code from removing or weakening any of
+  the above. Without it, a contributor could land a patch that drops
+  the write-seal and the existing surface-area pin tests would not
+  catch the regression.
+
+The reason `write(2)` rather than mmap-then-write-then-munmap is that
+`F_ADD_SEALS` does **not** invalidate writable mappings that already
+exist; it only blocks new ones. Using `write(2)` means no writable
+mapping ever exists in either process, so the "buffer is read-only by
+the time the FD crosses binder" invariant holds without depending on
+a `munmap` ordering between two processes.
 
 The implementation lives in `passes-pdf` as a small `MemFdAllocator`
 Kotlin class plus one JNI source file
@@ -223,14 +244,19 @@ have weakened that argument; G.1 closes the exposure window instead.
 
 `passes-pdf`'s `minSdk` follows the project default. The API 34
 requirement is enforced as a runtime gate, not a manifest floor. F.1's
-`memfd_create` syscall works at the project minSdk (kernel ≥3.17,
-guaranteed by Android API 26+), so F.1 and G.1 are independent
-invariants that do not interact on minSdk.
+`memfd_create` is reachable below API 34 either through the bionic
+libc wrapper (API 30+) or, on devices below API 30 that nevertheless
+ship a Linux kernel ≥3.17, through a raw `syscall(__NR_memfd_create,
+…)` call. Walt's implementation calls `syscall()` directly so the
+floor is the kernel, not bionic; vendor kernels are not strictly bound
+to API level, but the project's `minSdk` is high enough that no
+shipping device fails the kernel check in practice. F.1 and G.1 are
+therefore independent invariants that do not interact on `minSdk`.
 
 ### Tests pinning the amendments
 
 | Decision | Test                                                                                                  |
 |----------|-------------------------------------------------------------------------------------------------------|
 | D3 (F.1) | `MemFdAllocatorJniSurfaceTest`: `passes-pdf` declares exactly one native method (`memfd_create` shim).|
-| D3 (F.1) | classpath-scan test: no `File.createTempFile` call inside `passes-pdf`'s renderer-handoff code path.  |
+| D3 (F.1) | classpath-scan test: no `java.io.File` / `java.io.FileOutputStream` / `java.io.RandomAccessFile` / `java.nio.file.Files` write APIs inside `passes-pdf`'s renderer-handoff code path. The handoff path is structurally forbidden from touching the filesystem. |
 | Consequences (G.1) | unit test: import entry point on `Build.VERSION.SDK_INT < 34` returns the "Android 14 or newer required" rejection without invoking the renderer service. |
