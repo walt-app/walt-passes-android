@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  passes-pdf library manifest. Contributes the isolated-process renderer service that
+  performs all PDFium parsing and rendering work, per ADR 0005 D3.
+
+  ZERO uses-permission entries by design. The service runs in an isolated process and
+  inherits no app permissions: no INTERNET, no storage, no clipboard, no anything. A
+  PDFium use-after-free here brings down the renderer process, not the wallet, and the
+  isolated-uid sandbox guarantees the compromised process has nothing useful to reach
+  for. Adding a uses-permission entry to this manifest is a security-policy change
+  requiring re-review; ManifestPermissionsTest pins the invariant from a unit test, and
+  CI lint mirrors it from outside.
+
+  android:isolatedProcess="true" is the load-bearing bit. android:exported="false"
+  prevents external apps from binding even if walt-android were ever to ship a debug
+  manifest tweak. android:process=":pdfRenderer" keeps the process distinct from any
+  other isolated component the consumer might add later.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <service
+            android:name=".android.PdfRendererService"
+            android:isolatedProcess="true"
+            android:exported="false"
+            android:process=":pdfRenderer" />
+    </application>
+
+</manifest>
