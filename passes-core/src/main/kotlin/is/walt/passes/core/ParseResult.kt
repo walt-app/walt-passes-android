@@ -36,15 +36,24 @@ public sealed interface TamperReason {
     public data object SignatureCryptoFailure : TamperReason
 
     /**
-     * The CMS / PKCS#7 envelope parsed cleanly but its first SignerInfo references a
-     * certificate (by IssuerAndSerialNumber or SubjectKeyIdentifier) that is not
-     * present in the envelope's certificate set. Distinct from
-     * [SignatureCryptoFailure] (which covers structural corruption and unexpected BC
-     * exceptions) so telemetry can distinguish a malformed-but-parseable envelope
-     * from a genuine cryptographic miss. Surfaced as a separate arm because folding
-     * it into [SignatureCryptoFailure] hid the wpass-4js regression: a misclassified
-     * signer-ID code path looked identical in logcat to a corrupted blob, which
-     * bought the bug months of unflagged production exposure.
+     * The CMS / PKCS#7 envelope parsed cleanly but the verifier could not pair it
+     * with a signing certificate. Two shapes reach this arm:
+     *
+     *  1. The envelope contains zero SignerInfo entries (a structurally legal but
+     *     vacuous CMS).
+     *  2. The first SignerInfo's identifier (IssuerAndSerialNumber or
+     *     SubjectKeyIdentifier) does not match any certificate in the envelope's
+     *     certificate set.
+     *
+     * Both are folded together because the operational signal is identical: the
+     * envelope is well-formed but unsignable, which a corrupt blob is not.
+     * Distinct from [SignatureCryptoFailure] (structural corruption and unexpected
+     * BC exceptions) so telemetry can distinguish a malformed-but-parseable
+     * envelope from a genuine cryptographic miss. Surfaced as a separate arm
+     * because folding it into [SignatureCryptoFailure] hid the wpass-4js
+     * regression: a misclassified signer-ID code path looked identical in logcat
+     * to a corrupted blob, which bought the bug months of unflagged production
+     * exposure.
      */
     public data object SignerCertificateMissing : TamperReason
 }

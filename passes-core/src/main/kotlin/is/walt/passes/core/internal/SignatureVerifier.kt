@@ -177,6 +177,18 @@ private fun finalizeVerification(
  */
 private val BC_PROVIDER: BouncyCastleProvider by lazy { BouncyCastleProvider() }
 
+/**
+ * Returns the first SignerInfo paired with its certificate, or `null` if either no
+ * SignerInfo is present or the SignerInfo's identifier matches no certificate in the
+ * envelope's cert set.
+ *
+ * **Single-signer by design.** Apple's PassKit emits exactly one SignerInfo per
+ * pkpass, and that is the only signer-shape this kernel claims to verify (per the
+ * trust posture in the file-level docblock). A multi-signer CMS — legal in the spec
+ * but never produced by Apple — would have only its first SignerInfo inspected here;
+ * any later signers are silently ignored. If a future bead extends the trust claim
+ * to multi-signer envelopes, this is the entry point that needs to fan out.
+ */
 private fun firstSignerWithCert(signedData: CMSSignedData): SignerWithHolder? {
     val signer = signedData.signerInfos.signers.firstOrNull() ?: return null
     val store = signedData.holderStore()

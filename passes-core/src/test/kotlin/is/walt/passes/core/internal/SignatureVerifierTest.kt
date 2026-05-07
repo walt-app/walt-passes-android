@@ -256,13 +256,23 @@ class SignatureVerifierTest {
         // throws the same NoSuchAlgorithmException the real device throws. We
         // restore the original "BC" registration in a finally so downstream tests in
         // the same JVM are unaffected.
+        //
+        // **Concurrency contract.** This test mutates JVM-global Security registry
+        // state. JUnit 4 runs tests serially within a class, and Gradle's test task
+        // for :passes-core runs with maxParallelForks=1 (the default), so it cannot
+        // race other tests today. If anyone enables parallel forks, JUnit 5 parallel
+        // execution, or moves this case into a shared test source set, this test
+        // MUST be marked @Isolated (JUnit 5) or moved into a single-threaded fork
+        // — otherwise it will both flake itself and corrupt every concurrent test
+        // that calls `Security.getProvider("BC")` during the window between
+        // `removeProvider` and the finally `addProvider`.
         val savedBc = Security.getProvider("BC")
         Security.removeProvider("BC")
         Security.addProvider(StrippedFakeBcProvider())
         try {
-            val (manifest, signature) = loadAppleSignedFixture()
+            val fixture = loadAppleSignedFixture()
 
-            val result = verifySignature(signature, manifest, ParserConfig())
+            val result = verifySignature(fixture.signature, fixture.manifest, ParserConfig())
 
             assertOk(result, SignatureStatus.AppleVerified)
         } finally {
@@ -297,14 +307,31 @@ class SignatureVerifierTest {
         // our own root, but only the production `verifySignature(...)` entrypoint
         // exercises both the SKI signer-ID path AND the Apple Root CA bundling path
         // simultaneously — which is the combination that broke in the field.
-        val (manifest, signature) = loadAppleSignedFixture()
+        //
+        // **Fixture has a finite shelf life.** See
+        // `passes-core/src/test/resources/.../fixtures/apple-signed/README.md` for the
+        // current leaf certificate's `notAfter` date and the renewal procedure when
+        // this test starts failing on `Ok(CertChainIncomplete)` instead of
+        // `Ok(AppleVerified)`.
+        val fixture = loadAppleSignedFixture()
 
-        val result = verifySignature(signature, manifest, ParserConfig())
+        val result = verifySignature(fixture.signature, fixture.manifest, ParserConfig())
 
         assertOk(result, SignatureStatus.AppleVerified)
     }
 
-    private fun loadAppleSignedFixture(): Pair<ByteArray, ByteArray> {
+    /**
+     * Manifest + detached signature bytes pulled from a real Apple-signed pkpass.
+     * Named fields so callers can't transpose the two `ByteArray`s — both arguments
+     * to [verifySignature] are also `ByteArray`, and a positional pair would invite
+     * exactly that bug at every call site.
+     */
+    private data class AppleSignedFixture(
+        val manifest: ByteArray,
+        val signature: ByteArray,
+    )
+
+    private fun loadAppleSignedFixture(): AppleSignedFixture {
         val cls = SignatureVerifierTest::class.java
         val manifest =
             cls.getResourceAsStream("fixtures/apple-signed/manifest.json")?.use { it.readBytes() }
@@ -312,7 +339,7 @@ class SignatureVerifierTest {
         val signature =
             cls.getResourceAsStream("fixtures/apple-signed/signature")?.use { it.readBytes() }
                 ?: error("Fixture missing: fixtures/apple-signed/signature")
-        return manifest to signature
+        return AppleSignedFixture(manifest, signature)
     }
 
     @Test

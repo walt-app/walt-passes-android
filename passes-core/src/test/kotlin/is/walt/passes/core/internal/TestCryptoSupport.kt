@@ -35,14 +35,14 @@ import java.util.Date
  * as production code, so any test class in `passes-core` can call them.
  */
 internal fun ensureBouncyCastleProvider() {
-    if (Security.getProvider(BC_PROVIDER) == null) {
+    if (Security.getProvider(BC_PROVIDER_NAME) == null) {
         Security.addProvider(BouncyCastleProvider())
     }
 }
 
 internal fun newRsaKeyPair(): KeyPair {
     ensureBouncyCastleProvider()
-    val gen = KeyPairGenerator.getInstance("RSA", BC_PROVIDER)
+    val gen = KeyPairGenerator.getInstance("RSA", BC_PROVIDER_NAME)
     gen.initialize(RSA_KEY_BITS)
     return gen.generateKeyPair()
 }
@@ -69,9 +69,9 @@ internal fun selfSignedCertificate(
             keyPair.public,
         )
     builder.addSubjectKeyIdentifier(keyPair.public)
-    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER).build(keyPair.private)
+    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(keyPair.private)
     return JcaX509CertificateConverter()
-        .setProvider(BC_PROVIDER)
+        .setProvider(BC_PROVIDER_NAME)
         .getCertificate(builder.build(signer))
 }
 
@@ -104,9 +104,9 @@ internal fun signLeafCertificate(
         builder.addExtension(Extension.basicConstraints, true, BasicConstraints(0))
     }
     builder.addSubjectKeyIdentifier(leafPublicKey)
-    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER).build(issuerKey.private)
+    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(issuerKey.private)
     return JcaX509CertificateConverter()
-        .setProvider(BC_PROVIDER)
+        .setProvider(BC_PROVIDER_NAME)
         .getCertificate(builder.build(signer))
 }
 
@@ -123,10 +123,10 @@ internal fun cmsDetachedSignature(
     includedCerts: List<X509Certificate>,
 ): ByteArray {
     ensureBouncyCastleProvider()
-    val contentSigner = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER).build(signerKey)
+    val contentSigner = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(signerKey)
     val infoGen =
         JcaSignerInfoGeneratorBuilder(
-            JcaDigestCalculatorProviderBuilder().setProvider(BC_PROVIDER).build(),
+            JcaDigestCalculatorProviderBuilder().setProvider(BC_PROVIDER_NAME).build(),
         ).build(contentSigner, signerCert)
     val gen =
         CMSSignedDataGenerator().apply {
@@ -154,10 +154,10 @@ internal fun cmsDetachedSignatureWithSki(
     includedCerts: List<X509Certificate>,
 ): ByteArray {
     ensureBouncyCastleProvider()
-    val contentSigner = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER).build(signerKey)
+    val contentSigner = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(signerKey)
     val infoGen =
         JcaSignerInfoGeneratorBuilder(
-            JcaDigestCalculatorProviderBuilder().setProvider(BC_PROVIDER).build(),
+            JcaDigestCalculatorProviderBuilder().setProvider(BC_PROVIDER_NAME).build(),
         ).build(contentSigner, extractSubjectKeyIdentifier(signerCert))
     val gen =
         CMSSignedDataGenerator().apply {
@@ -194,7 +194,14 @@ private fun JcaX509v3CertificateBuilder.addSubjectKeyIdentifier(publicKey: Publi
     addExtension(Extension.subjectKeyIdentifier, false, ski)
 }
 
-private const val BC_PROVIDER = "BC"
+// String name lookup is fine here: tests run on JVM where Security.addProvider
+// (called from `ensureBouncyCastleProvider`) installs bcprov-jdk18on:1.79 under "BC"
+// before any helper resolves. The production verifier deliberately holds an instance
+// instead — see `BC_PROVIDER` in `SignatureVerifier.kt` and the wpass-4js writeup —
+// because Android already has a stripped BC parked in the "BC" slot. Tests are
+// unaffected by that failure mode, so the cheaper string lookup is appropriate;
+// the explicit `_NAME` suffix flags the type difference for readers.
+private const val BC_PROVIDER_NAME = "BC"
 private const val SIG_ALGO = "SHA256withRSA"
 private const val RSA_KEY_BITS = 2048
 private const val ONE_HOUR_MILLIS = 60L * 60L * 1000L
