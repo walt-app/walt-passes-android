@@ -213,6 +213,23 @@ class PublicApiSurfaceTest {
     }
 
     @Test
+    fun databaseKeyRetainAcrossZerosBufferIfBlockThrows() {
+        val raw = ByteArray(32) { (it + 1).toByte() }
+        val key = DatabaseKey(raw)
+        val boom = RuntimeException("simulated openOrCreateDatabase failure")
+        try {
+            key.retainAcross { throw boom }
+            error("expected the block's exception to propagate")
+        } catch (caught: RuntimeException) {
+            assertThat(caught).isSameInstanceAs(boom)
+        }
+        // The handle was never returned, so the caller cannot close() it.
+        // retainAcross MUST zero on the throw path itself - otherwise a
+        // failing SQLCipher open would leave the raw key resident in heap.
+        assertThat(raw.all { it.toInt() == 0 }).isTrue()
+    }
+
+    @Test
     fun databaseKeyRetainAcrossKeepsBytesAliveUntilHandleClosed() {
         val raw = ByteArray(32) { (it + 1).toByte() }
         val key = DatabaseKey(raw)

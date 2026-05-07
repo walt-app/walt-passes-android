@@ -66,7 +66,16 @@ public class DatabaseKey(private val bytes: ByteArray) {
      * all zeros, surfacing as `SQLiteOutOfMemoryException` from page-1 decrypt.
      */
     public fun retainAcross(block: (ByteArray) -> Unit): AutoCloseable {
-        block(bytes)
+        try {
+            block(bytes)
+        } catch (t: Throwable) {
+            // If the consumer throws before it has captured the buffer, the
+            // returned handle is never built and the caller cannot close it.
+            // Zero eagerly so a throwing openOrCreateDatabase (corrupt header,
+            // IO failure, JNI mismatch) does not leave the raw key resident.
+            bytes.fill(0)
+            throw t
+        }
         return AutoCloseable { bytes.fill(0) }
     }
 
