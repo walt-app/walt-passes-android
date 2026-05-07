@@ -32,8 +32,8 @@ public interface PassKeyProvider {
 /**
  * Wrapper around the raw 32-byte database key. Exists to make accidental logging
  * discouragingly verbose: the class deliberately overrides `toString()` to a redacted
- * form, and exposes byte access only via [withBytes], which scopes the lifetime of the
- * borrowed array.
+ * form, and exposes byte access only via [withBytes] (synchronous borrow) or
+ * [retainAcross] (lifetime-tied borrow).
  */
 public class DatabaseKey(private val bytes: ByteArray) {
     init {
@@ -50,6 +50,33 @@ public class DatabaseKey(private val bytes: ByteArray) {
         } finally {
             bytes.fill(0)
         }
+    }
+
+    /**
+     * Hands the raw key bytes to [block] for capture by a long-lived consumer that
+     * retains the [ByteArray] reference past the synchronous call. Returns an
+     * [AutoCloseable] that zeros the buffer when closed; the caller MUST close it
+     * once the consumer no longer needs the bytes.
+     *
+     * Required by `net.zetetic.database.sqlcipher`: `SQLiteDatabaseConfiguration`
+     * holds the password byte[] by reference (no copy), and `SQLiteConnection.open()`
+     * re-reads `mConfiguration.password` on every pool connection it opens, including
+     * read-only connections opened lazily on first cursor read. Zeroing the buffer
+     * before the connection pool is done with it re-keys new pool connections with
+     * all zeros, surfacing as `SQLiteOutOfMemoryException` from page-1 decrypt.
+     */
+    public fun retainAcross(block: (ByteArray) -> Unit): AutoCloseable {
+        try {
+            block(bytes)
+        } catch (t: Throwable) {
+            // If the consumer throws before it has captured the buffer, the
+            // returned handle is never built and the caller cannot close it.
+            // Zero eagerly so a throwing openOrCreateDatabase (corrupt header,
+            // IO failure, JNI mismatch) does not leave the raw key resident.
+            bytes.fill(0)
+            throw t
+        }
+        return AutoCloseable { bytes.fill(0) }
     }
 
     override fun toString(): String = "DatabaseKey(redacted)"

@@ -9,7 +9,7 @@
     <ID>NestedBlockDepth:SqlCipherPassStore.kt$SqlCipherPassStore$override fun upsert( pass: Pass, signatureStatus: SignatureStatus, nowEpochMs: Long, ): UpsertOutcome</ID>
     <ID>ReturnCount:AndroidKeystorePassKeyProvider.kt$AndroidKeystorePassKeyProvider$override fun provideDatabaseKey(): StorageResult&lt;DatabaseKey&gt;</ID>
     <ID>ReturnCount:BackupRulesAssertion.kt$BackupRulesAssertion$@JvmStatic public fun assertBackupRulesApplied(context: Context): Outcome</ID>
-    <ID>ReturnCount:SqlCipherDatabaseFactory.kt$SqlCipherDatabaseFactory$fun openOrCreate( context: Context, databaseKey: DatabaseKey, ): StorageResult&lt;SQLiteDatabase&gt;</ID>
+    <ID>ReturnCount:SqlCipherDatabaseFactory.kt$SqlCipherDatabaseFactory$fun openOrCreate( context: Context, databaseKey: DatabaseKey, ): StorageResult&lt;OpenedDatabase&gt;</ID>
     <ID>ReturnCount:SqlCipherPassRepository.kt$SqlCipherPassRepository.Companion$@JvmStatic public fun create( context: Context, keyProvider: PassKeyProvider, telemetryGuard: StorageTelemetryGuard, ioDispatcher: CoroutineDispatcher = Dispatchers.IO, clock: () -&gt; Long = { System.currentTimeMillis() }, ): StorageResult&lt;SqlCipherPassRepository&gt;</ID>
     <ID>ReturnCount:SqlCipherPassStore.kt$SqlCipherPassStore$override fun loadById(id: PassRecordId): StoredPass?</ID>
     <ID>ReturnCount:SqlCipherPassStore.kt$SqlCipherPassStore$private fun Cursor.toSummaryOrNull(): PassSummary?</ID>
@@ -26,6 +26,7 @@
     <ID>SwallowedException:BackupRulesAssertion.kt$BackupRulesAssertion$e: NoSuchFieldException</ID>
     <ID>SwallowedException:BackupRulesAssertion.kt$BackupRulesAssertion$e: PackageManager.NameNotFoundException</ID>
     <ID>TooGenericExceptionCaught:AndroidKeystorePassKeyProvider.kt$AndroidKeystorePassKeyProvider.Companion$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:PassKeyProvider.kt$DatabaseKey$t: Throwable</ID>
     <ID>TooGenericExceptionCaught:SqlCipherDatabaseFactory.kt$SqlCipherDatabaseFactory$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SqlCipherPassRepository.kt$SqlCipherPassRepository$e: Throwable</ID>
     <ID>TooGenericExceptionCaught:SqlCipherPassRepository.kt$SqlCipherPassRepository.Companion$e: Throwable</ID>
