@@ -125,3 +125,54 @@ public fun ParseResult.toFailureKind(): ParseFailureKind? =
             }
         is ParseResult.Unsupported -> ParseFailureKind.Unsupported
     }
+
+/**
+ * Telemetry-safe flattening of failure reasons. [ParseResult.Success] returns `null`. The
+ * exhaustive `when` is the drift detector: adding a sealed arm to [TamperReason],
+ * [MalformedReason], or [UnsupportedReason] without extending [ParseFailureReason] is a
+ * compile error here. Companion to [toFailureKind] — same shape, finer-grained dimension.
+ *
+ * Cyclomatic complexity (~26) is load-bearing, not accidental: every sealed arm of every
+ * failure hierarchy must be enumerated in a single place so that adding a new arm without
+ * extending [ParseFailureReason] fails the build. Splitting into per-source helpers would
+ * scatter the drift detector and weaken the "one place a missing arm trips a compile
+ * error" guarantee. Same rationale as `WaltPassesTelemetryAdapter`'s `@Suppress` on
+ * `TooManyFunctions` in the consumer.
+ */
+@Suppress("CyclomaticComplexMethod")
+public fun ParseResult.toFailureReason(): ParseFailureReason? =
+    when (this) {
+        is ParseResult.Success -> null
+        is ParseResult.Tampered ->
+            when (reason) {
+                TamperReason.ManifestSignatureMismatch -> ParseFailureReason.ManifestSignatureMismatch
+                TamperReason.FileHashMismatch -> ParseFailureReason.FileHashMismatch
+                TamperReason.SignatureCryptoFailure -> ParseFailureReason.SignatureCryptoFailure
+                TamperReason.SignerCertificateMissing -> ParseFailureReason.SignerCertificateMissing
+            }
+        is ParseResult.Malformed ->
+            when (val r = reason) {
+                MalformedReason.NotAZipArchive -> ParseFailureReason.NotAZipArchive
+                MalformedReason.MissingPassJson -> ParseFailureReason.MissingPassJson
+                MalformedReason.MissingManifest -> ParseFailureReason.MissingManifest
+                MalformedReason.InvalidPassJson -> ParseFailureReason.InvalidPassJson
+                MalformedReason.InvalidManifest -> ParseFailureReason.InvalidManifest
+                MalformedReason.InvalidStrings -> ParseFailureReason.InvalidStrings
+                is MalformedReason.ResourceLimitExceeded ->
+                    when (r.limit) {
+                        ResourceLimit.ArchiveSize -> ParseFailureReason.ArchiveSizeLimit
+                        ResourceLimit.EntryCount -> ParseFailureReason.EntryCountLimit
+                        ResourceLimit.EntrySize -> ParseFailureReason.EntrySizeLimit
+                        ResourceLimit.JsonDepth -> ParseFailureReason.JsonDepthLimit
+                        ResourceLimit.JsonStringSize -> ParseFailureReason.JsonStringSizeLimit
+                        ResourceLimit.ImagePixelCount -> ParseFailureReason.ImagePixelCountLimit
+                        ResourceLimit.LocaleCount -> ParseFailureReason.LocaleCountLimit
+                    }
+            }
+        is ParseResult.Unsupported ->
+            when (reason) {
+                is UnsupportedReason.FormatVersion -> ParseFailureReason.UnsupportedFormatVersion
+                is UnsupportedReason.UnknownPassStyle -> ParseFailureReason.UnknownPassStyle
+                UnsupportedReason.EncryptedArchive -> ParseFailureReason.EncryptedArchive
+            }
+    }

@@ -275,6 +275,9 @@ class PassParserTest {
             .inOrder()
         val failed = recorder.events[1] as RecordedEvent.Failed
         assertThat(failed.event.outcome).isEqualTo(ParseFailureKind.Malformed)
+        // Reason must travel with outcome — a one-byte input lands on the
+        // NotAZipArchive arm, which the parser populates via toFailureReason().
+        assertThat(failed.event.reason).isEqualTo(ParseFailureReason.NotAZipArchive)
     }
 
     @Test
