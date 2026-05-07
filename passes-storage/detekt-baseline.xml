@@ -26,7 +26,7 @@
     <ID>SwallowedException:BackupRulesAssertion.kt$BackupRulesAssertion$e: NoSuchFieldException</ID>
     <ID>SwallowedException:BackupRulesAssertion.kt$BackupRulesAssertion$e: PackageManager.NameNotFoundException</ID>
     <ID>TooGenericExceptionCaught:AndroidKeystorePassKeyProvider.kt$AndroidKeystorePassKeyProvider.Companion$e: Throwable</ID>
-    <ID>TooGenericExceptionCaught:SqlCipherDatabaseFactory.kt$SqlCipherDatabaseFactory$e: Throwable</ID>
+    <ID>TooGenericExceptionCaught:SqlCipherDatabaseFactory.kt$SqlCipherDatabaseFactory$e: Exception</ID>
     <ID>TooGenericExceptionCaught:SqlCipherPassRepository.kt$SqlCipherPassRepository$e: Throwable</ID>
     <ID>TooGenericExceptionCaught:SqlCipherPassRepository.kt$SqlCipherPassRepository.Companion$e: Throwable</ID>
     <ID>UnnecessaryParentheses:WrappedKeyStorage.kt$WrappedKeyEnvelope$(other is WrappedKeyEnvelope &amp;&amp; ciphertext.contentEquals(other.ciphertext) &amp;&amp; iv.contentEquals(other.iv) &amp;&amp; keyAlias == other.keyAlias)</ID>
