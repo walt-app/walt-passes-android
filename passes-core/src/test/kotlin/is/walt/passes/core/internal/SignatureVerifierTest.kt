@@ -244,15 +244,16 @@ class SignatureVerifierTest {
     @Test
     fun realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider() {
         // Regression coverage for wpass-4js, simulating the Android shape on JVM.
-        // Android ships a stripped-down BouncyCastle under the "BC" provider name; it
-        // omits the CMS / PKCS#7 packages we need. Before the fix, SignatureVerifier
-        // looked BC up by name (`setProvider("BC")`), which resolved to whatever the
-        // host process had registered under "BC" — Android's stripped instance, not
-        // our bundled bcprov-jdk18on:1.79. CMS verification then failed and every
-        // Apple-signed pkpass surfaced as Tampered. The fix is to hold a
-        // BouncyCastleProvider INSTANCE and pass it to BC builders directly. This
-        // test parks a non-BC provider in the "BC" slot before invoking the verifier;
-        // a name-lookup-based implementation would resolve to the fake and fail. We
+        // On-device probing confirmed: AOSP ships a stripped-down BouncyCastle 1.77
+        // under the "BC" provider name. Its 105 services do not include
+        // Signature.SHA256withRSA, so Signature.getInstance("SHA256withRSA", "BC")
+        // throws NoSuchAlgorithmException — caught by SignatureVerifier's outer
+        // runCatching and surfaced as Failed(SignatureCryptoFailure), the field-
+        // observed shape. The fix is to hold a BouncyCastleProvider INSTANCE and pass
+        // it to BC builders directly, bypassing JCE name lookup. This test parks a
+        // bare Provider under "BC" before invoking the verifier so any name-lookup
+        // path resolves to the fake (which has no Signature service at all) and
+        // throws the same NoSuchAlgorithmException the real device throws. We
         // restore the original "BC" registration in a finally so downstream tests in
         // the same JVM are unaffected.
         val savedBc = Security.getProvider("BC")
@@ -316,12 +317,15 @@ class SignatureVerifierTest {
 
     @Test
     fun appleVerifiedWhenSignerIdIsSubjectKeyIdentifier() {
-        // Regression coverage for wpass-4js. Apple's PassKit signer references the leaf
-        // by SubjectKeyIdentifier (every Pass Type ID certificate Apple issues uses SKI,
-        // never IssuerAndSerialNumber), and prior to the fix `firstSignerWithCert`
-        // returned null for this signer-ID flavor — collapsing every Apple-signed pkpass
-        // to ParseResult.Tampered. The synthetic chain here is structurally what Apple
-        // ships: leaf with an SKI extension, signer.sid pointing at that SKI.
+        // Forward coverage for the SubjectKeyIdentifier signer-ID flavor that every
+        // Apple-issued Pass Type ID certificate uses. SKI was the wpass-4js initial
+        // hypothesis but on-device probing showed it was a red herring: the actual
+        // failure was setProvider("BC") resolving to AOSP's stripped 1.77 BC, where
+        // Signature.getInstance("SHA256withRSA", "BC") throws NoSuchAlgorithmException
+        // — see realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider. The
+        // SKI path itself worked all along; this case stays in the suite so a future
+        // regression in firstSignerWithCert's holder lookup, or in BC's SKI matcher,
+        // surfaces here instead of silently degrading every Apple-signed import.
         val rootKey = newRsaKeyPair()
         val rootCert = selfSignedCertificate(rootKey, "CN=Test Apple Root")
         val leafKey = newRsaKeyPair()
@@ -344,10 +348,11 @@ class SignatureVerifierTest {
     @Test
     fun manifestSignatureMismatchForSkiSignerWithTamperedManifest() {
         // SKI-signer-ID counterpart to manifestSignatureMismatchWhenManifestBytesTamperedByOneByte.
-        // Once firstSignerWithCert returns the leaf for an SKI sid, the digest path must
-        // still classify a tampered manifest correctly — without this case a regression
-        // could trade one wrong arm (Tampered for valid passes) for another (Ok for
-        // tampered passes).
+        // Forward coverage: the digest-mismatch arm must keep classifying SKI-signed-but-
+        // tampered envelopes correctly. Without this case a future regression could
+        // produce the inverse failure (Ok on tampered SKI-signed passes), which is the
+        // genuinely dangerous shape — Tampered-on-valid is annoying, Ok-on-tampered is
+        // a security event.
         val key = newRsaKeyPair()
         val leaf = selfSignedCertificate(key, "CN=Self")
         val original = "{\"pass.json\":\"abcd\"}".toByteArray()

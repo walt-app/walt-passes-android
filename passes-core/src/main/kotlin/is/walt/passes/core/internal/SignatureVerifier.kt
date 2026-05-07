@@ -158,19 +158,22 @@ private fun finalizeVerification(
 /**
  * The BouncyCastle [`org.bouncycastle.jce.provider.BouncyCastleProvider`] instance
  * passed to every BC builder in this file. **Why an instance, not the `"BC"` provider
- * name** (wpass-4js): Android ships a stripped-down BC under the `"BC"` slot that
- * lacks CMS / PKCS#7 support. Passing the string `"BC"` to BC builders resolves it
- * via [java.security.Security.getProvider], which returns Android's stripped instance
- * rather than the `bcprov-jdk18on:1.79` we ship in our APK. CMS verification with the
- * stripped provider mismatches in subtle ways (signer-info digest paths in particular)
- * and surfaces every Apple-signed pkpass as [SignatureVerifyResult.Failed]. Holding
- * our own instance and passing it directly to provider-instance overloads of the BC
- * builders bypasses the JCE name registry entirely — the answer to "which BC are we
- * using?" is no longer a function of how the system Security registry happens to be
- * ordered. The instance is created lazily; this layer never registers it under
- * `Security.addProvider`, both because none of the call sites we use here require
- * registry lookup and because trampling whatever the host process registered under
- * `"BC"` would surprise other code in the same process.
+ * name** (wpass-4js): on-device probing confirmed AOSP ships a stripped-down
+ * BouncyCastle 1.77 fork under the `"BC"` slot whose 105 services do not include
+ * `Signature.SHA256withRSA`. Passing the string `"BC"` to BC builders resolves it via
+ * [java.security.Security.getProvider], which returns Android's stripped instance
+ * rather than the `bcprov-jdk18on:1.79` we ship in our APK; the verifier's
+ * `Signature.getInstance("SHA256withRSA", "BC")` lookup then throws
+ * [java.security.NoSuchAlgorithmException], the outer `runCatching` absorbs it, and
+ * every Apple-signed pkpass surfaces as [SignatureVerifyResult.Failed]
+ * ([TamperReason.SignatureCryptoFailure]). Holding our own instance and passing it
+ * directly to provider-instance overloads of the BC builders bypasses the JCE name
+ * registry entirely — the answer to "which BC are we using?" is no longer a function
+ * of how the system Security registry happens to be ordered. The instance is created
+ * lazily; this layer never registers it under [java.security.Security.addProvider],
+ * both because none of the call sites here require registry lookup and because
+ * trampling whatever the host process registered under `"BC"` would surprise other
+ * code in the same process.
  */
 private val BC_PROVIDER: BouncyCastleProvider by lazy { BouncyCastleProvider() }
 
