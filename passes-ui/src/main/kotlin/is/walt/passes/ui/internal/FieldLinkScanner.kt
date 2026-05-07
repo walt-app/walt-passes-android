@@ -29,8 +29,13 @@ import `is`.walt.passes.ui.SourceField
  *   spoofing class — e.g. `https://attacker.example/‮gpj.elgoog//:sptth` rendering
  *   visually as a Google asset URL while `Uri.parse` resolves to `attacker.example`.
  *   Tested in `FieldLinkScannerTest`.
- * - A phone number requires at least seven digits and is constrained to ASCII digits,
- *   spaces, hyphens, and parentheses.
+ * - A phone number requires at least seven digits AND at least one formatting hint
+ *   (a leading `+`, an embedded space, dash, or parenthesis) before it is recognised.
+ *   Bare digit runs — ticket numbers, order IDs, member numbers, barcode payloads —
+ *   are left as plain text. This mirrors Apple's data-detector behavior in iOS Wallet
+ *   and prevents two failure modes: (a) accidental "Call this number?" prompts on
+ *   every numeric field of a real pass, and (b) a malicious pass embedding a
+ *   premium-rate dial string in a value that the user reads as a reference number.
  * - An email requires an `@` with non-empty ASCII local and domain parts.
  *
  * Belt-and-suspenders: every match is post-filtered through [containsRenderingHazard],
@@ -99,6 +104,7 @@ internal object FieldLinkScanner {
         for (match in phoneRegex.findAll(fieldValue)) {
             val digitCount = match.value.count { it.isDigit() }
             if (digitCount < 7) continue
+            if (!hasPhoneFormattingHint(match, fieldValue)) continue
             if (overlapsExisting(match.range.first, match.range.last + 1, spans)) continue
             spans += LinkSpan(
                 start = match.range.first,
@@ -125,11 +131,44 @@ internal object FieldLinkScanner {
         c.category == CharCategory.FORMAT || c.isISOControl()
     }
 
+    /**
+     * True if the matched phone candidate carries at least one visible formatting hint:
+     * an internal `+`, dash, space, or parenthesis, OR an immediately adjacent `+` /
+     * `(` before the match or `)` after it. A bare digit run with no formatting and no
+     * adjacent paren or `+` is rejected.
+     *
+     * The two-stage check (internal + adjacent) handles the regex quirk that the inner
+     * pattern starts with `\+?\d`, so a phone written as `(5551234567)` matches only
+     * the digits — the parens stay outside the match. Without an adjacency check those
+     * inputs would lose their hints and be rejected. The space character is *not*
+     * accepted as an adjacency hint: surrounding spaces are the default text rhythm and
+     * would re-admit every numeric reference value (the wpass-536 regression).
+     *
+     * The check matches Apple's data-detector posture: numeric strings without
+     * formatting hints (ticket numbers, order IDs, barcodes, member numbers) are left
+     * non-tappable. This is the wpass-536 regression guard — the prior implementation
+     * fired on any 7+-digit run and turned every reference-number field into an
+     * accidental "Call this number?" prompt. It is also a meaningful narrowing of the
+     * attack surface: a malicious pass author can no longer plant a premium-rate dial
+     * string in a field labeled `ticketNumber` and rely on auto-detection to surface it.
+     */
+    private fun hasPhoneFormattingHint(match: MatchResult, fullText: String): Boolean {
+        if (match.value.any { it in INTERNAL_PHONE_HINTS }) return true
+        val before = fullText.getOrNull(match.range.first - 1)
+        val after = fullText.getOrNull(match.range.last + 1)
+        return before in PHONE_PREFIX_HINTS || after == ')'
+    }
+
     private fun overlapsExisting(
         start: Int,
         endExclusive: Int,
         existing: List<LinkSpan>,
     ): Boolean = existing.any { it.start < endExclusive && start < it.endExclusive }
+
+    private val INTERNAL_PHONE_HINTS = setOf('+', '-', ' ', '(', ')')
+
+    /** `+` and `(` immediately before a digit run signal an unmatched-paren or international form. */
+    private val PHONE_PREFIX_HINTS = setOf('+', '(')
 }
 
 internal data class LinkSpan(

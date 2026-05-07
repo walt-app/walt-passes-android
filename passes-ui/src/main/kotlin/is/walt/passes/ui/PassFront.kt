@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.CompositionLocalProvider
 import `is`.walt.passes.core.ColorValue
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassField
@@ -29,6 +30,9 @@ import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.core.TextAlignment
+import `is`.walt.passes.core.lookupOrSelf
+import `is`.walt.passes.core.resolveLocalizedStrings
+import `is`.walt.passes.ui.internal.LocalLocalizedStrings
 import `is`.walt.passes.ui.theme.LocalPassesSemantics
 import `is`.walt.passes.ui.theme.toComposeColor
 
@@ -54,13 +58,18 @@ public fun PassFront(
     signatureStatus: SignatureStatus,
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
-    @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"),
+    locale: PassLocale = PassLocale("en"),
     nowEpochMillis: Long = System.currentTimeMillis(),
 ) {
     val band = signatureStatus.toBand()
     val expired = remember(pass, nowEpochMillis) {
         ExpiredOverlayState.from(pass, nowEpochMillis)
     }
+    // wpass-38y: PKPASS allows the front-side organizationName, field labels, and
+    // field values to be pass.strings keys; substitute them through the resolved
+    // strings table so localized labels render instead of raw `#KEY#` placeholders.
+    val strings = remember(pass, locale) { pass.resolveLocalizedStrings(locale) }
+    val displayOrganizationName = strings.lookupOrSelf(pass.organizationName) ?: pass.organizationName
     androidx.compose.runtime.LaunchedEffect(pass, band) {
         telemetry.onPassRendered(pass.type, band)
     }
@@ -69,63 +78,72 @@ public fun PassFront(
     val passForeground = pass.colors.foreground.toComposeOrDefault(MaterialTheme.colorScheme.onSurface)
     val passLabel = pass.colors.label.toComposeOrDefault(passForeground.copy(alpha = 0.7f))
 
-    Box(modifier = modifier) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = passBackground,
-            contentColor = passForeground,
-            shape = RoundedCornerShape(16.dp),
-            tonalElevation = 0.dp,
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    Text(
-                        text = pass.organizationName,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = passLabel,
-                        modifier = Modifier.weight(1f),
-                    )
-                    SignatureTrustBadge(band = band)
-                }
-
-                when (pass.type) {
-                    PassType.BoardingPass -> BoardingPassBody(
-                        pass.frontFields,
-                        passForeground,
-                        passLabel,
-                    )
-                    PassType.EventTicket -> EventTicketBody(
-                        pass.frontFields,
-                        passForeground,
-                        passLabel,
-                    )
-                    PassType.Coupon, PassType.StoreCard, PassType.Generic -> GenericBody(
-                        pass.frontFields,
-                        passForeground,
-                        passLabel,
-                    )
-                }
-
-                pass.barcode?.let { barcode ->
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        BarcodeView(barcode = barcode)
-                    }
-                }
+    CompositionLocalProvider(LocalLocalizedStrings provides strings) {
+        Box(modifier = modifier) {
+            PassFrontSurface(
+                pass = pass,
+                band = band,
+                displayOrganizationName = displayOrganizationName,
+                passBackground = passBackground,
+                passForeground = passForeground,
+                passLabel = passLabel,
+            )
+            if (expired !is ExpiredOverlayState.None) {
+                ExpiredOverlay(state = expired, modifier = Modifier.matchParentSize())
             }
         }
+    }
+}
 
-        if (expired !is ExpiredOverlayState.None) {
-            ExpiredOverlay(state = expired, modifier = Modifier.matchParentSize())
+@Composable
+private fun PassFrontSurface(
+    pass: Pass,
+    band: SignatureBand,
+    displayOrganizationName: String,
+    passBackground: Color,
+    passForeground: Color,
+    passLabel: Color,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        color = passBackground,
+        contentColor = passForeground,
+        shape = RoundedCornerShape(16.dp),
+        tonalElevation = 0.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(
+                    text = displayOrganizationName,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = passLabel,
+                    modifier = Modifier.weight(1f),
+                )
+                SignatureTrustBadge(band = band)
+            }
+
+            when (pass.type) {
+                PassType.BoardingPass -> BoardingPassBody(pass.frontFields, passForeground, passLabel)
+                PassType.EventTicket -> EventTicketBody(pass.frontFields, passForeground, passLabel)
+                PassType.Coupon, PassType.StoreCard, PassType.Generic ->
+                    GenericBody(pass.frontFields, passForeground, passLabel)
+            }
+
+            pass.barcode?.let { barcode ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    BarcodeView(barcode = barcode)
+                }
+            }
         }
     }
 }
@@ -249,8 +267,14 @@ private fun FieldCell(
         TextAlignment.Center -> TextAlign.Center
         TextAlignment.Right -> TextAlign.End
     }
+    // wpass-38y: substitute label and value through the pass.strings table provided
+    // by the enclosing PassFront. Misses fall through to the raw text, so dynamic
+    // values (codes, dates, numbers) emerge unchanged.
+    val strings = LocalLocalizedStrings.current
+    val displayLabel = strings.lookupOrSelf(field.label)
+    val displayValue = strings.lookupOrSelf(field.value).orEmpty()
     Column(modifier = modifier) {
-        field.label?.takeIf { it.isNotBlank() }?.let { label ->
+        displayLabel?.takeIf { it.isNotBlank() }?.let { label ->
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelSmall,
@@ -260,7 +284,7 @@ private fun FieldCell(
             )
         }
         Text(
-            text = field.value,
+            text = displayValue,
             style = valueStyle,
             color = foreground,
             textAlign = align,

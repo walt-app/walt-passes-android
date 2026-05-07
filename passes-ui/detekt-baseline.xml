@@ -2,15 +2,14 @@
 <SmellBaseline>
   <ManuallySuppressedIssues/>
   <CurrentIssues>
-    <ID>LongMethod:PassFront.kt$@Composable public fun PassFront( pass: Pass, signatureStatus: SignatureStatus, telemetry: UiTelemetryGuard, modifier: Modifier = Modifier, @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"), nowEpochMillis: Long = System.currentTimeMillis(), )</ID>
     <ID>LongMethod:SecuritySheets.kt$@OptIn(ExperimentalMaterial3Api::class) @Composable private fun SecuritySheet( kind: SecurityIntentKind, passType: PassType, title: String, target: String, source: SourceField, confirmCopy: String, telemetry: UiTelemetryGuard, onConfirm: () -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
     <ID>LongParameterList:BoundedImage.kt$( bytes: ImageBytes, @Suppress("UNUSED_PARAMETER") role: ImageRole, contentDescription: String?, telemetry: UiTelemetryGuard, modifier: Modifier = Modifier, bounds: ImageRenderBounds = ImageRenderBounds.Default, )</ID>
-    <ID>LongParameterList:PassBack.kt$( pass: Pass, onUrlIntent: (B3UrlIntent) -&gt; Unit, onPhoneIntent: (PhoneIntent) -&gt; Unit, onEmailIntent: (EmailIntent) -&gt; Unit, telemetry: UiTelemetryGuard, modifier: Modifier = Modifier, @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"), )</ID>
+    <ID>LongParameterList:PassBack.kt$( pass: Pass, onUrlIntent: (B3UrlIntent) -&gt; Unit, onPhoneIntent: (PhoneIntent) -&gt; Unit, onEmailIntent: (EmailIntent) -&gt; Unit, telemetry: UiTelemetryGuard, modifier: Modifier = Modifier, locale: PassLocale = PassLocale("en"), )</ID>
     <ID>LongParameterList:PassFront.kt$( field: PassField, foreground: Color, labelColor: Color, valueStyle: androidx.compose.ui.text.TextStyle, modifier: Modifier = Modifier, textAlign: TextAlign? = null, )</ID>
-    <ID>LongParameterList:PassFront.kt$( pass: Pass, signatureStatus: SignatureStatus, telemetry: UiTelemetryGuard, modifier: Modifier = Modifier, @Suppress("UNUSED_PARAMETER") locale: PassLocale = PassLocale("en"), nowEpochMillis: Long = System.currentTimeMillis(), )</ID>
+    <ID>LongParameterList:PassFront.kt$( pass: Pass, band: SignatureBand, displayOrganizationName: String, passBackground: Color, passForeground: Color, passLabel: Color, )</ID>
+    <ID>LongParameterList:PassFront.kt$( pass: Pass, signatureStatus: SignatureStatus, telemetry: UiTelemetryGuard, modifier: Modifier = Modifier, locale: PassLocale = PassLocale("en"), nowEpochMillis: Long = System.currentTimeMillis(), )</ID>
     <ID>LongParameterList:SecuritySheets.kt$( kind: SecurityIntentKind, passType: PassType, title: String, target: String, source: SourceField, confirmCopy: String, telemetry: UiTelemetryGuard, onConfirm: () -&gt; Unit, onDismiss: () -&gt; Unit, )</ID>
     <ID>LoopWithTooManyJumpStatements:FieldLinkScanner.kt$FieldLinkScanner$for</ID>
-    <ID>MaxLineLength:SecuritySheets.kt$/** First Strong Isolate (U+2068). Opens an isolate that takes the directional class of the first strong-class character within. */</ID>
     <ID>ReturnCount:ExpiredOverlayState.kt$ExpiredOverlayState.Companion$@JvmStatic public fun from(pass: Pass, nowEpochMillis: Long): ExpiredOverlayState</ID>
     <ID>SwallowedException:BoundedImage.kt$e: IOException</ID>
     <ID>SwallowedException:BoundedImage.kt$e: IllegalArgumentException</ID>

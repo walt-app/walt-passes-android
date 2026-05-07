@@ -131,7 +131,62 @@ public enum class ImageRole {
 }
 
 /** Contents of a single `<locale>.lproj/pass.strings` file. */
-public data class LocalizedStrings(public val entries: Map<String, String>)
+public data class LocalizedStrings(public val entries: Map<String, String>) {
+    public companion object {
+        /** Empty strings table. Used as the no-op fallback when a pass carries no locales. */
+        public val Empty: LocalizedStrings = LocalizedStrings(emptyMap())
+    }
+}
+
+/**
+ * Looks [raw] up in this strings table; if absent (or [raw] is null), returns [raw]
+ * unchanged. This is Apple's documented PKPASS behavior for `label`, `value`, and
+ * `attributedValue`: the field's literal text is treated as the lookup key, and a
+ * miss falls through to the raw text.
+ *
+ * The "fall through to raw" path is what makes the substitution idempotent and makes
+ * dynamic field values (ticket numbers, dates, codes) safe to pipe through this
+ * function: they will not match any key and emerge unchanged.
+ */
+public fun LocalizedStrings.lookupOrSelf(raw: String?): String? {
+    if (raw == null) return null
+    return entries[raw] ?: raw
+}
+
+/**
+ * Resolves a [LocalizedStrings] from this pass's [Pass.locales] for [preferred], using
+ * Apple's documented PKPASS locale-fallback chain:
+ *
+ *  1. Exact tag match (`en-US` finds `en-US.lproj`).
+ *  2. Language-only fallback (`en-US` -> `en`, `sv-FI` -> `sv`). The split point is
+ *     either `-` (BCP 47) or `_` (legacy `Locale.toString()` form), whichever the
+ *     consumer hands in.
+ *  3. The `en` table, when present. Apple treats English as the implicit project
+ *     fallback.
+ *  4. The first locale declared in archive order. PKPASS does not pin a "default"
+ *     locale; this matches the order [DefaultPassParser.collectLocales] preserves
+ *     and gives the consumer *some* localized substitution rather than reverting
+ *     every label to its raw key.
+ *  5. [LocalizedStrings.Empty] when the pass has no `.lproj/pass.strings` at all.
+ *     The empty table makes [LocalizedStrings.lookupOrSelf] a pure passthrough so
+ *     callers can substitute unconditionally.
+ *
+ * Pure function: passes-core never reads the device locale itself (it is JVM-only by
+ * module boundary and KMP-portable by intent). The consumer module that knows the
+ * platform locale APIs hands the chosen [PassLocale] in.
+ */
+public fun Pass.resolveLocalizedStrings(preferred: PassLocale): LocalizedStrings {
+    if (locales.isEmpty()) return LocalizedStrings.Empty
+    val language = preferred.tag.substringBefore('-').substringBefore('_')
+    val languageFallback =
+        language
+            .takeIf { it.isNotEmpty() && it != preferred.tag }
+            ?.let { locales[PassLocale(it)] }
+    return locales[preferred]
+        ?: languageFallback
+        ?: locales[PassLocale("en")]
+        ?: locales.values.first()
+}
 
 /**
  * BCP-47 language tag, e.g. `en-US`, `de`, `zh-Hant`. Parsing of the tag itself is left to
