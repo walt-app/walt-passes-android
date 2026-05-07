@@ -1,0 +1,14 @@
+{
+  "pass.json": "e9f12aac294921cada61e61c63e3f035e9785d05",
+  "logo.png": "39a4840206f70dce071b17f5979f1407c33e5dcd",
+  "icon.png": "39a4840206f70dce071b17f5979f1407c33e5dcd",
+  "icon@2x.png": "39a4840206f70dce071b17f5979f1407c33e5dcd",
+  "en.lproj/pass.strings": "aa16c96fbde7455668f8292df201e02cb74c47bc",
+  "da.lproj/pass.strings": "33c5dd003be7aaea931930d21dac5c8a6a26aab0",
+  "fi.lproj/pass.strings": "cbadde29b346173b7e6664f276ce1ad2ac975985",
+  "is.lproj/pass.strings": "04f3af79f2b3ffc3cc1493936786c9246b2a4bf1",
+  "nb.lproj/pass.strings": "51e5744615318a03bfa2ec5e0ac0b345739b0458",
+  "nl.lproj/pass.strings": "015a383c565e0387fb8de683d583e360de995789",
+  "sv.lproj/pass.strings": "076b1ee6b65d90ab5f3dfd47af68bf6ba104fc04",
+  "de.lproj/pass.strings": "696d3574661fb3f05113f5f99f01f12fc8b58c3f"
+}

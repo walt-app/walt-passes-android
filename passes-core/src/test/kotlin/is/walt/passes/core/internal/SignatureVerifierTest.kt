@@ -5,8 +5,11 @@ import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.core.TamperReason
+import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.BeforeClass
 import org.junit.Test
+import java.security.Provider
+import java.security.Security
 import java.security.cert.TrustAnchor
 
 /**
@@ -160,6 +163,30 @@ class SignatureVerifierTest {
     }
 
     @Test
+    fun signerCertificateMissingWhenSignerIdMatchesNoCertInEnvelope() {
+        // Mint two leaves under the same fake CA. Sign with leafA but embed only leafB
+        // in the CMS envelope's certificate set. The SignerInfo's SignerIdentifier then
+        // points at leafA (whichever flavor — IssuerAndSerialNumber here), but
+        // holderStore().getMatches returns empty, so firstSignerWithCert returns null
+        // and the verifier surfaces TamperReason.SignerCertificateMissing — separately
+        // from SignatureCryptoFailure (a structural-corruption signal). This is the
+        // behavior the wpass-4js post-mortem called for: distinguishing "envelope
+        // parses but signer cert is absent" from "envelope is garbage" in telemetry.
+        val rootKey = newRsaKeyPair()
+        val rootCert = selfSignedCertificate(rootKey, "CN=Root")
+        val leafAKey = newRsaKeyPair()
+        val leafA = signLeafCertificate(leafAKey.public, rootKey, rootCert, "CN=Leaf A (signs)")
+        val leafBKey = newRsaKeyPair()
+        val leafB = signLeafCertificate(leafBKey.public, rootKey, rootCert, "CN=Leaf B (in envelope)")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature = cmsDetachedSignature(manifest, leafA, leafAKey.private, listOf(leafB, rootCert))
+
+        val result = runWithFakeAnchor(signature, manifest, ParserConfig())
+
+        assertFailed(result, TamperReason.SignerCertificateMissing)
+    }
+
+    @Test
     fun signatureCryptoFailureForGarbageBlob() {
         val garbage = ByteArray(64) { it.toByte() }
         val manifest = "{}".toByteArray()
@@ -212,6 +239,124 @@ class SignatureVerifierTest {
                 emptySet(),
             )
         assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    @Test
+    fun realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider() {
+        // Regression coverage for wpass-4js, simulating the Android shape on JVM.
+        // Android ships a stripped-down BouncyCastle under the "BC" provider name; it
+        // omits the CMS / PKCS#7 packages we need. Before the fix, SignatureVerifier
+        // looked BC up by name (`setProvider("BC")`), which resolved to whatever the
+        // host process had registered under "BC" — Android's stripped instance, not
+        // our bundled bcprov-jdk18on:1.79. CMS verification then failed and every
+        // Apple-signed pkpass surfaced as Tampered. The fix is to hold a
+        // BouncyCastleProvider INSTANCE and pass it to BC builders directly. This
+        // test parks a non-BC provider in the "BC" slot before invoking the verifier;
+        // a name-lookup-based implementation would resolve to the fake and fail. We
+        // restore the original "BC" registration in a finally so downstream tests in
+        // the same JVM are unaffected.
+        val savedBc = Security.getProvider("BC")
+        Security.removeProvider("BC")
+        Security.addProvider(StrippedFakeBcProvider())
+        try {
+            val (manifest, signature) = loadAppleSignedFixture()
+
+            val result = verifySignature(signature, manifest, ParserConfig())
+
+            assertOk(result, SignatureStatus.AppleVerified)
+        } finally {
+            Security.removeProvider("BC")
+            // ensureBouncyCastleProvider() in @BeforeClass already added BC for the
+            // suite; restore that exact instance so other tests see the registry they
+            // expect.
+            if (savedBc != null) {
+                Security.addProvider(savedBc)
+            } else {
+                Security.addProvider(BouncyCastleProvider())
+            }
+        }
+    }
+
+    /**
+     * Stand-in for the Android-shipped BC: registers under the same `"BC"` name slot
+     * but advertises no algorithms. A name-lookup implementation that resolves
+     * `setProvider("BC")` against [Security.getProvider] picks this up and fails fast;
+     * a fixed implementation that holds its own [BouncyCastleProvider] reference does
+     * not see this provider at all.
+     */
+    private class StrippedFakeBcProvider : Provider("BC", 1.0, "Fake stripped BC for wpass-4js regression test")
+
+    @Test
+    fun realAppleSignedPkpassFixtureVerifies() {
+        // Regression coverage for wpass-4js. The fixture is the manifest + signature
+        // pair from a real Apple-signed pkpass (Tixly Chroniques ticket; Pass Type ID
+        // pass.com.tixly, team A6DLLVNVR7, signed under WWDR G4). It's the smallest
+        // possible end-to-end check against the bundled Apple anchor set: the synthetic
+        // SKI test uses `verifySignatureAgainstAnchorsForTesting`, which lets us invent
+        // our own root, but only the production `verifySignature(...)` entrypoint
+        // exercises both the SKI signer-ID path AND the Apple Root CA bundling path
+        // simultaneously — which is the combination that broke in the field.
+        val (manifest, signature) = loadAppleSignedFixture()
+
+        val result = verifySignature(signature, manifest, ParserConfig())
+
+        assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    private fun loadAppleSignedFixture(): Pair<ByteArray, ByteArray> {
+        val cls = SignatureVerifierTest::class.java
+        val manifest =
+            cls.getResourceAsStream("fixtures/apple-signed/manifest.json")?.use { it.readBytes() }
+                ?: error("Fixture missing: fixtures/apple-signed/manifest.json")
+        val signature =
+            cls.getResourceAsStream("fixtures/apple-signed/signature")?.use { it.readBytes() }
+                ?: error("Fixture missing: fixtures/apple-signed/signature")
+        return manifest to signature
+    }
+
+    @Test
+    fun appleVerifiedWhenSignerIdIsSubjectKeyIdentifier() {
+        // Regression coverage for wpass-4js. Apple's PassKit signer references the leaf
+        // by SubjectKeyIdentifier (every Pass Type ID certificate Apple issues uses SKI,
+        // never IssuerAndSerialNumber), and prior to the fix `firstSignerWithCert`
+        // returned null for this signer-ID flavor — collapsing every Apple-signed pkpass
+        // to ParseResult.Tampered. The synthetic chain here is structurally what Apple
+        // ships: leaf with an SKI extension, signer.sid pointing at that SKI.
+        val rootKey = newRsaKeyPair()
+        val rootCert = selfSignedCertificate(rootKey, "CN=Test Apple Root")
+        val leafKey = newRsaKeyPair()
+        val leafCert = signLeafCertificate(leafKey.public, rootKey, rootCert, "CN=Test Apple Leaf")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature = cmsDetachedSignatureWithSki(manifest, leafCert, leafKey.private, listOf(leafCert, rootCert))
+
+        val result =
+            verifySignatureAgainstAnchorsForTesting(
+                signatureBytes = signature,
+                manifestBytes = manifest,
+                config = ParserConfig(),
+                trustAnchors = setOf(TrustAnchor(rootCert, null)),
+                knownIntermediates = emptySet(),
+            )
+
+        assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    @Test
+    fun manifestSignatureMismatchForSkiSignerWithTamperedManifest() {
+        // SKI-signer-ID counterpart to manifestSignatureMismatchWhenManifestBytesTamperedByOneByte.
+        // Once firstSignerWithCert returns the leaf for an SKI sid, the digest path must
+        // still classify a tampered manifest correctly — without this case a regression
+        // could trade one wrong arm (Tampered for valid passes) for another (Ok for
+        // tampered passes).
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Self")
+        val original = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature = cmsDetachedSignatureWithSki(original, leaf, key.private, listOf(leaf))
+        val tampered = original.copyOf().also { it[1] = 0x20 }
+
+        val result = runWithFakeAnchor(signature, tampered, ParserConfig())
+
+        assertFailed(result, TamperReason.ManifestSignatureMismatch)
     }
 
     @Test

@@ -34,6 +34,19 @@ public sealed interface TamperReason {
 
     /** The signature blob is structurally a PKCS#7 envelope but cryptographically malformed. */
     public data object SignatureCryptoFailure : TamperReason
+
+    /**
+     * The CMS / PKCS#7 envelope parsed cleanly but its first SignerInfo references a
+     * certificate (by IssuerAndSerialNumber or SubjectKeyIdentifier) that is not
+     * present in the envelope's certificate set. Distinct from
+     * [SignatureCryptoFailure] (which covers structural corruption and unexpected BC
+     * exceptions) so telemetry can distinguish a malformed-but-parseable envelope
+     * from a genuine cryptographic miss. Surfaced as a separate arm because folding
+     * it into [SignatureCryptoFailure] hid the wpass-4js regression: a misclassified
+     * signer-ID code path looked identical in logcat to a corrupted blob, which
+     * bought the bug months of unflagged production exposure.
+     */
+    public data object SignerCertificateMissing : TamperReason
 }
 
 public sealed interface MalformedReason {

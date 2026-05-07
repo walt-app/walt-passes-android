@@ -14,7 +14,6 @@ import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.util.Selector
 import org.bouncycastle.util.Store
-import java.security.Security
 import java.security.cert.CertPathBuilder
 import java.security.cert.CertStore
 import java.security.cert.CollectionCertStoreParameters
@@ -38,7 +37,7 @@ import java.security.cert.X509Certificate
  * signature and `manifestBytes` is always a tampering signal, regardless of the
  * trust toggle.
  *
- * **Three failure shapes, mapped to two [TamperReason] arms:**
+ * **Four failure shapes, mapped to three [TamperReason] arms:**
  *
  *  1. CMS structurally well-formed and the signed math evaluates against
  *     `manifestBytes` to "doesn't match" — either [SignerInformation.verify] returns
@@ -49,7 +48,12 @@ import java.security.cert.X509Certificate
  *     ([TamperReason.SignatureCryptoFailure]). The outer `runCatching` is the
  *     load-bearing safety net here: `verifySignature` must never propagate an
  *     exception out, since the parser-glue bead's `when` cannot surface one.
- *  3. CMS verifies but the cert chain does not reach a bundled Apple anchor — the
+ *  3. CMS parses but the first SignerInfo's identifier (IssuerAndSerialNumber or
+ *     SubjectKeyIdentifier) finds no matching certificate in the envelope's cert
+ *     set. → [Failed] ([TamperReason.SignerCertificateMissing]). Bucketed apart
+ *     from [SignatureCryptoFailure] so telemetry can distinguish a malformed
+ *     envelope from a wrong-signer-ID-shape regression (wpass-4js).
+ *  4. CMS verifies but the cert chain does not reach a bundled Apple anchor — the
  *     [ParserConfig.acceptSelfSignedCertificates] toggle decides between
  *     [SignatureStatus.SelfSigned] / [SignatureStatus.CertChainIncomplete] (lenient,
  *     default) or [TamperReason.SignatureCryptoFailure] (strict).
@@ -79,7 +83,6 @@ internal fun verifySignature(
     manifestBytes: ByteArray,
     config: ParserConfig,
 ): SignatureVerifyResult {
-    ensureBouncyCastleRegistered()
     // Anchor lookups MUST live inside the runCatching: AppleTrustAnchors.trustAnchors()
     // calls into resource I/O and CertificateFactory.generateCertificate, both of which
     // can throw if the JAR is repackaged (proguard/R8 stripping, shaded classpath, a
@@ -110,8 +113,9 @@ internal fun verifySignature(
  * test in this suite would catch, since the suite itself routes through here. The
  * `ForTesting` suffix is the conventional flag.
  *
- * Otherwise identical to the production path: the BC provider is registered on
- * first call, exceptions are caught, and the policy mapping is the same.
+ * Otherwise identical to the production path: the same lazily-constructed
+ * [BouncyCastleProvider] instance is reused, exceptions are caught, and the policy
+ * mapping is the same.
  */
 internal fun verifySignatureAgainstAnchorsForTesting(
     signatureBytes: ByteArray,
@@ -120,7 +124,6 @@ internal fun verifySignatureAgainstAnchorsForTesting(
     trustAnchors: Set<TrustAnchor>,
     knownIntermediates: Set<X509Certificate>,
 ): SignatureVerifyResult {
-    ensureBouncyCastleRegistered()
     val ctx = VerifyContext(config, trustAnchors, knownIntermediates)
     return runCatching { verifyAndClassify(signatureBytes, manifestBytes, ctx) }
         .getOrElse { SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure) }
@@ -134,7 +137,7 @@ private fun verifyAndClassify(
     val signedData = CMSSignedData(CMSProcessableByteArray(manifestBytes), signatureBytes)
     val signerCert =
         firstSignerWithCert(signedData)
-            ?: return SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure)
+            ?: return SignatureVerifyResult.Failed(TamperReason.SignerCertificateMissing)
     return finalizeVerification(signerCert, signedData, ctx)
 }
 
@@ -151,6 +154,25 @@ private fun finalizeVerification(
     val included = collectIncludedCerts(signedData, converter)
     return classifyChain(leaf, included, ctx)
 }
+
+/**
+ * The BouncyCastle [`org.bouncycastle.jce.provider.BouncyCastleProvider`] instance
+ * passed to every BC builder in this file. **Why an instance, not the `"BC"` provider
+ * name** (wpass-4js): Android ships a stripped-down BC under the `"BC"` slot that
+ * lacks CMS / PKCS#7 support. Passing the string `"BC"` to BC builders resolves it
+ * via [java.security.Security.getProvider], which returns Android's stripped instance
+ * rather than the `bcprov-jdk18on:1.79` we ship in our APK. CMS verification with the
+ * stripped provider mismatches in subtle ways (signer-info digest paths in particular)
+ * and surfaces every Apple-signed pkpass as [SignatureVerifyResult.Failed]. Holding
+ * our own instance and passing it directly to provider-instance overloads of the BC
+ * builders bypasses the JCE name registry entirely — the answer to "which BC are we
+ * using?" is no longer a function of how the system Security registry happens to be
+ * ordered. The instance is created lazily; this layer never registers it under
+ * `Security.addProvider`, both because none of the call sites we use here require
+ * registry lookup and because trampling whatever the host process registered under
+ * `"BC"` would surprise other code in the same process.
+ */
+private val BC_PROVIDER: BouncyCastleProvider by lazy { BouncyCastleProvider() }
 
 private fun firstSignerWithCert(signedData: CMSSignedData): SignerWithHolder? {
     val signer = signedData.signerInfos.signers.firstOrNull() ?: return null
@@ -246,14 +268,6 @@ private fun isSelfSigned(cert: X509Certificate): Boolean {
     return runCatching { cert.verify(cert.publicKey) }.isSuccess
 }
 
-private fun ensureBouncyCastleRegistered() {
-    // Security.addProvider is a no-op if a provider with the same name is already
-    // registered; the explicit pre-check just avoids the cost on the hot path.
-    if (Security.getProvider(BC_PROVIDER) == null) {
-        Security.addProvider(BouncyCastleProvider())
-    }
-}
-
 private data class SignerWithHolder(
     val signer: SignerInformation,
     val holder: X509CertificateHolder,
@@ -264,5 +278,3 @@ private data class VerifyContext(
     val trustAnchors: Set<TrustAnchor>,
     val knownIntermediates: Set<X509Certificate>,
 )
-
-private const val BC_PROVIDER = "BC"

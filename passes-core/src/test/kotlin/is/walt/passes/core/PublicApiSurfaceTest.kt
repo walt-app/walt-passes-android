@@ -120,6 +120,7 @@ class PublicApiSurfaceTest {
                 TamperReason.ManifestSignatureMismatch,
                 TamperReason.FileHashMismatch,
                 TamperReason.SignatureCryptoFailure,
+                TamperReason.SignerCertificateMissing,
             )
         assertThat(reasons.toSet()).hasSize(reasons.size)
     }
