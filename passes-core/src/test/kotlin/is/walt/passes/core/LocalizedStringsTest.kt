@@ -77,15 +77,47 @@ class LocalizedStringsTest {
     }
 
     @Test
-    fun resolveLocalizedStringsFallsBackToFirstAvailableWhenNoEnglish() {
+    fun resolveLocalizedStringsFallsBackToSmallestTagWhenNoEnglish() {
         val pass =
             sampleLocalizedPass(
-                PassLocale("da") to LocalizedStrings(mapOf("k" to "danish")),
                 PassLocale("nb") to LocalizedStrings(mapOf("k" to "norwegian")),
+                PassLocale("da") to LocalizedStrings(mapOf("k" to "danish")),
             )
-        // No exact match, no language-only match, no `en`. Falling back to the first
-        // declared locale is preferable to returning empty — at least one localized
-        // table is applied so labels are not raw `#KEY#` placeholders.
+        // No exact match, no language-only match, no `en`. Falls back to the locale
+        // with the lexicographically-smallest tag (`da` < `nb`), independent of the
+        // map's iteration order. Picking deterministically (rather than relying on
+        // insertion order, which the Map<,,> contract type does not guarantee) keeps
+        // the visible result stable across parser refactors.
+        assertThat(pass.resolveLocalizedStrings(PassLocale("fr-CA")).entries["k"])
+            .isEqualTo("danish")
+    }
+
+    @Test
+    fun resolveLocalizedStringsFallbackIsStableForHashMapInputs() {
+        // The Pass.locales contract is a plain Map; a future parser that hands a
+        // HashMap (or anything else without insertion-order iteration) must not
+        // change which fallback locale we pick. This test pins the contract.
+        val locales =
+            HashMap<PassLocale, LocalizedStrings>().apply {
+                put(PassLocale("nb"), LocalizedStrings(mapOf("k" to "norwegian")))
+                put(PassLocale("da"), LocalizedStrings(mapOf("k" to "danish")))
+                put(PassLocale("sv"), LocalizedStrings(mapOf("k" to "swedish")))
+            }
+        val pass =
+            Pass(
+                type = PassType.Generic,
+                serialNumber = "S",
+                description = "D",
+                organizationName = "O",
+                expirationDate = null,
+                voided = false,
+                colors = PassColors(foreground = null, background = null, label = null),
+                frontFields = PassFields(),
+                backFields = emptyList(),
+                barcode = null,
+                images = emptyMap(),
+                locales = locales,
+            )
         assertThat(pass.resolveLocalizedStrings(PassLocale("fr-CA")).entries["k"])
             .isEqualTo("danish")
     }

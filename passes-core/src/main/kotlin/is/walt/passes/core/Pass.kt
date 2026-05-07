@@ -139,19 +139,28 @@ public data class LocalizedStrings(public val entries: Map<String, String>) {
 }
 
 /**
- * Looks [raw] up in this strings table; if absent (or [raw] is null), returns [raw]
- * unchanged. This is Apple's documented PKPASS behavior for `label`, `value`, and
- * `attributedValue`: the field's literal text is treated as the lookup key, and a
+ * Looks [raw] up in this strings table; if absent, returns [raw] unchanged. This is
+ * Apple's documented PKPASS behavior for `label`, `value`, `attributedValue`, and
+ * `organizationName`: the field's literal text is treated as the lookup key, and a
  * miss falls through to the raw text.
  *
  * The "fall through to raw" path is what makes the substitution idempotent and makes
  * dynamic field values (ticket numbers, dates, codes) safe to pipe through this
  * function: they will not match any key and emerge unchanged.
  */
-public fun LocalizedStrings.lookupOrSelf(raw: String?): String? {
-    if (raw == null) return null
-    return entries[raw] ?: raw
-}
+public fun LocalizedStrings.lookupOrSelf(raw: String): String = entries[raw] ?: raw
+
+/**
+ * Nullable overload of [lookupOrSelf]. Returns `null` only when [raw] is `null`; for
+ * present values, behaves exactly like the non-nullable form. Exists so callers
+ * holding a nullable [PassField.label] do not have to lift the null-check themselves.
+ *
+ * `@JvmName` differentiates this from the non-nullable overload — JVM type erasure
+ * collapses `String` and `String?` to the same descriptor, so without an alias the
+ * compiler refuses both declarations.
+ */
+@JvmName("lookupOrSelfNullable")
+public fun LocalizedStrings.lookupOrSelf(raw: String?): String? = raw?.let { lookupOrSelf(it) }
 
 /**
  * Resolves a [LocalizedStrings] from this pass's [Pass.locales] for [preferred], using
@@ -163,10 +172,12 @@ public fun LocalizedStrings.lookupOrSelf(raw: String?): String? {
  *     consumer hands in.
  *  3. The `en` table, when present. Apple treats English as the implicit project
  *     fallback.
- *  4. The first locale declared in archive order. PKPASS does not pin a "default"
- *     locale; this matches the order [DefaultPassParser.collectLocales] preserves
- *     and gives the consumer *some* localized substitution rather than reverting
- *     every label to its raw key.
+ *  4. The locale with the lexicographically-smallest tag. PKPASS does not pin a
+ *     "default" locale; sorting deterministically (rather than relying on map
+ *     iteration order) gives the consumer *some* localized substitution rather than
+ *     reverting every label to its raw key, and is reproducible regardless of how
+ *     [Pass.locales] was constructed. The contract type [Pass.locales] is a plain
+ *     `Map`, so insertion order is not guaranteed and cannot be load-bearing.
  *  5. [LocalizedStrings.Empty] when the pass has no `.lproj/pass.strings` at all.
  *     The empty table makes [LocalizedStrings.lookupOrSelf] a pure passthrough so
  *     callers can substitute unconditionally.
@@ -182,10 +193,12 @@ public fun Pass.resolveLocalizedStrings(preferred: PassLocale): LocalizedStrings
         language
             .takeIf { it.isNotEmpty() && it != preferred.tag }
             ?.let { locales[PassLocale(it)] }
+    val deterministicFallback = locales.entries.minByOrNull { it.key.tag }?.value
     return locales[preferred]
         ?: languageFallback
         ?: locales[PassLocale("en")]
-        ?: locales.values.first()
+        ?: deterministicFallback
+        ?: LocalizedStrings.Empty
 }
 
 /**

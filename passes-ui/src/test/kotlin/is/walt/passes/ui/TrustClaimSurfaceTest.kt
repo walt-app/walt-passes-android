@@ -298,6 +298,88 @@ class TrustClaimSurfaceTest {
         assertThat(rejection!!.name).matches("ExceedsWidth|ExceedsHeight|ExceedsArea")
     }
 
+    // wpass-38y: pass.strings substitution must apply symmetrically on the front and
+    // the back. The chroniques (pass.com.tixly) regression had the back rendering raw
+    // `#LABELKEY#` placeholders; the parallel concern is that organizationName, which
+    // PKPASS allows to be a strings key and which the security confirmation sheets
+    // surface verbatim, gets the same substitution treatment on both surfaces.
+
+    @Test
+    fun passFrontSubstitutesOrganizationNameThroughStrings() {
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = localizedFixture(
+                        organizationName = "#ORGNAME#",
+                        backFields = emptyList(),
+                    ),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 0L,
+                    telemetry = telemetry,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Tixly").assertIsDisplayed()
+    }
+
+    @Test
+    fun passBackSubstitutesFieldLabelsThroughStrings() {
+        composeRule.setContent {
+            ThemedHost {
+                PassBack(
+                    pass = localizedFixture(
+                        organizationName = "#ORGNAME#",
+                        backFields = listOf(
+                            PassField(
+                                key = "ticketNoBack",
+                                label = "#LABELTICKETNUMBER#",
+                                value = "52311919",
+                            ),
+                        ),
+                    ),
+                    onUrlIntent = {},
+                    onPhoneIntent = {},
+                    onEmailIntent = {},
+                    telemetry = telemetry,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Ticket Number").assertIsDisplayed()
+        // Dynamic value (the actual ticket digits) must pass through unchanged.
+        composeRule.onNodeWithText("52311919").assertIsDisplayed()
+    }
+
+    private fun localizedFixture(
+        organizationName: String,
+        backFields: List<PassField>,
+    ): Pass = Pass(
+        type = PassType.Generic,
+        serialNumber = "0",
+        description = "fixture",
+        organizationName = organizationName,
+        expirationDate = null,
+        voided = false,
+        colors = PassColors(
+            foreground = ColorValue(0x000000),
+            background = ColorValue(0xFFFFFF),
+            label = ColorValue(0x444444),
+        ),
+        frontFields = PassFields(
+            primary = listOf(PassField(key = "p", label = "From", value = "JFK")),
+        ),
+        backFields = backFields,
+        barcode = null,
+        images = emptyMap(),
+        locales = mapOf(
+            `is`.walt.passes.core.PassLocale("en") to `is`.walt.passes.core.LocalizedStrings(
+                mapOf(
+                    "#ORGNAME#" to "Tixly",
+                    "#LABELTICKETNUMBER#" to "Ticket Number",
+                ),
+            ),
+        ),
+    )
+
     // Document-surface trust assertions (caption, tile bidi-isolation, lane wiring)
     // moved to passes-pdf-ui::DocumentTrustSurfaceTest with the composables (wpass-r4z).
 

@@ -40,6 +40,11 @@ import `is`.walt.passes.ui.internal.LocalLocalizedStrings
  *
  * The three callbacks are NOT defaulted to no-op — see ADR 0003 D5. A host that
  * forgets to wire one of them is a compile error, not a runtime swallow.
+ *
+ * @param locale Drives `pass.strings` substitution via [Pass.resolveLocalizedStrings].
+ *   The default `PassLocale("en")` is a *fallback for tests and previews*; production
+ *   callers (walt-android) MUST thread the device locale through, or the user sees
+ *   English labels regardless of system language.
  */
 @Composable
 public fun PassBack(
@@ -52,7 +57,15 @@ public fun PassBack(
     locale: PassLocale = PassLocale("en"),
 ) {
     LaunchedEffect(pass) { telemetry.onPassBackOpened(pass.type) }
-    val strings = remember(pass, locale) { pass.resolveLocalizedStrings(locale) }
+    // Narrow the remember key to the locales map; Pass.equals walks every image's
+    // contentEquals which is wasted work for a function that only consults locales.
+    val strings = remember(pass.locales, locale) { pass.resolveLocalizedStrings(locale) }
+    // wpass-38y: substitute organizationName here (not just inside BackFieldRow) so
+    // the security confirmation sheets — which read SourceField.organizationName —
+    // see the same display string the front of the pass shows. Without this the
+    // front would render "Tixly" while a tap on a back-field URL would surface
+    // "#ORGNAME#" in the confirm copy.
+    val displayOrganizationName = strings.lookupOrSelf(pass.organizationName)
 
     CompositionLocalProvider(LocalLocalizedStrings provides strings) {
         Surface(
@@ -67,7 +80,7 @@ public fun PassBack(
                 pass.backFields.forEach { field ->
                     BackFieldRow(
                         field = field,
-                        organizationName = pass.organizationName,
+                        organizationName = displayOrganizationName,
                         onUrlIntent = onUrlIntent,
                         onPhoneIntent = onPhoneIntent,
                         onEmailIntent = onEmailIntent,
@@ -86,13 +99,14 @@ private fun BackFieldRow(
     onPhoneIntent: (PhoneIntent) -> Unit,
     onEmailIntent: (EmailIntent) -> Unit,
 ) {
-    // wpass-38y: every text-bearing field passes through the resolved strings table
-    // so PKPASS placeholder labels (e.g. "#LABELTICKETNUMBER#") render as their
+    // wpass-38y: field label and value pass through the resolved strings table so
+    // PKPASS placeholder labels (e.g. "#LABELTICKETNUMBER#") render as their
     // localized text. A miss falls through to the raw string, which is the right
     // behavior for dynamic values (ticket numbers, codes) that never appear as keys.
+    // organizationName has already been substituted at the PassBack boundary.
     val strings = LocalLocalizedStrings.current
     val displayLabel = strings.lookupOrSelf(field.label)
-    val displayValue = strings.lookupOrSelf(field.value).orEmpty()
+    val displayValue = strings.lookupOrSelf(field.value)
 
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         displayLabel?.takeIf { it.isNotBlank() }?.let { label ->

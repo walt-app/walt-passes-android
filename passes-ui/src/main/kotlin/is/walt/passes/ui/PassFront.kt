@@ -51,6 +51,11 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *
  * The signature trust badge and (when applicable) the expired overlay are composited
  * on top of the pass; neither has a suppression parameter — see ADR 0003 D5.
+ *
+ * @param locale Drives `pass.strings` substitution via [Pass.resolveLocalizedStrings].
+ *   The default `PassLocale("en")` is a *fallback for tests and previews*; production
+ *   callers (walt-android) MUST thread the device locale through, or the user sees
+ *   English labels regardless of system language.
  */
 @Composable
 public fun PassFront(
@@ -68,8 +73,13 @@ public fun PassFront(
     // wpass-38y: PKPASS allows the front-side organizationName, field labels, and
     // field values to be pass.strings keys; substitute them through the resolved
     // strings table so localized labels render instead of raw `#KEY#` placeholders.
-    val strings = remember(pass, locale) { pass.resolveLocalizedStrings(locale) }
-    val displayOrganizationName = strings.lookupOrSelf(pass.organizationName) ?: pass.organizationName
+    //
+    // The remember key is narrowed to the locales map (the only input
+    // resolveLocalizedStrings consults) instead of the full Pass — Pass.equals walks
+    // every image's contentEquals, which is megabytes of work on each recomposition
+    // for a real PKPASS.
+    val strings = remember(pass.locales, locale) { pass.resolveLocalizedStrings(locale) }
+    val displayOrganizationName = strings.lookupOrSelf(pass.organizationName)
     androidx.compose.runtime.LaunchedEffect(pass, band) {
         telemetry.onPassRendered(pass.type, band)
     }
@@ -272,7 +282,7 @@ private fun FieldCell(
     // values (codes, dates, numbers) emerge unchanged.
     val strings = LocalLocalizedStrings.current
     val displayLabel = strings.lookupOrSelf(field.label)
-    val displayValue = strings.lookupOrSelf(field.value).orEmpty()
+    val displayValue = strings.lookupOrSelf(field.value)
     Column(modifier = modifier) {
         displayLabel?.takeIf { it.isNotBlank() }?.let { label ->
             Text(

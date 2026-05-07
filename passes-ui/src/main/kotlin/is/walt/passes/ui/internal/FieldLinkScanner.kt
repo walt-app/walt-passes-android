@@ -165,7 +165,13 @@ internal object FieldLinkScanner {
         existing: List<LinkSpan>,
     ): Boolean = existing.any { it.start < endExclusive && start < it.endExclusive }
 
-    private val INTERNAL_PHONE_HINTS = setOf('+', '-', ' ', '(', ')')
+    // The phone regex `(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)` cannot start with `(` or
+    // end with `)` (its outer anchors require digits at both edges), so any paren
+    // surrounding a phone number lands *adjacent to* the match, not inside it. The
+    // internal-hint set therefore lists only the characters that can actually appear
+    // inside `match.value` — `+`, `-`, and space. Adjacent parens are picked up via
+    // [PHONE_PREFIX_HINTS] / the trailing-`)` check in [hasPhoneFormattingHint].
+    private val INTERNAL_PHONE_HINTS = setOf('+', '-', ' ')
 
     /** `+` and `(` immediately before a digit run signal an unmatched-paren or international form. */
     private val PHONE_PREFIX_HINTS = setOf('+', '(')
