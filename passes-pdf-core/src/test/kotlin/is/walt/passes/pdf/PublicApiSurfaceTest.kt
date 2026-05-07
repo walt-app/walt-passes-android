@@ -98,5 +98,67 @@ class PublicApiSurfaceTest {
         guard.onImportFailed(
             DocumentImportFailedEvent(outcome = DocumentRejectedKind.Encrypted, durationMillis = 7L),
         )
+        guard.onConsumerRenderFailed(ConsumerRenderFailure.OutOfMemory)
+        guard.onConsumerRenderFailed(ConsumerRenderFailure.SharedMemoryUnavailable)
+        guard.onConsumerRenderFailed(ConsumerRenderFailure.DimensionMismatch)
+        guard.onConsumerRenderFailed(ConsumerRenderFailure.Other)
+    }
+
+    @Test
+    fun consumerRenderFailureHasExactlyTheFourListedArms() {
+        val all =
+            setOf(
+                ConsumerRenderFailure.OutOfMemory,
+                ConsumerRenderFailure.SharedMemoryUnavailable,
+                ConsumerRenderFailure.DimensionMismatch,
+                ConsumerRenderFailure.Other,
+            )
+        assertThat(all).containsExactlyElementsIn(ConsumerRenderFailure.entries)
+        assertThat(ConsumerRenderFailure.entries).hasSize(4)
+    }
+
+    /**
+     * Mirrors `passes-ui::PublicApiSurfaceTest.uiTelemetryGuardEventsAreEnumsAndPrimitivesOnly`:
+     * an exhaustive behavioral exercise that pins every guard method against an
+     * enums-and-primitives-only shape. Adding a free-form `String`, `ByteArray`, or `Throwable`
+     * parameter to any method below would either fail to compile against this fixture or fall
+     * through the `DocumentTelemetryGuardSurfaceTest` allowlist.
+     */
+    @Test
+    fun documentTelemetryGuardEventsAreEnumsAndPrimitivesOnly() {
+        val recorded = mutableListOf<String>()
+        val guard =
+            object : DocumentTelemetryGuard {
+                override fun onImportStarted() {
+                    recorded += "started"
+                }
+
+                override fun onImportSucceeded(event: DocumentImportSucceededEvent) {
+                    recorded += "ok:${event.byteCount}:${event.pageCount}:${event.durationMillis}"
+                }
+
+                override fun onImportFailed(event: DocumentImportFailedEvent) {
+                    recorded += "failed:${event.outcome.name}:${event.durationMillis}"
+                }
+
+                override fun onConsumerRenderFailed(reason: ConsumerRenderFailure) {
+                    recorded += "render:${reason.name}"
+                }
+            }
+        guard.onImportStarted()
+        guard.onImportSucceeded(
+            DocumentImportSucceededEvent(byteCount = 99L, pageCount = 2, durationMillis = 11L),
+        )
+        guard.onImportFailed(
+            DocumentImportFailedEvent(outcome = DocumentRejectedKind.TooManyPages, durationMillis = 3L),
+        )
+        guard.onConsumerRenderFailed(ConsumerRenderFailure.DimensionMismatch)
+
+        assertThat(recorded).containsExactly(
+            "started",
+            "ok:99:2:11",
+            "failed:TooManyPages:3",
+            "render:DimensionMismatch",
+        ).inOrder()
     }
 }

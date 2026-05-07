@@ -24,12 +24,28 @@ public interface DocumentTelemetryGuard {
 
     public fun onImportFailed(event: DocumentImportFailedEvent)
 
+    /**
+     * A consumer-side render attempt produced no bitmap. Distinct from the renderer
+     * service's own failure path: this fires inside the hosting UI module after
+     * `RenderResult.Ok` has been received, when reconstructing the bitmap from the
+     * returned `SharedMemory` throws — out of memory, dimension mismatch, or a handle
+     * already closed by a parallel render. The visible outcome is a blank page that
+     * the next swipe re-attempts; without this hook the path is silent.
+     *
+     * The PII discipline is upheld by parameter shape: only the enum [reason] is
+     * accepted. No `Throwable`, no message, no dimensions — see
+     * `DocumentTelemetryGuardSurfaceTest` for the structural lock.
+     */
+    public fun onConsumerRenderFailed(reason: ConsumerRenderFailure)
+
     public object NoOp : DocumentTelemetryGuard {
         override fun onImportStarted(): Unit = Unit
 
         override fun onImportSucceeded(event: DocumentImportSucceededEvent): Unit = Unit
 
         override fun onImportFailed(event: DocumentImportFailedEvent): Unit = Unit
+
+        override fun onConsumerRenderFailed(reason: ConsumerRenderFailure): Unit = Unit
     }
 }
 
@@ -43,3 +59,23 @@ public data class DocumentImportFailedEvent(
     public val outcome: DocumentRejectedKind,
     public val durationMillis: Long,
 )
+
+/**
+ * Why a consumer-side bitmap reconstruction failed. Mirrors the three deterministic
+ * Android-side failure shapes plus a defensive [Other] catch-all:
+ *
+ *  - [OutOfMemory] — `Bitmap.createBitmap` or `copyPixelsFromBuffer` threw `OutOfMemoryError`.
+ *  - [SharedMemoryUnavailable] — `SharedMemory.mapReadOnly()` threw `IllegalStateException`,
+ *    the JDK-typed surface for "the handle was already closed", typically by a parallel
+ *    render coroutine that cancelled and ran the cleanup branch.
+ *  - [DimensionMismatch] — `copyPixelsFromBuffer` threw `BufferUnderflowException`, meaning
+ *    the renderer-reported `widthPx * heightPx * 4` bytes did not match the mapped buffer.
+ *  - [Other] — any other `Throwable`. Preserved to keep the outer `runCatching` surface
+ *    safe against future Android changes; spike here means a new failure class to triage.
+ */
+public enum class ConsumerRenderFailure {
+    OutOfMemory,
+    SharedMemoryUnavailable,
+    DimensionMismatch,
+    Other,
+}

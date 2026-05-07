@@ -28,12 +28,15 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import `is`.walt.passes.pdf.ConsumerRenderFailure
+import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
 import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
+import java.nio.BufferUnderflowException
 import java.nio.ByteBuffer
 
 /**
@@ -78,6 +81,7 @@ public fun DocumentView(
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
     modifier: Modifier = Modifier,
+    telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
 ) {
     val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) {
@@ -119,18 +123,22 @@ public fun DocumentView(
                 pdfFile = pdfFile,
                 renderer = renderer,
                 cache = cache,
+                telemetry = telemetry,
             )
         }
     }
 }
 
 @Composable
+@Suppress("LongParameterList") // Each parameter is a distinct dependency; bundling
+// would only relocate the count from a function signature to a holder constructor.
 private fun DocumentPage(
     document: PdfDocument,
     pageIndex: Int,
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
     cache: RenderedPageCache<Bitmap>,
+    telemetry: DocumentTelemetryGuard,
 ) {
     val density = LocalDensity.current
     var rendered by remember(document.id, pageIndex) {
@@ -157,7 +165,7 @@ private fun DocumentPage(
             // request, when reconstructing the Bitmap — using the request would make
             // copyPixelsFromBuffer either throw against an undersized SharedMemory
             // (silently swallowed by runCatching below) or render a misshapen image.
-            val bitmap = bitmapFromSharedMemory(result)
+            val bitmap = bitmapFromSharedMemory(result, telemetry)
             if (bitmap != null) {
                 cache.put(document.id, pageIndex, bitmap)
                 rendered = bitmap.asImageBitmap()
@@ -185,18 +193,20 @@ private fun DocumentPage(
     }
 }
 
-private fun bitmapFromSharedMemory(ok: RenderResult.Ok): Bitmap? {
+private fun bitmapFromSharedMemory(
+    ok: RenderResult.Ok,
+    telemetry: DocumentTelemetryGuard,
+): Bitmap? {
     // The renderer service writes ARGB_8888 packed row-major with no padding using the
     // dimensions it reports back in `ok.widthPx` / `ok.heightPx` (which may differ from
     // the request — see the call-site comment for D7).
     //
-    // Failure modes that runCatching here intentionally swallows: OOM on
-    // Bitmap.createBitmap, BufferUnderflowException from copyPixelsFromBuffer if the
-    // SharedMemory size mismatches the bitmap, IllegalStateException if the
-    // SharedMemory was already closed by a parallel render. Each of these surfaces as
-    // "page does not paint" and the next swipe re-attempts; the renderer-service-side
-    // failure mode is already telemetered via DocumentTelemetryGuard. Consumer-side
-    // telemetry for the silent path is tracked in a follow-up issue (see PR review).
+    // The runCatching swallow remains intentional: OOM on Bitmap.createBitmap,
+    // BufferUnderflowException from copyPixelsFromBuffer if the SharedMemory size
+    // mismatches the bitmap, and IllegalStateException if the SharedMemory was already
+    // closed by a parallel render each surface as a blank page that the next swipe
+    // re-attempts. Telemetry is observability, not a user-facing error path; the failure
+    // mapping is what wpass-8v4 added so the silent path stops being invisible.
     return runCatching {
         val mapped: ByteBuffer = ok.sharedMemory.mapReadOnly()
         try {
@@ -207,7 +217,16 @@ private fun bitmapFromSharedMemory(ok: RenderResult.Ok): Bitmap? {
             android.os.SharedMemory.unmap(mapped)
             ok.sharedMemory.close()
         }
+    }.onFailure { t ->
+        telemetry.onConsumerRenderFailed(consumerRenderFailureFor(t))
     }.getOrNull()
+}
+
+internal fun consumerRenderFailureFor(t: Throwable): ConsumerRenderFailure = when (t) {
+    is OutOfMemoryError -> ConsumerRenderFailure.OutOfMemory
+    is BufferUnderflowException -> ConsumerRenderFailure.DimensionMismatch
+    is IllegalStateException -> ConsumerRenderFailure.SharedMemoryUnavailable
+    else -> ConsumerRenderFailure.Other
 }
 
 // HorizontalPager retains composed Image references for adjacent pages during a swipe
