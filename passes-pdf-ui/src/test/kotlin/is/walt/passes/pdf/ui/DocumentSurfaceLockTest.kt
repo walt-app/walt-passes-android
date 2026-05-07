@@ -33,10 +33,15 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun documentViewHasExactlyFourUserVisibleParameters() {
-        // (doc, pdfFile, renderer, modifier). D5: no flag to hide the trust caption,
-        // no flag to render anything from PDF metadata, no overflow into Share.
-        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 4)
+    fun documentViewHasExactlyFiveUserVisibleParameters() {
+        // (doc, pdfFile, renderer, modifier, telemetry). D5: no flag to hide the trust
+        // caption, no flag to render anything from PDF metadata, no overflow into
+        // Share. The fifth slot is the wpass-8v4 telemetry guard with a NoOp default;
+        // bumping this count from 4 to 5 is the deliberate change for that issue, not
+        // a slip. Integration coverage of the failure-mapping path lives in
+        // `DocumentViewInstrumentedTest`; the JVM-pure mapping helper is covered by
+        // `ConsumerRenderFailureMappingTest`.
+        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 5)
     }
 
     @Test

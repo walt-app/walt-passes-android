@@ -136,7 +136,12 @@ class DocumentTelemetryGuardSurfaceTest {
         // ParameterizedType collapses to its raw and then must clear the same bar.
         val raw = rawClassOrNull() ?: return false
         return when (allowed) {
-            AllowedTypes.GuardMethod -> raw in eventClasses
+            // Guard methods accept either an event class wrapper (the historical
+            // `onImport*` shape) or a bare enum (the `onConsumerRenderFailed(reason)`
+            // shape). Both clear the PII bar — an enum is the leanest legitimate shape
+            // and is already proven safe at the EventCtor level. `String`, `ByteArray`,
+            // `Map`, etc. all collapse to non-enum, non-event-class raws and stay caught.
+            AllowedTypes.GuardMethod -> raw in eventClasses || raw.isEnum
             AllowedTypes.EventCtor ->
                 raw == java.lang.Long.TYPE ||
                     raw == java.lang.Integer.TYPE ||
