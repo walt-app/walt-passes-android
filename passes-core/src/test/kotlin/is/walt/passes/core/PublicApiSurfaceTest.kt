@@ -96,6 +96,87 @@ class PublicApiSurfaceTest {
     }
 
     /**
+     * Companion to [parseResultFailureKindCoversEveryArm] for [ParseFailureReason]. Every
+     * [TamperReason] / [MalformedReason] / [UnsupportedReason] arm — including all seven
+     * [ResourceLimit] sub-buckets that lift out of [MalformedReason.ResourceLimitExceeded] —
+     * round-trips to a distinct [ParseFailureReason]. Together with the exhaustive `when`
+     * inside [toFailureReason], this pins both directions of the mapping.
+     */
+    @Test
+    fun parseResultFailureReasonCoversEveryArm() {
+        val tamperReasons: List<ParseResult> =
+            listOf(
+                ParseResult.Tampered(TamperReason.ManifestSignatureMismatch),
+                ParseResult.Tampered(TamperReason.FileHashMismatch),
+                ParseResult.Tampered(TamperReason.SignatureCryptoFailure),
+                ParseResult.Tampered(TamperReason.SignerCertificateMissing),
+            )
+        val malformedReasons: List<ParseResult> =
+            listOf(
+                ParseResult.Malformed(MalformedReason.NotAZipArchive),
+                ParseResult.Malformed(MalformedReason.MissingPassJson),
+                ParseResult.Malformed(MalformedReason.MissingManifest),
+                ParseResult.Malformed(MalformedReason.InvalidPassJson),
+                ParseResult.Malformed(MalformedReason.InvalidManifest),
+                ParseResult.Malformed(MalformedReason.InvalidStrings),
+            )
+        val resourceReasons: List<ParseResult> =
+            ResourceLimit.entries.map {
+                ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(it))
+            }
+        val unsupportedReasons: List<ParseResult> =
+            listOf(
+                ParseResult.Unsupported(UnsupportedReason.FormatVersion(2)),
+                ParseResult.Unsupported(UnsupportedReason.UnknownPassStyle("nfcPass")),
+                ParseResult.Unsupported(UnsupportedReason.EncryptedArchive),
+            )
+        val all = tamperReasons + malformedReasons + resourceReasons + unsupportedReasons
+        val mapped = all.mapNotNull { it.toFailureReason() }
+
+        assertThat(mapped).hasSize(all.size)
+        // Every kernel-defined ParseFailureReason is reachable from some sealed-arm input,
+        // and no two distinct inputs collapse onto the same reason value.
+        assertThat(mapped.toSet()).containsExactlyElementsIn(ParseFailureReason.entries)
+        assertThat(ParseResult.Success(samplePass(), SignatureStatus.AppleVerified).toFailureReason())
+            .isNull()
+    }
+
+    /**
+     * Pins agreement between the two telemetry-mapping helpers: for every [ParseResult]
+     * failure arm, `result.toFailureReason()?.toKind() == result.toFailureKind()`. The
+     * cross-field invariant on [ParseFailedEvent] is already enforced by construction
+     * (its `outcome` is a computed property derived from `reason`), so this test guards
+     * the *function-pair* — a future edit to one helper that doesn't update the other
+     * would otherwise silently mis-bucket the outcome. Bucket-coverage is pinned by
+     * [parseResultFailureKindCoversEveryArm]; this test focuses on the round-trip.
+     */
+    @Test
+    fun parseFailureReasonToKindMatchesParseResultMapping() {
+        val all: List<ParseResult> =
+            listOf(
+                ParseResult.Tampered(TamperReason.ManifestSignatureMismatch),
+                ParseResult.Tampered(TamperReason.FileHashMismatch),
+                ParseResult.Tampered(TamperReason.SignatureCryptoFailure),
+                ParseResult.Tampered(TamperReason.SignerCertificateMissing),
+                ParseResult.Malformed(MalformedReason.NotAZipArchive),
+                ParseResult.Malformed(MalformedReason.MissingPassJson),
+                ParseResult.Malformed(MalformedReason.MissingManifest),
+                ParseResult.Malformed(MalformedReason.InvalidPassJson),
+                ParseResult.Malformed(MalformedReason.InvalidManifest),
+                ParseResult.Malformed(MalformedReason.InvalidStrings),
+                ParseResult.Unsupported(UnsupportedReason.FormatVersion(2)),
+                ParseResult.Unsupported(UnsupportedReason.UnknownPassStyle("nfcPass")),
+                ParseResult.Unsupported(UnsupportedReason.EncryptedArchive),
+            ) +
+                ResourceLimit.entries.map {
+                    ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(it))
+                }
+        all.forEach { result ->
+            assertThat(result.toFailureReason()?.toKind()).isEqualTo(result.toFailureKind())
+        }
+    }
+
+    /**
      * Every [ResourceLimit] enum value has a backing [ParserConfig] field. The exhaustive
      * `when` inside [limitFrom] enforces the existence side at compile time; this test
      * proves the values are non-zero (a misconfigured field would silently zero-out a guard
@@ -165,7 +246,12 @@ class PublicApiSurfaceTest {
                 localeCount = 2,
             ),
         )
-        guard.onParseFailed(ParseFailedEvent(ParseFailureKind.Tampered, 7L))
+        guard.onParseFailed(
+            ParseFailedEvent(
+                reason = ParseFailureReason.ManifestSignatureMismatch,
+                durationMillis = 7L,
+            ),
+        )
     }
 
     @Test

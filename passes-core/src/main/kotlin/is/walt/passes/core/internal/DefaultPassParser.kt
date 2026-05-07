@@ -15,7 +15,7 @@ import `is`.walt.passes.core.ResourceLimit
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.core.TamperReason
 import `is`.walt.passes.core.UnsupportedReason
-import `is`.walt.passes.core.toFailureKind
+import `is`.walt.passes.core.toFailureReason
 import `is`.walt.passes.core.toKind
 
 /**
@@ -236,12 +236,14 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
             else ->
                 config.telemetryGuard.onParseFailed(
                     ParseFailedEvent(
-                        // toFailureKind() returns null only for Success, which the
-                        // outer `when` already routed; the !! is a category check, not
-                        // a runtime risk. A future ParseResult arm that breaks this
+                        // toFailureReason() returns null only for Success, which the
+                        // outer `when` already routed; the !! is a category check, not a
+                        // runtime risk. A future ParseResult arm that breaks this
                         // surfaces as an immediate test failure here, not a silent
-                        // observability hole.
-                        outcome = result.toFailureKind()!!,
+                        // observability hole. ParseFailedEvent.outcome derives from
+                        // reason via the computed property — no second `!!`, and the
+                        // cross-field invariant is enforced by construction.
+                        reason = result.toFailureReason()!!,
                         durationMillis = durationMillis,
                     ),
                 )
