@@ -1,6 +1,7 @@
 package `is`.walt.passes.storage.internal
 
 import android.content.Context
+import android.util.Log
 import `is`.walt.passes.storage.DatabaseKey
 import `is`.walt.passes.storage.Schema
 import `is`.walt.passes.storage.StorageError
@@ -19,6 +20,12 @@ import java.io.File
  * idempotent on subsequent calls.
  */
 internal object SqlCipherDatabaseFactory {
+    // Logcat tag for setup-phase diagnosis. Logcat is local-only; this is NOT telemetry
+    // (StorageTelemetryGuard's no-free-form-strings discipline still holds). The cause's
+    // class and message are needed to root-cause a SQLCipher setup failure on a real
+    // device, since the typed StorageFailureKind alone is opaque.
+    private const val LOG_TAG: String = "PassesStorage"
+
     @Volatile
     private var librariesLoaded: Boolean = false
 
@@ -48,59 +55,71 @@ internal object SqlCipherDatabaseFactory {
             SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null)
         }
 
-        // Pin SQLCipher v4 page format defensively against a future major-version default
-        // change. Issued before any other DDL/DML so the page format is locked before
-        // tables get created.
-        db.execSQL("PRAGMA cipher_compatibility = 4")
-        db.execSQL("PRAGMA foreign_keys = ON")
+        // Setup phase: PRAGMA pinning, schema-version probe, and DDL/migration apply must
+        // all succeed or the connection must close. A throw anywhere below leaks the open
+        // SQLiteDatabase handle (a real symptom seen in wpass-aio logcat) unless guarded.
+        return try {
+            // Pin SQLCipher v4 page format defensively against a future major-version
+            // default change. Issued before any other DDL/DML so the page format is locked
+            // before tables get created.
+            db.execSQL("PRAGMA cipher_compatibility = 4")
+            db.execSQL("PRAGMA foreign_keys = ON")
 
-        val onDiskVersion: Int? = readSchemaVersionIfPresent(db)
-        when {
-            onDiskVersion != null && onDiskVersion > Schema.VERSION -> {
-                db.close()
-                return StorageResult.Failure(StorageError.Unsupported(onDiskVersion))
+            val onDiskVersion: Int? = readSchemaVersionIfPresent(db)
+            when {
+                onDiskVersion != null && onDiskVersion > Schema.VERSION -> {
+                    db.close()
+                    return StorageResult.Failure(StorageError.Unsupported(onDiskVersion))
+                }
+                onDiskVersion == Schema.VERSION -> return StorageResult.Success(db)
             }
-            onDiskVersion == Schema.VERSION -> return StorageResult.Success(db)
-        }
 
-        val statements: List<String> = if (onDiskVersion == null) {
-            Schema.DDL
-        } else {
-            buildMigrationChain(onDiskVersion) ?: run {
-                // The DB is fine; the build is broken (someone bumped Schema.VERSION
-                // without adding a migration entry). Reporting this as DatabaseCorrupt
-                // would mislead telemetry into pointing at user data. The
-                // `migrationsCoverEveryHopFromV1ToCurrent` JVM test catches the mistake
-                // at CI time so this runtime path should never fire in a shipped build.
-                db.close()
-                return StorageResult.Failure(
-                    StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
+            val statements: List<String> = if (onDiskVersion == null) {
+                Schema.DDL
+            } else {
+                buildMigrationChain(onDiskVersion) ?: run {
+                    // The DB is fine; the build is broken (someone bumped Schema.VERSION
+                    // without adding a migration entry). Reporting this as DatabaseCorrupt
+                    // would mislead telemetry into pointing at user data. The
+                    // `migrationsCoverEveryHopFromV1ToCurrent` JVM test catches the mistake
+                    // at CI time so this runtime path should never fire in a shipped build.
+                    db.close()
+                    return StorageResult.Failure(
+                        StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
+                    )
+                }
+            }
+
+            db.beginTransaction()
+            try {
+                for (statement in statements) {
+                    db.execSQL(statement)
+                }
+                db.execSQL(
+                    "INSERT OR REPLACE INTO ${Schema.Tables.SCHEMA_META} (key, value) VALUES (?, ?)",
+                    arrayOf<Any>(Schema.MetaKeys.SCHEMA_VERSION, Schema.VERSION.toString().toByteArray()),
                 )
+                db.setTransactionSuccessful()
+            } finally {
+                db.endTransaction()
             }
-        }
-
-        db.beginTransaction()
-        try {
-            for (statement in statements) {
-                db.execSQL(statement)
-            }
-            db.execSQL(
-                "INSERT OR REPLACE INTO ${Schema.Tables.SCHEMA_META} (key, value) VALUES (?, ?)",
-                arrayOf<Any>(Schema.MetaKeys.SCHEMA_VERSION, Schema.VERSION.toString().toByteArray()),
-            )
-            db.setTransactionSuccessful()
+            StorageResult.Success(db)
         } catch (e: Throwable) {
-            db.endTransaction()
-            db.close()
-            return StorageResult.Failure(
+            // Logcat (local-only) carries the cause class and message; StorageTelemetryGuard
+            // remains free of free-form strings (see KDoc on that interface). Without this
+            // line the failure surfaces only as `unknown_kind=DatabaseCorrupt` and root-cause
+            // is impossible to determine from a device.
+            Log.w(LOG_TAG, "SqlCipher setup failed: ${e.javaClass.name}: ${e.message}", e)
+            runCatching { db.close() }.onFailure { closeError ->
+                Log.w(LOG_TAG, "Also failed closing db after setup error", closeError)
+            }
+            StorageResult.Failure(
                 StorageError.Unknown(
                     kind = UnknownStorageFailureKind.DatabaseCorrupt,
                     cause = e,
                 ),
             )
         }
-        db.endTransaction()
-        return StorageResult.Success(db)
     }
 
     /**
