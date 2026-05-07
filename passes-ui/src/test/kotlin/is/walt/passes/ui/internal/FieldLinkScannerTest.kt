@@ -63,6 +63,72 @@ class FieldLinkScannerTest {
         assertThat(spans).isEmpty()
     }
 
+    // -- wpass-536: bare digit runs without formatting hints ----------------------
+    //
+    // The chroniques (pass.com.tixly) regression. An 8-digit ticket number rendered
+    // tappable, surfacing a "Call this number?" prompt on a reference value the user
+    // never expected to be a phone number. The fix requires at least one formatting
+    // hint (+, dash, space, paren) before classifying a digit run as a phone number,
+    // matching Apple's data-detector behavior.
+
+    @Test
+    fun rejectsBareEightDigitTicketNumberAsPhone() {
+        // chroniques pass back-field "ticketNoBack" value: "52311919".
+        val spans = FieldLinkScanner.scan("52311919", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun rejectsBareSevenDigitOrderNumberAsPhone() {
+        // chroniques pass back-field "orderNoBack" value: "5847559".
+        val spans = FieldLinkScanner.scan("5847559", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun rejectsLongBareDigitRunAsPhone() {
+        // Barcode payload, member ID, etc. — long bare digit string with no formatting
+        // hint must never fire the phone detector.
+        val spans = FieldLinkScanner.scan("123456789012", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun rejectsBareDigitRunAdjacentToProseAsPhone() {
+        val spans = FieldLinkScanner.scan("Order 52311919 placed.", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun acceptsPhoneWithOnlySpaceHint() {
+        val spans = FieldLinkScanner.scan("Call 555 123 4567 today.", source)
+        assertThat(spans).hasSize(1)
+        assertThat(spans.single().intent).isInstanceOf(PhoneIntent::class.java)
+        assertThat((spans.single().intent as PhoneIntent).phoneNumber).isEqualTo("555 123 4567")
+    }
+
+    @Test
+    fun acceptsPhoneWithOnlyDashHint() {
+        val spans = FieldLinkScanner.scan("555-123-4567", source)
+        assertThat(spans).hasSize(1)
+        assertThat(spans.single().intent).isInstanceOf(PhoneIntent::class.java)
+    }
+
+    @Test
+    fun acceptsPhoneWithOnlyParenHint() {
+        val spans = FieldLinkScanner.scan("Call (5551234567) now.", source)
+        assertThat(spans).hasSize(1)
+        assertThat(spans.single().intent).isInstanceOf(PhoneIntent::class.java)
+    }
+
+    @Test
+    fun acceptsPhoneWithOnlyPlusHint() {
+        val spans = FieldLinkScanner.scan("+15551234567", source)
+        assertThat(spans).hasSize(1)
+        assertThat(spans.single().intent).isInstanceOf(PhoneIntent::class.java)
+        assertThat((spans.single().intent as PhoneIntent).phoneNumber).isEqualTo("+15551234567")
+    }
+
     @Test
     fun emailInsideUrlIsNotDoubleClaimed() {
         val spans = FieldLinkScanner.scan("https://x@example.com/path", source)
