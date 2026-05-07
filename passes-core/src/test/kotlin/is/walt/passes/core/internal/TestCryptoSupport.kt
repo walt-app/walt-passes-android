@@ -3,8 +3,10 @@ package `is`.walt.passes.core.internal
 import org.bouncycastle.asn1.x500.X500Name
 import org.bouncycastle.asn1.x509.BasicConstraints
 import org.bouncycastle.asn1.x509.Extension
+import org.bouncycastle.asn1.x509.SubjectKeyIdentifier
 import org.bouncycastle.cert.jcajce.JcaCertStore
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
+import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder
 import org.bouncycastle.cms.CMSProcessableByteArray
 import org.bouncycastle.cms.CMSSignedDataGenerator
@@ -33,14 +35,14 @@ import java.util.Date
  * as production code, so any test class in `passes-core` can call them.
  */
 internal fun ensureBouncyCastleProvider() {
-    if (Security.getProvider(BC_PROVIDER) == null) {
+    if (Security.getProvider(BC_PROVIDER_NAME) == null) {
         Security.addProvider(BouncyCastleProvider())
     }
 }
 
 internal fun newRsaKeyPair(): KeyPair {
     ensureBouncyCastleProvider()
-    val gen = KeyPairGenerator.getInstance("RSA", BC_PROVIDER)
+    val gen = KeyPairGenerator.getInstance("RSA", BC_PROVIDER_NAME)
     gen.initialize(RSA_KEY_BITS)
     return gen.generateKeyPair()
 }
@@ -66,9 +68,10 @@ internal fun selfSignedCertificate(
             subject,
             keyPair.public,
         )
-    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER).build(keyPair.private)
+    builder.addSubjectKeyIdentifier(keyPair.public)
+    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(keyPair.private)
     return JcaX509CertificateConverter()
-        .setProvider(BC_PROVIDER)
+        .setProvider(BC_PROVIDER_NAME)
         .getCertificate(builder.build(signer))
 }
 
@@ -100,9 +103,10 @@ internal fun signLeafCertificate(
     if (isCa) {
         builder.addExtension(Extension.basicConstraints, true, BasicConstraints(0))
     }
-    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER).build(issuerKey.private)
+    builder.addSubjectKeyIdentifier(leafPublicKey)
+    val signer = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(issuerKey.private)
     return JcaX509CertificateConverter()
-        .setProvider(BC_PROVIDER)
+        .setProvider(BC_PROVIDER_NAME)
         .getCertificate(builder.build(signer))
 }
 
@@ -119,10 +123,10 @@ internal fun cmsDetachedSignature(
     includedCerts: List<X509Certificate>,
 ): ByteArray {
     ensureBouncyCastleProvider()
-    val contentSigner = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER).build(signerKey)
+    val contentSigner = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(signerKey)
     val infoGen =
         JcaSignerInfoGeneratorBuilder(
-            JcaDigestCalculatorProviderBuilder().setProvider(BC_PROVIDER).build(),
+            JcaDigestCalculatorProviderBuilder().setProvider(BC_PROVIDER_NAME).build(),
         ).build(contentSigner, signerCert)
     val gen =
         CMSSignedDataGenerator().apply {
@@ -132,7 +136,72 @@ internal fun cmsDetachedSignature(
     return gen.generate(CMSProcessableByteArray(content), false).encoded
 }
 
-private const val BC_PROVIDER = "BC"
+/**
+ * Detached CMS / PKCS#7 signature that uses the **SubjectKeyIdentifier** flavor of
+ * `SignerIdentifier` rather than the default `IssuerAndSerialNumber`. Apple's PassKit
+ * signing infrastructure exclusively emits SKI signer-IDs (every Pass Type ID
+ * certificate carries an SKI extension and Apple's signer references the leaf by SKI),
+ * so this helper exists to give the verifier a fixture that exercises the SKI code
+ * path in [firstSignerWithCert] — the path real Apple-signed pkpass archives travel.
+ *
+ * The SKI bytes are derived from the leaf certificate's SubjectKeyIdentifier extension
+ * via [extractSubjectKeyIdentifier], matching the production wire shape Apple ships.
+ */
+internal fun cmsDetachedSignatureWithSki(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    includedCerts: List<X509Certificate>,
+): ByteArray {
+    ensureBouncyCastleProvider()
+    val contentSigner = JcaContentSignerBuilder(SIG_ALGO).setProvider(BC_PROVIDER_NAME).build(signerKey)
+    val infoGen =
+        JcaSignerInfoGeneratorBuilder(
+            JcaDigestCalculatorProviderBuilder().setProvider(BC_PROVIDER_NAME).build(),
+        ).build(contentSigner, extractSubjectKeyIdentifier(signerCert))
+    val gen =
+        CMSSignedDataGenerator().apply {
+            addSignerInfoGenerator(infoGen)
+            addCertificates(JcaCertStore(includedCerts))
+        }
+    return gen.generate(CMSProcessableByteArray(content), false).encoded
+}
+
+/**
+ * Pulls the 20-byte SubjectKeyIdentifier extension value out of [cert]. Both
+ * [selfSignedCertificate] and [signLeafCertificate] now attach this extension by
+ * default so this lookup never returns null in tests; an unexpected null means a
+ * test-only cert was minted without the extension and the test should fail loudly.
+ */
+private fun extractSubjectKeyIdentifier(cert: X509Certificate): ByteArray {
+    val raw =
+        cert.getExtensionValue(Extension.subjectKeyIdentifier.id)
+            ?: error(
+                "Test cert lacks SubjectKeyIdentifier extension; " +
+                    "mint with selfSignedCertificate / signLeafCertificate",
+            )
+    // X509Certificate.getExtensionValue returns the DER encoding of the outer OCTET STRING
+    // wrapping the extension value (RFC 5280 §4.1.2.9). For a SubjectKeyIdentifier extension
+    // the inner value is itself an OCTET STRING containing the 20-byte key identifier
+    // (RFC 5280 §4.2.1.2: `SubjectKeyIdentifier ::= OCTET STRING`). BC's parseExtensionValue
+    // peels the outer OCTET STRING; one further unwrap pulls the raw key bytes.
+    val inner = JcaX509ExtensionUtils.parseExtensionValue(raw)
+    return SubjectKeyIdentifier.getInstance(inner).keyIdentifier
+}
+
+private fun JcaX509v3CertificateBuilder.addSubjectKeyIdentifier(publicKey: PublicKey) {
+    val ski = JcaX509ExtensionUtils().createSubjectKeyIdentifier(publicKey)
+    addExtension(Extension.subjectKeyIdentifier, false, ski)
+}
+
+// String name lookup is fine here: tests run on JVM where Security.addProvider
+// (called from `ensureBouncyCastleProvider`) installs bcprov-jdk18on:1.79 under "BC"
+// before any helper resolves. The production verifier deliberately holds an instance
+// instead — see `BC_PROVIDER` in `SignatureVerifier.kt` and the wpass-4js writeup —
+// because Android already has a stripped BC parked in the "BC" slot. Tests are
+// unaffected by that failure mode, so the cheaper string lookup is appropriate;
+// the explicit `_NAME` suffix flags the type difference for readers.
+private const val BC_PROVIDER_NAME = "BC"
 private const val SIG_ALGO = "SHA256withRSA"
 private const val RSA_KEY_BITS = 2048
 private const val ONE_HOUR_MILLIS = 60L * 60L * 1000L
