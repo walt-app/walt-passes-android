@@ -260,7 +260,7 @@ public class SqlCipherPassRepository internal constructor(
                 )
                 return StorageResult.Failure(unknown)
             }
-            val db = when (openResult) {
+            val opened = when (openResult) {
                 is StorageResult.Success -> openResult.value
                 is StorageResult.Failure -> {
                     telemetryGuard.onStorageFailure(
@@ -270,8 +270,8 @@ public class SqlCipherPassRepository internal constructor(
                     return StorageResult.Failure(openResult.error)
                 }
             }
-            val store = SqlCipherPassStore(db, telemetryGuard)
-            val documentStore = SqlCipherDocumentStore(db)
+            val store = SqlCipherPassStore(opened.db, opened.keyHandle, telemetryGuard)
+            val documentStore = SqlCipherDocumentStore(opened.db)
             val repo = SqlCipherPassRepository(
                 store = store,
                 documentStore = documentStore,

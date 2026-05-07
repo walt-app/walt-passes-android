@@ -212,6 +212,26 @@ class PublicApiSurfaceTest {
         assertThat(raw.all { it.toInt() == 0 }).isTrue()
     }
 
+    @Test
+    fun databaseKeyRetainAcrossKeepsBytesAliveUntilHandleClosed() {
+        val raw = ByteArray(32) { (it + 1).toByte() }
+        val key = DatabaseKey(raw)
+        var captured: ByteArray? = null
+        val handle: AutoCloseable = key.retainAcross { borrowed ->
+            captured = borrowed
+            assertThat(borrowed.any { it.toInt() != 0 }).isTrue()
+        }
+        // Bytes still alive after the block returns - this is the wpass-aio contract:
+        // SQLCipher's connection pool keys lazily-opened pool connections from this
+        // same array reference, so it must outlive retainAcross's lambda.
+        assertThat(captured!!.any { it.toInt() != 0 }).isTrue()
+        assertThat(raw.any { it.toInt() != 0 }).isTrue()
+
+        handle.close()
+        assertThat(raw.all { it.toInt() == 0 }).isTrue()
+        assertThat(captured!!.all { it.toInt() == 0 }).isTrue()
+    }
+
     /**
      * Pins the `StorageTelemetryGuard` PII discipline (ADR 0002 D8). Every event method
      * is reachable here with enums-and-primitives-only arguments. Adding a free-form

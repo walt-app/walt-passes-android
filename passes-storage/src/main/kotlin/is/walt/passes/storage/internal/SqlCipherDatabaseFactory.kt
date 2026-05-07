@@ -46,18 +46,23 @@ internal object SqlCipherDatabaseFactory {
     fun openOrCreate(
         context: Context,
         databaseKey: DatabaseKey,
-    ): StorageResult<SQLiteDatabase> {
+    ): StorageResult<OpenedDatabase> {
         loadLibsOnce()
         val dbFile: File = context.applicationContext.getDatabasePath(Schema.DATABASE_NAME)
         dbFile.parentFile?.mkdirs()
         val isDebuggable: Boolean = isHostAppDebuggable(context)
 
-        val db: SQLiteDatabase = databaseKey.withBytes { rawKey ->
-            // The withBytes scope zeros our local copy on return; SQLCipher's internal
-            // page-key derivation buffer survives for the lifetime of the open connection,
-            // which is bounded by SqlCipherPassStore.close().
-            SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null)
+        // The byte[] handed to SQLCipher must outlive every pool connection it keys.
+        // SQLiteDatabaseConfiguration retains the array by reference; SQLiteConnection
+        // re-reads it on every lazily-opened pool connection. retainAcross hands a
+        // long-lived buffer to SQLCipher and returns a handle whose close() zeros it.
+        // The handle's lifetime is bounded by SqlCipherPassStore.close(), which closes
+        // the SQLiteDatabase first.
+        var openedDb: SQLiteDatabase? = null
+        val keyHandle: AutoCloseable = databaseKey.retainAcross { rawKey ->
+            openedDb = SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null)
         }
+        val db: SQLiteDatabase = openedDb!!
 
         // Pin SQLCipher v4 page format defensively against a future major-version default
         // change. Issued before any other DDL/DML so the page format is locked before
@@ -69,21 +74,21 @@ internal object SqlCipherDatabaseFactory {
             readSchemaVersionIfPresent(db)
         } catch (e: CancellationException) {
             // Coroutine cancellation: surface, do NOT map to DatabaseCorrupt. Close
-            // best-effort to release the native handle.
-            closeQuietly(db, isDebuggable, phase = "PRAGMA/schema-probe")
+            // best-effort to release the native handle and zero the key buffer.
+            closeQuietly(db, keyHandle, isDebuggable, phase = "PRAGMA/schema-probe")
             throw e
         } catch (e: Exception) {
-            return databaseCorrupt(db, e, isDebuggable, phase = "PRAGMA/schema-probe")
+            return databaseCorrupt(db, keyHandle, e, isDebuggable, phase = "PRAGMA/schema-probe")
         }
 
         if (onDiskVersion != null && onDiskVersion > Schema.VERSION) {
             // Future schema (user downgraded the wallet app). Close best-effort; if close
             // throws we still want to return Unsupported, NOT DatabaseCorrupt.
-            closeQuietly(db, isDebuggable, phase = "future-schema-close")
+            closeQuietly(db, keyHandle, isDebuggable, phase = "future-schema-close")
             return StorageResult.Failure(StorageError.Unsupported(onDiskVersion))
         }
         if (onDiskVersion == Schema.VERSION) {
-            return StorageResult.Success(db)
+            return StorageResult.Success(OpenedDatabase(db, keyHandle))
         }
 
         val statements: List<String> = if (onDiskVersion == null) {
@@ -96,7 +101,7 @@ internal object SqlCipherDatabaseFactory {
                 // so a throwing close() does not flip the category. The
                 // `migrationsCoverEveryHopFromV1ToCurrent` JVM test catches the mistake
                 // at CI time so this runtime path should never fire in a shipped build.
-                closeQuietly(db, isDebuggable, phase = "missing-migration-close")
+                closeQuietly(db, keyHandle, isDebuggable, phase = "missing-migration-close")
                 return StorageResult.Failure(
                     StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
                 )
@@ -118,12 +123,12 @@ internal object SqlCipherDatabaseFactory {
                 db.endTransaction()
             }
         } catch (e: CancellationException) {
-            closeQuietly(db, isDebuggable, phase = "DDL/migration")
+            closeQuietly(db, keyHandle, isDebuggable, phase = "DDL/migration")
             throw e
         } catch (e: Exception) {
-            return databaseCorrupt(db, e, isDebuggable, phase = "DDL/migration")
+            return databaseCorrupt(db, keyHandle, e, isDebuggable, phase = "DDL/migration")
         }
-        return StorageResult.Success(db)
+        return StorageResult.Success(OpenedDatabase(db, keyHandle))
     }
 
     private fun isHostAppDebuggable(context: Context): Boolean =
@@ -131,14 +136,15 @@ internal object SqlCipherDatabaseFactory {
 
     private fun databaseCorrupt(
         db: SQLiteDatabase,
+        keyHandle: AutoCloseable,
         cause: Exception,
         isDebuggable: Boolean,
         phase: String,
-    ): StorageResult<SQLiteDatabase> {
+    ): StorageResult<OpenedDatabase> {
         if (isDebuggable) {
             Log.w(LOG_TAG, "SqlCipher $phase failed: ${cause.javaClass.name}: ${cause.message}", cause)
         }
-        closeQuietly(db, isDebuggable, phase = "$phase-close")
+        closeQuietly(db, keyHandle, isDebuggable, phase = "$phase-close")
         return StorageResult.Failure(
             StorageError.Unknown(
                 kind = UnknownStorageFailureKind.DatabaseCorrupt,
@@ -147,12 +153,28 @@ internal object SqlCipherDatabaseFactory {
         )
     }
 
-    private fun closeQuietly(db: SQLiteDatabase, isDebuggable: Boolean, phase: String) {
+    private fun closeQuietly(
+        db: SQLiteDatabase,
+        keyHandle: AutoCloseable,
+        isDebuggable: Boolean,
+        phase: String,
+    ) {
         runCatching { db.close() }.onFailure { closeError ->
             if (isDebuggable) {
                 Log.w(
                     LOG_TAG,
                     "Also failed during $phase: ${closeError.javaClass.name}: ${closeError.message}",
+                    closeError,
+                )
+            }
+        }
+        // Zero the key buffer regardless of whether db.close() threw, so the raw key
+        // never outlives a failed setup phase.
+        runCatching { keyHandle.close() }.onFailure { closeError ->
+            if (isDebuggable) {
+                Log.w(
+                    LOG_TAG,
+                    "Also failed zeroing key during $phase: ${closeError.javaClass.name}: ${closeError.message}",
                     closeError,
                 )
             }
@@ -191,3 +213,15 @@ internal object SqlCipherDatabaseFactory {
         }
     }
 }
+
+/**
+ * The result of [SqlCipherDatabaseFactory.openOrCreate]. Bundles the SQLCipher handle
+ * with the [AutoCloseable] that zeros the raw-key buffer SQLCipher's connection pool
+ * holds by reference. The owner ([SqlCipherPassStore]) MUST close the SQLiteDatabase
+ * first, then the keyHandle - reversing the order would zero the buffer while the
+ * pool may still be re-keying connections.
+ */
+internal data class OpenedDatabase(
+    val db: SQLiteDatabase,
+    val keyHandle: AutoCloseable,
+)

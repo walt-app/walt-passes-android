@@ -25,9 +25,15 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase
  * lifetime of the repository. Concurrency is single-writer: all callers go through the
  * repository's IO dispatcher. Reads share the same dispatcher to keep the StateFlow +
  * telemetry sequencing deterministic.
+ *
+ * Also owns the [keyHandle] returned by [SqlCipherDatabaseFactory.openOrCreate]. The
+ * SQLCipher connection pool keys lazily-opened pool connections from the same byte[]
+ * the keyHandle wraps, so the buffer must outlive the SQLiteDatabase. [close] enforces
+ * this by closing the database first, then zeroing the buffer.
  */
 internal class SqlCipherPassStore(
     private val db: SQLiteDatabase,
+    private val keyHandle: AutoCloseable,
     private val telemetryGuard: StorageTelemetryGuard,
 ) : PassStore {
 
@@ -192,7 +198,14 @@ internal class SqlCipherPassStore(
     }
 
     override fun close() {
-        db.close()
+        // Close the SQLiteDatabase first, THEN zero the key buffer. The connection
+        // pool may re-key connections during shutdown; zeroing first would corrupt
+        // those re-keyings the same way the boot bug surfaced (wpass-aio).
+        try {
+            db.close()
+        } finally {
+            keyHandle.close()
+        }
     }
 
     private fun readImages(id: PassRecordId): Map<ImageRole, ImageBytes> {
