@@ -24,6 +24,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.ui.core.isolated
 import `is`.walt.passes.ui.theme.LocalPassesSemantics
 import `is`.walt.passes.ui.theme.toComposeColor
 
@@ -207,23 +208,5 @@ private fun SecuritySheet(
     }
 }
 
-/**
- * Wrap [s] in Unicode First-Strong Isolate / Pop Directional Isolate (U+2068, U+2069).
- * Inside the isolate the bidi algorithm treats the contents as a single neutral
- * directional unit: characters within cannot reorder text outside, and surrounding
- * directional context cannot reorder characters within. This is the recommended
- * fence for displaying user-controlled strings in bidi-sensitive surfaces (UAX #9
- * §3.4 isolate formatting characters).
- *
- * Combined with the Cf/Cc rejection in `FieldLinkScanner`, this guarantees that the
- * sheet's displayed target string is rendered as-typed; an attacker can no longer
- * craft a pass field that looks visually like a trusted host while parsing as a
- * hostile one.
- */
-internal fun isolated(s: String): String = "$FSI$s$PDI"
-
-/** First Strong Isolate (U+2068). Opens an isolate that takes the directional class of the first strong-class character within. */
-internal const val FSI: Char = '⁨'
-
-/** Pop Directional Isolate (U+2069). Closes the most recently opened isolate. */
-internal const val PDI: Char = '⁩'
+// `isolated()`, `FSI`, and `PDI` moved to `passes-ui-core` so `passes-pdf-ui` can use the
+// same bidi fence without depending on `passes-ui` (wpass-r4z). Imported above.

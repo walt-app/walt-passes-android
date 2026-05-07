@@ -1,4 +1,4 @@
-package `is`.walt.passes.ui
+package `is`.walt.passes.pdf.ui
 
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
@@ -18,14 +18,9 @@ import `is`.walt.passes.pdf.PdfDocumentId
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.ProbeResult
 import `is`.walt.passes.pdf.android.RenderResult
-import `is`.walt.passes.ui.theme.ArgbColor
-import `is`.walt.passes.ui.theme.CategoryAccentColors
-import `is`.walt.passes.ui.theme.DocumentSemantics
-import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
-import `is`.walt.passes.ui.theme.PassesSemantics
-import `is`.walt.passes.ui.theme.PassesTheme
-import `is`.walt.passes.ui.theme.SecuritySheetStyle
-import `is`.walt.passes.ui.theme.SignatureBadgeColors
+import `is`.walt.passes.pdf.ui.theme.DocumentSemantics
+import `is`.walt.passes.pdf.ui.theme.DocumentTheme
+import `is`.walt.passes.ui.core.ArgbColor
 import org.junit.After
 import org.junit.Before
 import org.junit.Rule
@@ -178,52 +173,19 @@ class DocumentViewInstrumentedTest {
     @Composable
     private fun ThemedHost(content: @Composable () -> Unit) {
         MaterialTheme {
-            PassesTheme(semantics = semantics, content = content)
+            DocumentTheme(semantics = semantics, content = content)
         }
     }
 
-    private val semantics = PassesSemantics(
-        signatureBadge = SignatureBadgeColors(
-            unsignedBackground = ArgbColor(0xFF000000.toInt()),
-            unsignedForeground = ArgbColor(0xFF000000.toInt()),
-            selfSignedBackground = ArgbColor(0xFF000000.toInt()),
-            selfSignedForeground = ArgbColor(0xFF000000.toInt()),
-            appleVerifiedBackground = ArgbColor(0xFF000000.toInt()),
-            appleVerifiedForeground = ArgbColor(0xFF000000.toInt()),
-            certChainIncompleteBackground = ArgbColor(0xFF000000.toInt()),
-            certChainIncompleteForeground = ArgbColor(0xFF000000.toInt()),
-        ),
-        expiredBadge = ExpiredBadgeStyle(
-            pillBackground = ArgbColor(0xFF000000.toInt()),
-            pillForeground = ArgbColor(0xFFFFFFFF.toInt()),
-            scrimAlpha = 96,
-        ),
-        securitySheet = SecuritySheetStyle(
-            sheetBackground = ArgbColor(0xFFFFFFFF.toInt()),
-            emphasisBackground = ArgbColor(0xFFEFEFEF.toInt()),
-            emphasisForeground = ArgbColor(0xFF000000.toInt()),
-            bodyForeground = ArgbColor(0xFF202020.toInt()),
-            confirmContainer = ArgbColor(0xFF202020.toInt()),
-            confirmForeground = ArgbColor(0xFFFFFFFF.toInt()),
-            cancelForeground = ArgbColor(0xFF202020.toInt()),
-        ),
-        categoryAccent = CategoryAccentColors(
-            boardingPass = ArgbColor(0xFF1D4ED8.toInt()),
-            eventTicket = ArgbColor(0xFF7C2D92.toInt()),
-            coupon = ArgbColor(0xFF555555.toInt()),
-            storeCard = ArgbColor(0xFF555555.toInt()),
-            generic = ArgbColor(0xFF555555.toInt()),
-        ),
-        documents = DocumentSemantics(
-            captionBackground = ArgbColor(0xFF202020.toInt()),
-            captionForeground = ArgbColor(0xFFFFFFFF.toInt()),
-            tileBackground = ArgbColor(0xFFF5F5F5.toInt()),
-            tileForeground = ArgbColor(0xFF202020.toInt()),
-            tileLabelForeground = ArgbColor(0xFF606060.toInt()),
-            laneBackground = ArgbColor(0xFFEEEEEE.toInt()),
-            documentBadgeBackground = ArgbColor(0xFFD0D0D0.toInt()),
-            documentBadgeForeground = ArgbColor(0xFF202020.toInt()),
-        ),
+    private val semantics = DocumentSemantics(
+        captionBackground = ArgbColor(0xFF202020.toInt()),
+        captionForeground = ArgbColor(0xFFFFFFFF.toInt()),
+        tileBackground = ArgbColor(0xFFF5F5F5.toInt()),
+        tileForeground = ArgbColor(0xFF202020.toInt()),
+        tileLabelForeground = ArgbColor(0xFF606060.toInt()),
+        laneBackground = ArgbColor(0xFFEEEEEE.toInt()),
+        documentBadgeBackground = ArgbColor(0xFFD0D0D0.toInt()),
+        documentBadgeForeground = ArgbColor(0xFF202020.toInt()),
     )
 
     /**

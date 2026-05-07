@@ -23,18 +23,23 @@ package `is`.walt.passes.ui.theme
  *   distinct accents for boarding pass / event / coupon / store-card / generic; the
  *   actual hex values come from the host theme, not from this contract.
  *
- * Color values are packed ARGB integers (`0xAARRGGBB`), matching the shape `passes-core`
- * already uses for `ColorValue.rgb`. Consumers built on Compose convert via
- * `Color(argb.toLong())` at the API boundary; consumers on other UI toolkits unpack
- * directly. See `passes-ui/COMPOSABLE_SIGNATURES.md` for how this maps to `@Composable`
- * functions.
+ * Document-rendering tokens (caption, tile, lane chrome) are NOT on this contract — they
+ * live in `passes-pdf-ui::DocumentSemantics`, supplied via that module's sibling
+ * `LocalDocumentSemantics`. The split exists because `passes-ui` and `passes-pdf-ui` are
+ * independent peers; nesting one's tokens inside the other's data class would force
+ * either module to depend on the other.
+ *
+ * Color values are packed ARGB integers (`0xAARRGGBB`), shared with `passes-pdf-ui` via
+ * the [ArgbColor] value class re-exported from `passes-ui-core`. Consumers built on
+ * Compose convert via [toComposeColor] at the API boundary; consumers on other UI
+ * toolkits unpack directly. See `passes-ui/COMPOSABLE_SIGNATURES.md` for how this maps to
+ * `@Composable` functions.
  */
 public data class PassesSemantics(
     public val signatureBadge: SignatureBadgeColors,
     public val expiredBadge: ExpiredBadgeStyle,
     public val securitySheet: SecuritySheetStyle,
     public val categoryAccent: CategoryAccentColors,
-    public val documents: DocumentSemantics,
 )
 
 /**
@@ -107,15 +112,3 @@ public data class CategoryAccentColors(
     public val storeCard: ArgbColor,
     public val generic: ArgbColor,
 )
-
-/**
- * A 32-bit ARGB color, packed `0xAARRGGBB`. Mirrors `passes-core`'s `ColorValue.rgb`
- * shape but with an alpha channel, since theme tokens may legitimately want to
- * express transparency that pass.json's RGB triplet cannot.
- *
- * Compose-side conversion: `androidx.compose.ui.graphics.Color(argb.argb.toLong())`.
- * The `Long` cast is required because `Color(Int)` interprets its argument as RGB,
- * not ARGB; using the `Long` overload preserves alpha.
- */
-@JvmInline
-public value class ArgbColor(public val argb: Int)

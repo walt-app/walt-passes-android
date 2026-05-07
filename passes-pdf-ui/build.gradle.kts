@@ -5,15 +5,22 @@ plugins {
 }
 
 android {
-    namespace = "is.walt.passes.ui"
+    namespace = "is.walt.passes.pdf.ui"
 }
 
+// Document-rendering UI surfaces. Carved out of passes-ui (wpass-r4z) so that the
+// PKPASS-only passes-ui no longer transitively pulls in the Android-only
+// PdfRendererBinder / SharedMemory machinery for every consumer that just renders
+// passes. CLAUDE.md's "passes-storage / passes-pdf / passes-ui are independent"
+// rule extends naturally to passes-pdf-ui as a fourth peer; the only edge it has
+// to its peers is the deliberate `api(passes-pdf)` here, which is what gives a
+// consumer of this module the binder type to construct.
 dependencies {
-    api(project(":passes-core"))
-    // PKPASS-only module. Document-rendering surfaces live in :passes-pdf-ui (which
-    // takes the passes-pdf dep). passes-ui-core hosts the BiDi (FSI/PDI) helper and
-    // the ArgbColor value class that both UI modules consume; isolating those there
-    // keeps passes-ui and passes-pdf-ui from depending on each other.
+    api(project(":passes-pdf-core"))
+    // api (not implementation) because PdfRendererBinder is a parameter type on
+    // DocumentView; consumers must construct one and the binder type has to be on
+    // their compile classpath.
+    api(project(":passes-pdf"))
     api(project(":passes-ui-core"))
     api(libs.kotlinx.coroutines.core)
 
@@ -30,8 +37,6 @@ dependencies {
 
     debugImplementation(libs.androidx.compose.ui.tooling)
     implementation(libs.androidx.compose.ui.tooling.preview)
-
-    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)

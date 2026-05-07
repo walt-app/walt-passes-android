@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Empty library manifest. passes-ui-core contributes only Kotlin types (ArgbColor,
+  isolated()) and a Compose-Color extension. No components, no permissions, no
+  manifest-merged metadata. The namespace is set in passes-ui-core/build.gradle.kts.
+-->
+<manifest />

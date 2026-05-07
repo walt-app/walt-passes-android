@@ -78,67 +78,9 @@ class ComposableSurfaceLockTest {
         assertThat(typeNames).contains("ImageRenderBounds")
     }
 
-    @Test
-    fun documentTrustCaptionHasExactlyOneUserVisibleParameter() {
-        // (modifier) — D5: no `enabled`, no theme suppression flag, no overload that
-        // accepts a state to hide the caption. The caption is structurally always-on.
-        assertUserVisibleParamCount("DocumentTrustCaptionKt", "DocumentTrustCaption", expected = 1)
-    }
-
-    @Test
-    fun documentTileHasExactlyFourUserVisibleParameters() {
-        // (doc, thumbnail, onClick, modifier). No share/export action, no overflow menu.
-        assertUserVisibleParamCount("DocumentTileKt", "DocumentTile", expected = 4)
-    }
-
-    @Test
-    fun documentViewHasExactlyFourUserVisibleParameters() {
-        // (doc, pdfFile, renderer, modifier). D5: no flag to hide the trust caption,
-        // no flag to render anything from PDF metadata, no overflow into Share.
-        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 4)
-    }
-
-    @Test
-    fun documentsLaneHasExactlyFourUserVisibleParameters() {
-        // (documents, thumbnails, onDocumentClick, modifier). The lane composes the
-        // trust caption inside itself; no parameter omits it.
-        assertUserVisibleParamCount("DocumentsLaneKt", "DocumentsLane", expected = 4)
-    }
-
-    @Test
-    fun documentViewConsumesPdfRendererBinderInterfaceNotConcreteClient() {
-        // The DocumentView contract takes the binder interface so test fakes inject
-        // cleanly. A regression to the concrete `PdfRendererClient` would make every
-        // hosting test bind a real service. Lock the type by simple name.
-        val method = findComposable("DocumentViewKt", "DocumentView")
-        val typeNames = method.parameterTypes.map { it.simpleName }
-        assertWithMessage("DocumentView must accept the PdfRendererBinder interface")
-            .that(typeNames)
-            .contains("PdfRendererBinder")
-        assertWithMessage("DocumentView must NOT bind to the concrete PdfRendererClient")
-            .that(typeNames)
-            .doesNotContain("PdfRendererClient")
-    }
-
-    @Test
-    fun documentSurfacesHaveNoOverloads() {
-        // The trust-caption non-suppressibility rule extends to overloads: a future
-        // contributor cannot quietly add `DocumentView(..., showCaption: Boolean)` as
-        // a sibling with the same name. Lock that there is exactly one method per
-        // composable name.
-        listOf(
-            "DocumentTrustCaptionKt" to "DocumentTrustCaption",
-            "DocumentTileKt" to "DocumentTile",
-            "DocumentViewKt" to "DocumentView",
-            "DocumentsLaneKt" to "DocumentsLane",
-        ).forEach { (file, name) ->
-            val klass = Class.forName("is.walt.passes.ui.$file")
-            val matches = klass.methods.filter { it.name == name || it.name.startsWith("$name-") }
-            assertWithMessage("$name should have exactly one declared overload")
-                .that(matches.size)
-                .isEqualTo(1)
-        }
-    }
+    // Document-surface shape locks (DocumentTrustCaption / DocumentTile / DocumentView
+    // / DocumentsLane and the no-overload + PdfRendererBinder-not-Client assertions)
+    // moved to passes-pdf-ui::DocumentSurfaceLockTest with the composables (wpass-r4z).
 
     @Test
     fun securitySheetsAllAcceptUiTelemetryGuard() {

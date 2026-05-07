@@ -1,4 +1,4 @@
-package `is`.walt.passes.ui
+package `is`.walt.passes.pdf.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -16,8 +16,8 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.PdfDocumentId
-import `is`.walt.passes.ui.theme.LocalPassesSemantics
-import `is`.walt.passes.ui.theme.toComposeColor
+import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
+import `is`.walt.passes.ui.core.toComposeColor
 
 /**
  * The Documents lane that sits below the passes list on the wallet root screen. The
@@ -28,12 +28,12 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * non-suppressible [DocumentTrustCaption]. Composing the caption inside the lane means
  * the user sees the trust signal before any tile and cannot scroll past it. There is no
  * caller-supplied flag to omit the caption; the structural lock in
- * `ComposableSurfaceLockTest` and the surface assertion in `TrustClaimSurfaceTest`
+ * `DocumentSurfaceLockTest` and the surface assertion in `DocumentTrustSurfaceTest`
  * enforce that a caller cannot skip past it.
  *
  * Visual distinction from the passes list comes from the lane's own background tone
- * (separate token in [DocumentSemantics.laneBackground]) so a glance distinguishes a
- * document from a signed pass without reading the badge.
+ * (separate token in [is.walt.passes.pdf.ui.theme.DocumentSemantics.laneBackground]) so
+ * a glance distinguishes a document from a signed pass without reading the badge.
  */
 @Composable
 public fun DocumentsLane(
@@ -43,7 +43,7 @@ public fun DocumentsLane(
     modifier: Modifier = Modifier,
 ) {
     if (documents.isEmpty()) return
-    val semantics = LocalPassesSemantics.current.documents
+    val semantics = LocalDocumentSemantics.current
     Column(
         modifier = modifier
             .fillMaxWidth()

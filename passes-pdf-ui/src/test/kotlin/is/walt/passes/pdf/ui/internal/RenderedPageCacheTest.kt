@@ -1,4 +1,4 @@
-package `is`.walt.passes.ui.internal
+package `is`.walt.passes.pdf.ui.internal
 
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.pdf.PdfDocumentId

@@ -5,6 +5,8 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import `is`.walt.passes.ui.core.ArgbColor as CoreArgbColor
+import `is`.walt.passes.ui.core.toComposeColor as coreToComposeColor
 
 /**
  * The host's entry point into `passes-ui`. Wraps [content] in a [CompositionLocalProvider]
@@ -43,8 +45,19 @@ public val LocalPassesSemantics: ProvidableCompositionLocal<PassesSemantics> =
     }
 
 /**
- * Convert a packed-ARGB [ArgbColor] (the contract type) to a Compose [Color] (the
- * runtime type). The `.toLong()` cast is required: `Color(Int)` interprets the int
- * as RGB without alpha, while `Color(Long)` preserves the alpha channel.
+ * Re-export of `passes-ui-core::ArgbColor` under the historical
+ * `is.walt.passes.ui.theme.ArgbColor` import path. The value class itself moved to
+ * `passes-ui-core` (wpass-r4z) so `passes-pdf-ui::DocumentSemantics` could share the
+ * type without depending on `passes-ui`. The typealias keeps existing consumer
+ * imports compiling — `import is.walt.passes.ui.theme.ArgbColor` continues to
+ * resolve to the same value class.
  */
-public fun ArgbColor.toComposeColor(): Color = Color(argb.toLong() and 0xFFFFFFFFL)
+public typealias ArgbColor = CoreArgbColor
+
+/**
+ * Convert a packed-ARGB [ArgbColor] (the contract type) to a Compose [Color] (the
+ * runtime type). Forwards to the implementation in `passes-ui-core`. Existence of
+ * this re-export is the same backwards-compatibility shim the [ArgbColor] typealias
+ * provides, applied to the extension function.
+ */
+public fun ArgbColor.toComposeColor(): Color = coreToComposeColor()
