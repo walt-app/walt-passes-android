@@ -9,17 +9,28 @@ import `is`.walt.passes.storage.StorageError
 import `is`.walt.passes.storage.StorageResult
 import `is`.walt.passes.storage.UnknownStorageFailureKind
 import kotlinx.coroutines.CancellationException
+import net.zetetic.database.sqlcipher.SQLiteConnection
 import net.zetetic.database.sqlcipher.SQLiteDatabase
+import net.zetetic.database.sqlcipher.SQLiteDatabaseHook
 import java.io.File
 
 /**
  * Opens (or creates on first use) the `walt_passes.db` SQLCipher file with the supplied
- * [DatabaseKey], pins the SQLCipher v4 page format, runs [Schema.DDL] under a single
+ * [DatabaseKey], pins the SQLCipher v4 page format via a postKey hook (so the KDF regime
+ * is locked BEFORE the binding decrypts page 1), runs [Schema.DDL] under a single
  * transaction on first use, and enables `PRAGMA foreign_keys=ON` so the `ON DELETE CASCADE`
  * chains for `pass_images` and `pass_locales` actually fire (SQLite/SQLCipher default this off).
  *
  * The native libraries are loaded lazily via `System.loadLibrary("sqlcipher")`, which is
  * idempotent on subsequent calls.
+ *
+ * Maintenance note: any PRAGMA that affects the KDF or page format (cipher_compatibility,
+ * cipher_default_kdf_iter, cipher_page_size, etc.) MUST be issued from the
+ * [SQLiteDatabaseHook] postKey, NOT after [SQLiteDatabase.openOrCreateDatabase].
+ * On reopen of an existing v4-on-disk database, the binding chooses a default KDF regime
+ * at open time; a post-open `PRAGMA cipher_compatibility = 4` lands too late, the lazy
+ * page-1 decode runs with the wrong KDF, and surfaces as `SQLITE_NOMEM` (wpass-aio).
+ * The create+write path masked this because there are no on-disk pages to decrypt yet.
  */
 internal object SqlCipherDatabaseFactory {
     // Logcat tag for setup-phase diagnosis. Logcat is local-only AND we gate on the host
@@ -28,6 +39,25 @@ internal object SqlCipherDatabaseFactory {
     // telemetry. The cause class and message are needed to root-cause a SQLCipher setup
     // failure on a real device, since the typed StorageFailureKind alone is opaque.
     private const val LOG_TAG: String = "PassesStorage"
+
+    private const val PRAGMA_CIPHER_COMPAT_V4: String = "PRAGMA cipher_compatibility = 4"
+
+    /**
+     * Pins the SQLCipher v4 KDF/MAC regime in [postKey], which runs after the binding has
+     * accepted the supplied key but before any decryption work. `cipher_compatibility`
+     * tells the binding how to interpret that key, so it MUST be issued post-key; preKey
+     * (no key yet) is the wrong moment per Zetetic's documented placement. Stateless and
+     * thread-safe; a single instance is reused across all opens.
+     */
+    private val cipherCompatV4Hook: SQLiteDatabaseHook = object : SQLiteDatabaseHook {
+        override fun preKey(connection: SQLiteConnection) {
+            // No-op: cipher_compatibility belongs in postKey.
+        }
+
+        override fun postKey(connection: SQLiteConnection) {
+            connection.execute(PRAGMA_CIPHER_COMPAT_V4, null, null)
+        }
+    }
 
     @Volatile
     private var librariesLoaded: Boolean = false
@@ -52,29 +82,16 @@ internal object SqlCipherDatabaseFactory {
         dbFile.parentFile?.mkdirs()
         val isDebuggable: Boolean = isHostAppDebuggable(context)
 
-        // The byte[] handed to SQLCipher must outlive every pool connection it keys.
-        // SQLiteDatabaseConfiguration retains the array by reference; SQLiteConnection
-        // re-reads it on every lazily-opened pool connection. retainAcross hands a
-        // long-lived buffer to SQLCipher and returns a handle whose close() zeros it.
-        // The handle's lifetime is bounded by SqlCipherPassStore.close(), which closes
-        // the SQLiteDatabase first.
-        var openedDb: SQLiteDatabase? = null
-        val keyHandle: AutoCloseable = databaseKey.retainAcross { rawKey ->
-            openedDb = SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null)
-        }
-        val db: SQLiteDatabase = openedDb!!
+        val openOutcome = openHandleWithKey(dbFile, databaseKey, isDebuggable)
+        if (openOutcome !is StorageResult.Success) return openOutcome
+        val (db, keyHandle) = openOutcome.value
 
-        // Pin SQLCipher v4 page format defensively against a future major-version default
-        // change. Issued before any other DDL/DML so the page format is locked before
-        // tables get created. Probe the on-disk schema version after PRAGMA so any failure
-        // here is mapped to DatabaseCorrupt with the cause attached.
+        // cipher_compatibility is set by [cipherCompatV4Hook]; foreign_keys is
+        // connection-scoped and does not affect KDF or page format. See file-level KDoc.
         val onDiskVersion: Int? = try {
-            db.execSQL("PRAGMA cipher_compatibility = 4")
             db.execSQL("PRAGMA foreign_keys = ON")
             readSchemaVersionIfPresent(db)
         } catch (e: CancellationException) {
-            // Coroutine cancellation: surface, do NOT map to DatabaseCorrupt. Close
-            // best-effort to release the native handle and zero the key buffer.
             closeQuietly(db, keyHandle, isDebuggable, phase = "PRAGMA/schema-probe")
             throw e
         } catch (e: Exception) {
@@ -133,6 +150,50 @@ internal object SqlCipherDatabaseFactory {
 
     private fun isHostAppDebuggable(context: Context): Boolean =
         context.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+
+    /**
+     * Hands the raw key to [SQLiteDatabase.openOrCreateDatabase] under [retainAcross], and
+     * routes any failure (including a throw from the postKey hook) through [openCorrupt].
+     * On the success path the caller owns the [OpenedDatabase] and is responsible for
+     * closing it.
+     */
+    private fun openHandleWithKey(
+        dbFile: File,
+        databaseKey: DatabaseKey,
+        isDebuggable: Boolean,
+    ): StorageResult<OpenedDatabase> {
+        var openedDb: SQLiteDatabase? = null
+        val keyHandle: AutoCloseable = try {
+            databaseKey.retainAcross { rawKey ->
+                openedDb = SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null, cipherCompatV4Hook)
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            return openCorrupt(e, isDebuggable)
+        }
+        return StorageResult.Success(OpenedDatabase(openedDb!!, keyHandle))
+    }
+
+    /**
+     * Failure path for openOrCreateDatabase itself (including throws from the postKey
+     * hook). No SQLiteDatabase or keyHandle exist yet to close - retainAcross zeros the
+     * key buffer eagerly when its block throws, so this path has no resources to release.
+     */
+    private fun openCorrupt(
+        cause: Exception,
+        isDebuggable: Boolean,
+    ): StorageResult<OpenedDatabase> {
+        if (isDebuggable) {
+            Log.w(LOG_TAG, "SqlCipher openOrCreateDatabase failed: ${cause.javaClass.name}: ${cause.message}", cause)
+        }
+        return StorageResult.Failure(
+            StorageError.Unknown(
+                kind = UnknownStorageFailureKind.DatabaseCorrupt,
+                cause = cause,
+            ),
+        )
+    }
 
     private fun databaseCorrupt(
         db: SQLiteDatabase,
