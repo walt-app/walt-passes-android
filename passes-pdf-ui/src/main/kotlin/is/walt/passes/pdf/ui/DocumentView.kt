@@ -129,9 +129,14 @@ public fun DocumentView(
     }
 }
 
+/**
+ * Each parameter is a distinct dependency the page rendering needs; bundling them
+ * into a holder would only relocate the count from a function signature to a
+ * constructor without lowering the conceptual surface, so the LongParameterList
+ * suppression is the lower-cost choice here.
+ */
 @Composable
-@Suppress("LongParameterList") // Each parameter is a distinct dependency; bundling
-// would only relocate the count from a function signature to a holder constructor.
+@Suppress("LongParameterList")
 private fun DocumentPage(
     document: PdfDocument,
     pageIndex: Int,
