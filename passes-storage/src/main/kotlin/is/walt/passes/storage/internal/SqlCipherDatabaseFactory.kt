@@ -1,12 +1,14 @@
 package `is`.walt.passes.storage.internal
 
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.util.Log
 import `is`.walt.passes.storage.DatabaseKey
 import `is`.walt.passes.storage.Schema
 import `is`.walt.passes.storage.StorageError
 import `is`.walt.passes.storage.StorageResult
 import `is`.walt.passes.storage.UnknownStorageFailureKind
+import kotlinx.coroutines.CancellationException
 import net.zetetic.database.sqlcipher.SQLiteDatabase
 import java.io.File
 
@@ -20,10 +22,11 @@ import java.io.File
  * idempotent on subsequent calls.
  */
 internal object SqlCipherDatabaseFactory {
-    // Logcat tag for setup-phase diagnosis. Logcat is local-only; this is NOT telemetry
-    // (StorageTelemetryGuard's no-free-form-strings discipline still holds). The cause's
-    // class and message are needed to root-cause a SQLCipher setup failure on a real
-    // device, since the typed StorageFailureKind alone is opaque.
+    // Logcat tag for setup-phase diagnosis. Logcat is local-only AND we gate on the host
+    // app's debuggable flag so release builds emit nothing. StorageTelemetryGuard's
+    // no-free-form-strings discipline still holds; this is debug-only diagnostic, not
+    // telemetry. The cause class and message are needed to root-cause a SQLCipher setup
+    // failure on a real device, since the typed StorageFailureKind alone is opaque.
     private const val LOG_TAG: String = "PassesStorage"
 
     @Volatile
@@ -47,6 +50,7 @@ internal object SqlCipherDatabaseFactory {
         loadLibsOnce()
         val dbFile: File = context.applicationContext.getDatabasePath(Schema.DATABASE_NAME)
         dbFile.parentFile?.mkdirs()
+        val isDebuggable: Boolean = isHostAppDebuggable(context)
 
         val db: SQLiteDatabase = databaseKey.withBytes { rawKey ->
             // The withBytes scope zeros our local copy on return; SQLCipher's internal
@@ -55,41 +59,51 @@ internal object SqlCipherDatabaseFactory {
             SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null)
         }
 
-        // Setup phase: PRAGMA pinning, schema-version probe, and DDL/migration apply must
-        // all succeed or the connection must close. A throw anywhere below leaks the open
-        // SQLiteDatabase handle (a real symptom seen in wpass-aio logcat) unless guarded.
-        return try {
-            // Pin SQLCipher v4 page format defensively against a future major-version
-            // default change. Issued before any other DDL/DML so the page format is locked
-            // before tables get created.
+        // Pin SQLCipher v4 page format defensively against a future major-version default
+        // change. Issued before any other DDL/DML so the page format is locked before
+        // tables get created. Probe the on-disk schema version after PRAGMA so any failure
+        // here is mapped to DatabaseCorrupt with the cause attached.
+        val onDiskVersion: Int? = try {
             db.execSQL("PRAGMA cipher_compatibility = 4")
             db.execSQL("PRAGMA foreign_keys = ON")
+            readSchemaVersionIfPresent(db)
+        } catch (e: CancellationException) {
+            // Coroutine cancellation: surface, do NOT map to DatabaseCorrupt. Close
+            // best-effort to release the native handle.
+            closeQuietly(db, isDebuggable, phase = "PRAGMA/schema-probe")
+            throw e
+        } catch (e: Exception) {
+            return databaseCorrupt(db, e, isDebuggable, phase = "PRAGMA/schema-probe")
+        }
 
-            val onDiskVersion: Int? = readSchemaVersionIfPresent(db)
-            when {
-                onDiskVersion != null && onDiskVersion > Schema.VERSION -> {
-                    db.close()
-                    return StorageResult.Failure(StorageError.Unsupported(onDiskVersion))
-                }
-                onDiskVersion == Schema.VERSION -> return StorageResult.Success(db)
+        if (onDiskVersion != null && onDiskVersion > Schema.VERSION) {
+            // Future schema (user downgraded the wallet app). Close best-effort; if close
+            // throws we still want to return Unsupported, NOT DatabaseCorrupt.
+            closeQuietly(db, isDebuggable, phase = "future-schema-close")
+            return StorageResult.Failure(StorageError.Unsupported(onDiskVersion))
+        }
+        if (onDiskVersion == Schema.VERSION) {
+            return StorageResult.Success(db)
+        }
+
+        val statements: List<String> = if (onDiskVersion == null) {
+            Schema.DDL
+        } else {
+            buildMigrationChain(onDiskVersion) ?: run {
+                // The DB is fine; the build is broken (someone bumped Schema.VERSION
+                // without adding a migration entry). Reporting this as DatabaseCorrupt
+                // would mislead telemetry into pointing at user data; close best-effort
+                // so a throwing close() does not flip the category. The
+                // `migrationsCoverEveryHopFromV1ToCurrent` JVM test catches the mistake
+                // at CI time so this runtime path should never fire in a shipped build.
+                closeQuietly(db, isDebuggable, phase = "missing-migration-close")
+                return StorageResult.Failure(
+                    StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
+                )
             }
+        }
 
-            val statements: List<String> = if (onDiskVersion == null) {
-                Schema.DDL
-            } else {
-                buildMigrationChain(onDiskVersion) ?: run {
-                    // The DB is fine; the build is broken (someone bumped Schema.VERSION
-                    // without adding a migration entry). Reporting this as DatabaseCorrupt
-                    // would mislead telemetry into pointing at user data. The
-                    // `migrationsCoverEveryHopFromV1ToCurrent` JVM test catches the mistake
-                    // at CI time so this runtime path should never fire in a shipped build.
-                    db.close()
-                    return StorageResult.Failure(
-                        StorageError.Unknown(kind = UnknownStorageFailureKind.Other),
-                    )
-                }
-            }
-
+        try {
             db.beginTransaction()
             try {
                 for (statement in statements) {
@@ -103,22 +117,45 @@ internal object SqlCipherDatabaseFactory {
             } finally {
                 db.endTransaction()
             }
-            StorageResult.Success(db)
-        } catch (e: Throwable) {
-            // Logcat (local-only) carries the cause class and message; StorageTelemetryGuard
-            // remains free of free-form strings (see KDoc on that interface). Without this
-            // line the failure surfaces only as `unknown_kind=DatabaseCorrupt` and root-cause
-            // is impossible to determine from a device.
-            Log.w(LOG_TAG, "SqlCipher setup failed: ${e.javaClass.name}: ${e.message}", e)
-            runCatching { db.close() }.onFailure { closeError ->
-                Log.w(LOG_TAG, "Also failed closing db after setup error", closeError)
+        } catch (e: CancellationException) {
+            closeQuietly(db, isDebuggable, phase = "DDL/migration")
+            throw e
+        } catch (e: Exception) {
+            return databaseCorrupt(db, e, isDebuggable, phase = "DDL/migration")
+        }
+        return StorageResult.Success(db)
+    }
+
+    private fun isHostAppDebuggable(context: Context): Boolean =
+        context.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+
+    private fun databaseCorrupt(
+        db: SQLiteDatabase,
+        cause: Exception,
+        isDebuggable: Boolean,
+        phase: String,
+    ): StorageResult<SQLiteDatabase> {
+        if (isDebuggable) {
+            Log.w(LOG_TAG, "SqlCipher $phase failed: ${cause.javaClass.name}: ${cause.message}", cause)
+        }
+        closeQuietly(db, isDebuggable, phase = "$phase-close")
+        return StorageResult.Failure(
+            StorageError.Unknown(
+                kind = UnknownStorageFailureKind.DatabaseCorrupt,
+                cause = cause,
+            ),
+        )
+    }
+
+    private fun closeQuietly(db: SQLiteDatabase, isDebuggable: Boolean, phase: String) {
+        runCatching { db.close() }.onFailure { closeError ->
+            if (isDebuggable) {
+                Log.w(
+                    LOG_TAG,
+                    "Also failed during $phase: ${closeError.javaClass.name}: ${closeError.message}",
+                    closeError,
+                )
             }
-            StorageResult.Failure(
-                StorageError.Unknown(
-                    kind = UnknownStorageFailureKind.DatabaseCorrupt,
-                    cause = e,
-                ),
-            )
         }
     }
 
