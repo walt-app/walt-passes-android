@@ -1,5 +1,6 @@
 package `is`.walt.passes.ui
 
+import `is`.walt.passes.core.ParseFailureKind
 import `is`.walt.passes.core.PassType
 
 /**
@@ -23,6 +24,14 @@ public interface UiTelemetryGuard {
     /**
      * A pass front rendered. Useful as a baseline against which sheet-display rates
      * can be normalized.
+     *
+     * NB: this fires for every [PassFront] composition, including the preview embedded
+     * in [PassImportConfirm]. A successful import therefore records both
+     * [onImportConfirmShown] and at least one [onPassRendered]; consumers that want a
+     * "library views only" baseline should subtract import-flow renders or filter on a
+     * scope they track separately. The signal is not split here because the only
+     * Walt-side dashboard that consumes this event already aggregates per-day, and the
+     * inflation is bounded by the import volume.
      */
     public fun onPassRendered(type: PassType, signatureBand: SignatureBand)
 
@@ -58,6 +67,36 @@ public interface UiTelemetryGuard {
      * tuning.
      */
     public fun onImageDecodeRejected(reason: ImageDecodeRejection)
+
+    /**
+     * The in-app pass-import confirmation surface ([PassImportConfirm]) was shown to
+     * the user after a successful parse. [signatureBand] is the trust band the user is
+     * being asked to consent to; a sustained shift toward [SignatureBand.Untrusted] or
+     * [SignatureBand.SelfSigned] is operationally meaningful.
+     */
+    public fun onImportConfirmShown(type: PassType, signatureBand: SignatureBand)
+
+    /**
+     * The user tapped Save on the import-confirm surface. The host's call to
+     * `PassRepository.upsert` is the next thing constructed after this event.
+     */
+    public fun onImportConfirmed(type: PassType, signatureBand: SignatureBand)
+
+    /**
+     * The user tapped Cancel on the import-confirm surface, or dismissed it. A
+     * sustained rise — especially scoped to [SignatureBand.SelfSigned] — is a useful
+     * UX or social-engineering signal.
+     */
+    public fun onImportDismissed(type: PassType, signatureBand: SignatureBand)
+
+    /**
+     * An import attempt was rejected by [PassImportRejectionSheet] because the parser
+     * returned a non-success arm. [kind] is the coarse failure family; the underlying
+     * `ParseFailureReason` is intentionally not surfaced to the UI guard, since
+     * `passes-core`'s `TelemetryGuard.onParseFailed` already records that dimension and
+     * a duplicate-with-narrower-shape would only invite drift.
+     */
+    public fun onImportRejected(kind: ParseFailureKind)
 }
 
 /**
@@ -107,4 +146,8 @@ public object NoopUiTelemetryGuard : UiTelemetryGuard {
     override fun onSecuritySheetConfirmed(intentKind: SecurityIntentKind, type: PassType): Unit = Unit
     override fun onSecuritySheetDismissed(intentKind: SecurityIntentKind, type: PassType): Unit = Unit
     override fun onImageDecodeRejected(reason: ImageDecodeRejection): Unit = Unit
+    override fun onImportConfirmShown(type: PassType, signatureBand: SignatureBand): Unit = Unit
+    override fun onImportConfirmed(type: PassType, signatureBand: SignatureBand): Unit = Unit
+    override fun onImportDismissed(type: PassType, signatureBand: SignatureBand): Unit = Unit
+    override fun onImportRejected(kind: ParseFailureKind): Unit = Unit
 }

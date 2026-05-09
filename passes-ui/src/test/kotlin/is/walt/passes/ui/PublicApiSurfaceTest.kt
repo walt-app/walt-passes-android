@@ -1,5 +1,6 @@
 package `is`.walt.passes.ui
 
+import `is`.walt.passes.core.ParseFailureKind
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassColors
 import `is`.walt.passes.core.PassFields
@@ -187,6 +188,22 @@ class PublicApiSurfaceTest {
             override fun onImageDecodeRejected(reason: ImageDecodeRejection) {
                 recorded += "decode:${reason.name}"
             }
+
+            override fun onImportConfirmShown(type: PassType, signatureBand: SignatureBand) {
+                recorded += "import-shown:${type.name}:${signatureBand.name}"
+            }
+
+            override fun onImportConfirmed(type: PassType, signatureBand: SignatureBand) {
+                recorded += "import-confirm:${type.name}:${signatureBand.name}"
+            }
+
+            override fun onImportDismissed(type: PassType, signatureBand: SignatureBand) {
+                recorded += "import-dismiss:${type.name}:${signatureBand.name}"
+            }
+
+            override fun onImportRejected(kind: ParseFailureKind) {
+                recorded += "import-rejected:${kind.name}"
+            }
         }
         guard.onPassRendered(PassType.BoardingPass, SignatureBand.AppleVerified)
         guard.onPassBackOpened(PassType.EventTicket)
@@ -194,6 +211,10 @@ class PublicApiSurfaceTest {
         guard.onSecuritySheetConfirmed(SecurityIntentKind.Phone, PassType.StoreCard)
         guard.onSecuritySheetDismissed(SecurityIntentKind.Email, PassType.Coupon)
         guard.onImageDecodeRejected(ImageDecodeRejection.ExceedsArea)
+        guard.onImportConfirmShown(PassType.Generic, SignatureBand.SelfSigned)
+        guard.onImportConfirmed(PassType.Generic, SignatureBand.SelfSigned)
+        guard.onImportDismissed(PassType.BoardingPass, SignatureBand.Untrusted)
+        guard.onImportRejected(ParseFailureKind.Tampered)
 
         assertThat(recorded).containsExactly(
             "rendered:BoardingPass:AppleVerified",
@@ -202,6 +223,10 @@ class PublicApiSurfaceTest {
             "confirm:Phone:StoreCard",
             "dismiss:Email:Coupon",
             "decode:ExceedsArea",
+            "import-shown:Generic:SelfSigned",
+            "import-confirm:Generic:SelfSigned",
+            "import-dismiss:BoardingPass:Untrusted",
+            "import-rejected:Tampered",
         ).inOrder()
     }
 
@@ -214,6 +239,10 @@ class PublicApiSurfaceTest {
         guard.onSecuritySheetConfirmed(SecurityIntentKind.Url, PassType.BoardingPass)
         guard.onSecuritySheetDismissed(SecurityIntentKind.Url, PassType.BoardingPass)
         guard.onImageDecodeRejected(ImageDecodeRejection.Other)
+        guard.onImportConfirmShown(PassType.BoardingPass, SignatureBand.AppleVerified)
+        guard.onImportConfirmed(PassType.BoardingPass, SignatureBand.AppleVerified)
+        guard.onImportDismissed(PassType.BoardingPass, SignatureBand.Incomplete)
+        guard.onImportRejected(ParseFailureKind.Malformed)
     }
 
     @Test
