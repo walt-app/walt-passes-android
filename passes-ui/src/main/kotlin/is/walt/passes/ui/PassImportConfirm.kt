@@ -1,5 +1,6 @@
 package `is`.walt.passes.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -23,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.ui.internal.toBand
 import `is`.walt.passes.ui.theme.LocalPassesSemantics
 import `is`.walt.passes.ui.theme.toComposeColor
 
@@ -46,7 +48,17 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *
  * This is a leaf composable: walt-android wraps it in its own scaffold / nav back-
  * stack. The dimensions of the pass preview (PassFront fills available width) make a
- * bottom sheet awkward; a screen-level layout is preferred.
+ * bottom sheet awkward; a screen-level layout is preferred. Hosts whose target
+ * viewport may be shorter than the pass preview + caption + action row (small phones
+ * in landscape, foldable inner screens) MUST wrap this composable in a vertically
+ * scrollable container; this composable does not impose its own scroll because the
+ * host's scaffold typically owns the scroll axis.
+ *
+ * Android system back is wired to the same dismissal pair as the Cancel button —
+ * [onImportDismissed] telemetry fires, then [onDismiss] is invoked. Hosts cannot
+ * silence this: the [BackHandler] is registered unconditionally inside this
+ * composable. A future flag that lets back-press bypass dismissal would invalidate
+ * the trust contract by allowing imports to be cancelled without telemetry.
  *
  * [locale] drives `pass.strings` substitution in the preview, identical to [PassFront].
  * Defaults to `PassLocale("en")` for tests / previews; production callers thread the
@@ -65,8 +77,19 @@ public fun PassImportConfirm(
     val band = remember(signatureStatus) { signatureStatus.toBand() }
     val emphasis = LocalPassesSemantics.current.securitySheet
 
+    // Keys are (pass.type, band), not Unit, because navigating back to this screen
+    // for a *different* pass — same composable instance, different inputs — should
+    // re-emit the shown event. A Unit key would coalesce the two views into one.
     LaunchedEffect(pass.type, band) {
         telemetry.onImportConfirmShown(pass.type, band)
+    }
+
+    // System back must mirror Cancel: same telemetry, same callback. Without this
+    // the host loses dismissal symmetry and confirm-shown counts drift away from
+    // confirm/dismiss tallies for any user who back-presses out of the screen.
+    BackHandler {
+        telemetry.onImportDismissed(pass.type, band)
+        onDismiss()
     }
 
     Column(
@@ -166,13 +189,3 @@ private fun ImportTrustCaption(band: SignatureBand) {
     }
 }
 
-// PassFront's private toBand() is duplicated here so this file does not need a
-// passes-core extension or a cross-file private. The mapping is total over
-// SignatureStatus (four arms in, four arms out); a new arm in either type is a
-// compile error.
-private fun SignatureStatus.toBand(): SignatureBand = when (this) {
-    SignatureStatus.Unsigned -> SignatureBand.Untrusted
-    SignatureStatus.SelfSigned -> SignatureBand.SelfSigned
-    SignatureStatus.AppleVerified -> SignatureBand.AppleVerified
-    SignatureStatus.CertChainIncomplete -> SignatureBand.Incomplete
-}

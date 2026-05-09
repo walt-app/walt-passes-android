@@ -24,6 +24,14 @@ public interface UiTelemetryGuard {
     /**
      * A pass front rendered. Useful as a baseline against which sheet-display rates
      * can be normalized.
+     *
+     * NB: this fires for every [PassFront] composition, including the preview embedded
+     * in [PassImportConfirm]. A successful import therefore records both
+     * [onImportConfirmShown] and at least one [onPassRendered]; consumers that want a
+     * "library views only" baseline should subtract import-flow renders or filter on a
+     * scope they track separately. The signal is not split here because the only
+     * Walt-side dashboard that consumes this event already aggregates per-day, and the
+     * inflation is bounded by the import volume.
      */
     public fun onPassRendered(type: PassType, signatureBand: SignatureBand)
 

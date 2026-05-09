@@ -33,6 +33,7 @@ import `is`.walt.passes.core.TextAlignment
 import `is`.walt.passes.core.lookupOrSelf
 import `is`.walt.passes.core.resolveLocalizedStrings
 import `is`.walt.passes.ui.internal.LocalLocalizedStrings
+import `is`.walt.passes.ui.internal.toBand
 import `is`.walt.passes.ui.theme.LocalPassesSemantics
 import `is`.walt.passes.ui.theme.toComposeColor
 
@@ -329,13 +330,6 @@ private fun SignatureTrustBadge(band: SignatureBand) {
             .background(background.toComposeColor())
             .padding(PaddingValues(horizontal = 12.dp, vertical = 4.dp)),
     )
-}
-
-private fun SignatureStatus.toBand(): SignatureBand = when (this) {
-    SignatureStatus.Unsigned -> SignatureBand.Untrusted
-    SignatureStatus.SelfSigned -> SignatureBand.SelfSigned
-    SignatureStatus.AppleVerified -> SignatureBand.AppleVerified
-    SignatureStatus.CertChainIncomplete -> SignatureBand.Incomplete
 }
 
 private fun ColorValue?.toComposeOrDefault(default: Color): Color {

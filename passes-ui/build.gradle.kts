@@ -19,6 +19,10 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+    // androidx.activity.compose pulls in BackHandler, which the trust-claim-bearing
+    // PassImportConfirm uses so system back-press routes through the same dismiss
+    // telemetry as the Cancel button (no silent escape hatch).
+    implementation(libs.androidx.activity.compose)
 
     val composeBom = platform(libs.androidx.compose.bom)
     api(composeBom)

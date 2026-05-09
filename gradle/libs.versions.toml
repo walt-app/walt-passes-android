@@ -12,6 +12,7 @@ bouncycastle = "1.79"
 # Android + Compose toolchain (matches walt-android consumer to avoid drift).
 androidxCoreKtx = "1.17.0"
 androidxLifecycle = "2.10.0"
+androidxActivity = "1.10.1"
 composeBom = "2026.01.00"
 zxing = "3.5.4"
 robolectric = "4.16.1"
@@ -47,6 +48,7 @@ bouncycastle-bcpkix = { module = "org.bouncycastle:bcpkix-jdk18on", version.ref 
 # Android core
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "androidxCoreKtx" }
 androidx-lifecycle-runtime-ktx = { group = "androidx.lifecycle", name = "lifecycle-runtime-ktx", version.ref = "androidxLifecycle" }
+androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "androidxActivity" }
 
 # Compose (versions sourced from the BOM)
 androidx-compose-bom = { group = "androidx.compose", name = "compose-bom", version.ref = "composeBom" }
