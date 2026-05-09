@@ -93,6 +93,43 @@ class ComposableSurfaceLockTest {
         }
     }
 
+    @Test
+    fun passImportConfirmHasExactlySevenUserVisibleParameters() {
+        // (pass, signatureStatus, telemetry, onConfirm, onDismiss, modifier, locale).
+        // No `enabled`, no `skipConfirmation`, no `showTrustCaption` — drift here is a
+        // trust-claim regression (decision-wlt-0tn-q1 1a).
+        assertUserVisibleParamCount("PassImportConfirmKt", "PassImportConfirm", expected = 7)
+    }
+
+    @Test
+    fun passImportConfirmAcceptsUiTelemetryGuard() {
+        val method = findComposable("PassImportConfirmKt", "PassImportConfirm")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("PassImportConfirm must declare a UiTelemetryGuard parameter")
+            .that(typeNames)
+            .contains("UiTelemetryGuard")
+    }
+
+    @Test
+    fun passImportRejectionSheetHasExactlyThreeUserVisibleParameters() {
+        // (kind, telemetry, onDismiss). The sheet is dismiss-only by design (no Save /
+        // Open / Anyway button); a future addition of a fourth callback would be a
+        // policy change to the lenient-with-disclosure signature stance.
+        assertUserVisibleParamCount("PassImportRejectionKt", "PassImportRejectionSheet", expected = 3)
+    }
+
+    @Test
+    fun passImportRejectionSheetAcceptsParseFailureKindAndUiTelemetryGuard() {
+        val method = findComposable("PassImportRejectionKt", "PassImportRejectionSheet")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("PassImportRejectionSheet must declare a ParseFailureKind parameter")
+            .that(typeNames)
+            .contains("ParseFailureKind")
+        assertWithMessage("PassImportRejectionSheet must declare a UiTelemetryGuard parameter")
+            .that(typeNames)
+            .contains("UiTelemetryGuard")
+    }
+
     // -- helpers -------------------------------------------------------------------
 
     private fun findComposable(fileClassSimpleName: String, methodName: String): Method {

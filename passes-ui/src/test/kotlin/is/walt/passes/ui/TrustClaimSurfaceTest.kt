@@ -7,8 +7,10 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.compose.ui.test.performClick
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.ColorValue
+import `is`.walt.passes.core.ParseFailureKind
 import `is`.walt.passes.core.ImageBytes
 import `is`.walt.passes.core.ImageRole
 import `is`.walt.passes.core.Pass
@@ -383,6 +385,132 @@ class TrustClaimSurfaceTest {
     // Document-surface trust assertions (caption, tile bidi-isolation, lane wiring)
     // moved to passes-pdf-ui::DocumentTrustSurfaceTest with the composables (wpass-r4z).
 
+    @Test
+    fun importConfirmShowsTrustCaptionForAppleVerified() {
+        composeRule.setContent {
+            ThemedHost {
+                PassImportConfirm(
+                    pass = passFixture(),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText("Verified Apple issuer").assertIsDisplayed()
+        composeRule.onNodeWithText("Add this pass?").assertIsDisplayed()
+        composeRule.onNodeWithText("Save pass").assertIsDisplayed()
+        composeRule.onNodeWithText("Cancel").assertIsDisplayed()
+        composeRule.waitForIdle()
+        assertThat(telemetry.events).contains("import-shown:Generic:AppleVerified")
+    }
+
+    @Test
+    fun importConfirmTrustCaptionUnsigned() = importConfirmCaption(SignatureStatus.Unsigned, "No signature")
+
+    @Test
+    fun importConfirmTrustCaptionSelfSigned() =
+        importConfirmCaption(SignatureStatus.SelfSigned, "Self-signed issuer")
+
+    @Test
+    fun importConfirmTrustCaptionIncomplete() =
+        importConfirmCaption(SignatureStatus.CertChainIncomplete, "Issuer chain incomplete")
+
+    private fun importConfirmCaption(status: SignatureStatus, expected: String) {
+        composeRule.setContent {
+            ThemedHost {
+                PassImportConfirm(
+                    pass = passFixture(),
+                    signatureStatus = status,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText(expected).assertIsDisplayed()
+    }
+
+    @Test
+    fun importConfirmFiresConfirmedTelemetryAndCallback() {
+        var confirmed = 0
+        composeRule.setContent {
+            ThemedHost {
+                PassImportConfirm(
+                    pass = passFixture(),
+                    signatureStatus = SignatureStatus.SelfSigned,
+                    telemetry = telemetry,
+                    onConfirm = { confirmed++ },
+                    onDismiss = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText("Save pass").performClick()
+        composeRule.waitForIdle()
+        assertThat(confirmed).isEqualTo(1)
+        assertThat(telemetry.events).contains("import-confirm:Generic:SelfSigned")
+    }
+
+    @Test
+    fun importConfirmFiresDismissedTelemetryAndCallback() {
+        var dismissed = 0
+        composeRule.setContent {
+            ThemedHost {
+                PassImportConfirm(
+                    pass = passFixture(),
+                    signatureStatus = SignatureStatus.Unsigned,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = { dismissed++ },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Cancel").performClick()
+        composeRule.waitForIdle()
+        assertThat(dismissed).isEqualTo(1)
+        assertThat(telemetry.events).contains("import-dismiss:Generic:Untrusted")
+    }
+
+    @Test
+    fun importRejectionSheetTamperedCopy() = importRejectionCopy(
+        ParseFailureKind.Tampered,
+        "This pass appears to have been tampered with",
+    )
+
+    @Test
+    fun importRejectionSheetMalformedCopy() = importRejectionCopy(
+        ParseFailureKind.Malformed,
+        "This file is not a valid pass",
+    )
+
+    @Test
+    fun importRejectionSheetUnsupportedCopy() = importRejectionCopy(
+        ParseFailureKind.Unsupported,
+        "Walt cannot open this pass",
+    )
+
+    @Test
+    fun importRejectionSheetResourceLimitCopy() = importRejectionCopy(
+        ParseFailureKind.ResourceLimitExceeded,
+        "This pass is too large to open safely",
+    )
+
+    private fun importRejectionCopy(kind: ParseFailureKind, expectedTitle: String) {
+        composeRule.setContent {
+            ThemedHost {
+                PassImportRejectionSheet(
+                    kind = kind,
+                    telemetry = telemetry,
+                    onDismiss = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText(expectedTitle).assertIsDisplayed()
+        composeRule.waitForIdle()
+        assertThat(telemetry.events).contains("import-rejected:${kind.name}")
+    }
+
     @Composable
     private fun ThemedHost(content: @Composable () -> Unit) {
         MaterialTheme {
@@ -433,5 +561,17 @@ private class RecordingGuard : UiTelemetryGuard {
     }
     override fun onImageDecodeRejected(reason: ImageDecodeRejection) {
         events += "decode:${reason.name}"
+    }
+    override fun onImportConfirmShown(type: PassType, signatureBand: SignatureBand) {
+        events += "import-shown:${type.name}:${signatureBand.name}"
+    }
+    override fun onImportConfirmed(type: PassType, signatureBand: SignatureBand) {
+        events += "import-confirm:${type.name}:${signatureBand.name}"
+    }
+    override fun onImportDismissed(type: PassType, signatureBand: SignatureBand) {
+        events += "import-dismiss:${type.name}:${signatureBand.name}"
+    }
+    override fun onImportRejected(kind: ParseFailureKind) {
+        events += "import-rejected:${kind.name}"
     }
 }
