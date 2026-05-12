@@ -30,6 +30,7 @@ class RejectedKindWireSurfaceTest {
                 DocumentRejectedKind.Encrypted to RejectedKindWire.ENCRYPTED,
                 DocumentRejectedKind.TooManyPages to RejectedKindWire.TOO_MANY_PAGES,
                 DocumentRejectedKind.RendererFailed to RejectedKindWire.RENDERER_FAILED,
+                DocumentRejectedKind.UnsupportedAndroidVersion to RejectedKindWire.UNSUPPORTED_ANDROID_VERSION,
             )
         for ((kind, code) in expected) {
             assertThat(RejectedKindWire.encode(kind)).isEqualTo(code)
@@ -57,6 +58,7 @@ class RejectedKindWireSurfaceTest {
         assertThat(RejectedKindWire.ENCRYPTED).isEqualTo(2)
         assertThat(RejectedKindWire.TOO_MANY_PAGES).isEqualTo(3)
         assertThat(RejectedKindWire.RENDERER_FAILED).isEqualTo(4)
+        assertThat(RejectedKindWire.UNSUPPORTED_ANDROID_VERSION).isEqualTo(5)
     }
 
     @Test

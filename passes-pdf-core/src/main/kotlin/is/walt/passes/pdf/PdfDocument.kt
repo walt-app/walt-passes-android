@@ -52,6 +52,11 @@ public enum class Provenance {
  *  - [Encrypted] → D6 (encrypted PDFs are rejected at import).
  *  - [RendererFailed] → the isolated renderer service (D3) returned an error or timed out
  *    during page-count probing; we never report the underlying decoder error string.
+ *  - [UnsupportedAndroidVersion] → ADR 0005 G.1 runtime gate. The host device's
+ *    `Build.VERSION.SDK_INT` is below 34, so the Mainline-backed PDFium reachable through
+ *    `android.graphics.pdf.PdfRenderer` is not available. Fired by the importer entry
+ *    point *before* any source bytes are read or the renderer service is bound; the
+ *    isolated process never starts on a device that cannot satisfy the version floor.
  *
  * Reviewers should treat any future addition of a string-bearing failure arm (e.g. an
  * "ErrorMessage" data class) as a security-policy change.
@@ -69,4 +74,5 @@ public enum class DocumentRejectedKind {
     Encrypted,
     TooManyPages,
     RendererFailed,
+    UnsupportedAndroidVersion,
 }
