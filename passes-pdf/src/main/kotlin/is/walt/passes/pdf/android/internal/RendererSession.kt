@@ -70,21 +70,7 @@ internal class AndroidRendererSessionFactory(
  */
 private object FailedSession : RendererSession {
     override val client: PdfRendererBinder =
-        object : PdfRendererBinder {
-            override suspend fun probe(pdf: android.os.ParcelFileDescriptor) =
-                `is`.walt.passes.pdf.android.ProbeResult.Rejected(
-                    `is`.walt.passes.pdf.DocumentRejectedKind.RendererFailed,
-                )
-
-            override suspend fun render(
-                pdf: android.os.ParcelFileDescriptor,
-                page: Int,
-                widthPx: Int,
-                heightPx: Int,
-            ) = `is`.walt.passes.pdf.android.RenderResult.Rejected(
-                `is`.walt.passes.pdf.DocumentRejectedKind.RendererFailed,
-            )
-        }
+        RejectingBinder(`is`.walt.passes.pdf.DocumentRejectedKind.RendererFailed)
 
     override fun close() = Unit
 }

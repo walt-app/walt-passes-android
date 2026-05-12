@@ -31,6 +31,8 @@ class RejectedKindWireSurfaceTest {
                 DocumentRejectedKind.TooManyPages to RejectedKindWire.TOO_MANY_PAGES,
                 DocumentRejectedKind.RendererFailed to RejectedKindWire.RENDERER_FAILED,
                 DocumentRejectedKind.UnsupportedAndroidVersion to RejectedKindWire.UNSUPPORTED_ANDROID_VERSION,
+                DocumentRejectedKind.EncoderFailed to RejectedKindWire.ENCODER_FAILED,
+                DocumentRejectedKind.StorageHandoffFailed to RejectedKindWire.STORAGE_HANDOFF_FAILED,
             )
         for ((kind, code) in expected) {
             assertThat(RejectedKindWire.encode(kind)).isEqualTo(code)
@@ -59,6 +61,8 @@ class RejectedKindWireSurfaceTest {
         assertThat(RejectedKindWire.TOO_MANY_PAGES).isEqualTo(3)
         assertThat(RejectedKindWire.RENDERER_FAILED).isEqualTo(4)
         assertThat(RejectedKindWire.UNSUPPORTED_ANDROID_VERSION).isEqualTo(5)
+        assertThat(RejectedKindWire.ENCODER_FAILED).isEqualTo(6)
+        assertThat(RejectedKindWire.STORAGE_HANDOFF_FAILED).isEqualTo(7)
     }
 
     @Test

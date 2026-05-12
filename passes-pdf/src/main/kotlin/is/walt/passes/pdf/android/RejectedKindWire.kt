@@ -27,6 +27,8 @@ internal object RejectedKindWire {
     const val TOO_MANY_PAGES: Int = 3
     const val RENDERER_FAILED: Int = 4
     const val UNSUPPORTED_ANDROID_VERSION: Int = 5
+    const val ENCODER_FAILED: Int = 6
+    const val STORAGE_HANDOFF_FAILED: Int = 7
 
     fun encode(kind: DocumentRejectedKind): Int =
         when (kind) {
@@ -36,6 +38,8 @@ internal object RejectedKindWire {
             DocumentRejectedKind.TooManyPages -> TOO_MANY_PAGES
             DocumentRejectedKind.RendererFailed -> RENDERER_FAILED
             DocumentRejectedKind.UnsupportedAndroidVersion -> UNSUPPORTED_ANDROID_VERSION
+            DocumentRejectedKind.EncoderFailed -> ENCODER_FAILED
+            DocumentRejectedKind.StorageHandoffFailed -> STORAGE_HANDOFF_FAILED
         }
 
     fun decode(code: Int): DocumentRejectedKind =
@@ -46,6 +50,8 @@ internal object RejectedKindWire {
             TOO_MANY_PAGES -> DocumentRejectedKind.TooManyPages
             RENDERER_FAILED -> DocumentRejectedKind.RendererFailed
             UNSUPPORTED_ANDROID_VERSION -> DocumentRejectedKind.UnsupportedAndroidVersion
+            ENCODER_FAILED -> DocumentRejectedKind.EncoderFailed
+            STORAGE_HANDOFF_FAILED -> DocumentRejectedKind.StorageHandoffFailed
             else -> error("Unknown DocumentRejectedKind wire code: $code")
         }
 }

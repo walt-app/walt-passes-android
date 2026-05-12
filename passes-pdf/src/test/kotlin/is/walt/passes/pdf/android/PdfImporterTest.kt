@@ -17,6 +17,7 @@ import `is`.walt.passes.pdf.android.internal.PdfPfdFactory
 import `is`.walt.passes.pdf.android.internal.RendererSession
 import `is`.walt.passes.pdf.android.internal.RendererSessionFactory
 import `is`.walt.passes.pdf.android.internal.ThumbnailEncoder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -215,7 +216,7 @@ class PdfImporterTest {
     }
 
     @Test
-    fun persistThrowFoldsToRendererFailedAndUnbinds() = runTest {
+    fun persistThrowFoldsToStorageHandoffFailedAndUnbinds() = runTest {
         val sm = SharedMemory.create("walt-test-persist-throw", DEFAULT_THUMB_PIXEL_BYTES)
         val factory =
             RecordingSessionFactory(
@@ -232,8 +233,113 @@ class PdfImporterTest {
                 persist = { _, _, _, _ -> error("downstream storage exploded") },
             )
 
-        assertThat(result).isEqualTo(PdfImportResult.Rejected(DocumentRejectedKind.RendererFailed))
+        assertThat(result).isEqualTo(PdfImportResult.Rejected(DocumentRejectedKind.StorageHandoffFailed))
         assertThat(factory.lastSession?.closed).isTrue()
+    }
+
+    @Test
+    fun encoderThrowFoldsToEncoderFailedAndUnbinds() = runTest {
+        val sm = SharedMemory.create("walt-test-encoder-throw", DEFAULT_THUMB_PIXEL_BYTES)
+        val factory =
+            RecordingSessionFactory(
+                binder = StaticBinder(
+                    probeResult = ProbeResult.Ok(pageCount = 2),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                ),
+            )
+        val throwingEncoder =
+            object : ThumbnailEncoder {
+                override fun encode(render: RenderResult.Ok): ByteArray {
+                    runCatching { render.sharedMemory.close() }
+                    error("encoder blew up")
+                }
+            }
+
+        val result =
+            importer(sessionFactory = factory, thumbnailEncoder = throwingEncoder).import(
+                source = PdfImportSource.FileDescriptor(pfdContaining(VALID_PDF_BYTES)),
+                displayLabel = "x.pdf",
+                persist = { _, _, _, _ -> error("persist must not run on encoder failure") },
+            )
+
+        assertThat(result).isEqualTo(PdfImportResult.Rejected(DocumentRejectedKind.EncoderFailed))
+        assertThat(factory.lastSession?.closed).isTrue()
+    }
+
+    @Test
+    fun persistCancellationPropagatesAndPreservesStructuredConcurrency() = runTest {
+        val sm = SharedMemory.create("walt-test-persist-cancel", DEFAULT_THUMB_PIXEL_BYTES)
+        val factory =
+            RecordingSessionFactory(
+                binder = StaticBinder(
+                    probeResult = ProbeResult.Ok(pageCount = 1),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                ),
+            )
+
+        val thrown =
+            runCatching {
+                importer(sessionFactory = factory).import(
+                    source = PdfImportSource.FileDescriptor(pfdContaining(VALID_PDF_BYTES)),
+                    displayLabel = "x.pdf",
+                    persist = { _, _, _, _ -> throw CancellationException("parent scope cancelled") },
+                )
+            }.exceptionOrNull()
+
+        // CancellationException must propagate out of `import` rather than being folded
+        // onto StorageHandoffFailed; otherwise the parent scope sees "import finished
+        // with rejection" instead of "import was cancelled."
+        assertThat(thrown).isInstanceOf(CancellationException::class.java)
+        assertThat(factory.lastSession?.closed).isTrue()
+    }
+
+    @Test
+    fun encoderCancellationPropagatesAndPreservesStructuredConcurrency() = runTest {
+        val sm = SharedMemory.create("walt-test-encoder-cancel", DEFAULT_THUMB_PIXEL_BYTES)
+        val factory =
+            RecordingSessionFactory(
+                binder = StaticBinder(
+                    probeResult = ProbeResult.Ok(pageCount = 1),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                ),
+            )
+        val cancellingEncoder =
+            object : ThumbnailEncoder {
+                override fun encode(render: RenderResult.Ok): ByteArray {
+                    runCatching { render.sharedMemory.close() }
+                    throw CancellationException("scope cancelled mid-encode")
+                }
+            }
+
+        val thrown =
+            runCatching {
+                importer(sessionFactory = factory, thumbnailEncoder = cancellingEncoder).import(
+                    source = PdfImportSource.FileDescriptor(pfdContaining(VALID_PDF_BYTES)),
+                    displayLabel = "x.pdf",
+                    persist = { _, _, _, _ -> Unit },
+                )
+            }.exceptionOrNull()
+
+        assertThat(thrown).isInstanceOf(CancellationException::class.java)
+        assertThat(factory.lastSession?.closed).isTrue()
+    }
+
+    @Test
+    fun nonContentSchemeUriRejectsAsNotAPdfWithoutBindingService() = runTest {
+        // file:// is the canonical escape-hatch shape the scheme allowlist closes:
+        // ContentResolver.openInputStream would happily walk a file path otherwise.
+        val factory = RecordingSessionFactory()
+        val fileUri = Uri.parse("file:///data/data/example/downloads/x.pdf")
+
+        val result =
+            importer(sessionFactory = factory).import(
+                source = PdfImportSource.ContentUri(fileUri, context.contentResolver),
+                displayLabel = "x.pdf",
+                persist = { _, _, _, _ -> error("persist must not run for non-content scheme") },
+            )
+
+        assertThat(result).isEqualTo(PdfImportResult.Rejected(DocumentRejectedKind.NotAPdf))
+        assertThat(factory.connectCalls).isEqualTo(0)
     }
 
     @Test

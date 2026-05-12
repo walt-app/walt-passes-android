@@ -31,7 +31,7 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun documentRejectedKindHasExactlyTheSixListedArms() {
+    fun documentRejectedKindHasExactlyTheEightListedArms() {
         val all =
             setOf(
                 DocumentRejectedKind.OversizedAtImport,
@@ -40,9 +40,11 @@ class PublicApiSurfaceTest {
                 DocumentRejectedKind.TooManyPages,
                 DocumentRejectedKind.RendererFailed,
                 DocumentRejectedKind.UnsupportedAndroidVersion,
+                DocumentRejectedKind.EncoderFailed,
+                DocumentRejectedKind.StorageHandoffFailed,
             )
         assertThat(all).containsExactlyElementsIn(DocumentRejectedKind.entries)
-        assertThat(DocumentRejectedKind.entries).hasSize(6)
+        assertThat(DocumentRejectedKind.entries).hasSize(8)
     }
 
     @Test

@@ -1,5 +1,6 @@
 package `is`.walt.passes.pdf.android
 
+import android.content.ContentResolver
 import android.content.Context
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -20,6 +21,7 @@ import `is`.walt.passes.pdf.isPdfHeader
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
 /**
  * The single import entry point honouring ADR 0005 G.1's "API-34-or-reject" gate and
@@ -36,6 +38,21 @@ import java.util.UUID
  *
  * Each step's rejection routes back into the importer's [DocumentRejectedKind] enum;
  * the renderer service is unbound in a `finally` regardless of outcome.
+ *
+ * Rejection-arm routing keeps trust bands distinct:
+ *
+ *  - [DocumentRejectedKind.RendererFailed] is reserved for the bind→probe→render window
+ *    (including pfd-alloc and source-fd dup failures, which are part of preparing the
+ *    renderer handoff). A spike here is the signal that PDFium may have refused a file.
+ *  - [DocumentRejectedKind.EncoderFailed] covers post-render PNG encoding failures
+ *    (SharedMemory map / bitmap reconstruction / PNG compress). A spike here is "the
+ *    renderer succeeded but our PNG path blew up."
+ *  - [DocumentRejectedKind.StorageHandoffFailed] is reserved for `persist` throws.
+ *    A spike here points the on-call at the consumer's storage layer, not the renderer.
+ *
+ * [CancellationException] is rethrown from the encode and persist wrap points so a
+ * parent-scope cancel during import surfaces as cancellation, preserving structured
+ * concurrency instead of silently converting cancellation into an import rejection.
  *
  * Test seams are kept internal — the public entry remains the [PdfImporter.create]
  * factory. Unit tests in this module construct [DefaultPdfImporter] directly with fake
@@ -160,15 +177,25 @@ internal class DefaultPdfImporter(
                     is RenderResult.Rejected -> return@use rejectAndReport(render.kind, startedAt)
                     is RenderResult.Ok ->
                         runCatching { deps.thumbnailEncoder.encode(render) }
-                            .getOrElse {
-                                return@use rejectAndReport(DocumentRejectedKind.RendererFailed, startedAt)
+                            .getOrElse { t ->
+                                // CancellationException is part of structured concurrency: catching
+                                // it here would silently convert a parent-scope cancel into an
+                                // EncoderFailed rejection, breaking the parent's "import was
+                                // cancelled" signal. Rethrow lets the cancellation propagate.
+                                if (t is CancellationException) throw t
+                                return@use rejectAndReport(DocumentRejectedKind.EncoderFailed, startedAt)
                             }
                 }
-            // Persist throws fold to RendererFailed: persist is the trust-boundary
-            // handoff to storage, and a throw there is an infrastructure failure the
-            // importer cannot recover from. onImportFailed still fires.
+            // Persist failure routes to StorageHandoffFailed (distinct from RendererFailed):
+            // the consumer's storage layer threw, not the isolated renderer. Splitting the
+            // arms gives the on-call a clean "SQLCipher wedged" vs "PDFium choked" signal.
+            // CancellationException is rethrown so a parent-scope cancel mid-persist
+            // surfaces as cancellation, not as an Importer rejection.
             runCatching { persist(displayLabel, bytes, pages, thumbnailBytes) }
-                .getOrElse { return@use rejectAndReport(DocumentRejectedKind.RendererFailed, startedAt) }
+                .getOrElse { t ->
+                    if (t is CancellationException) throw t
+                    return@use rejectAndReport(DocumentRejectedKind.StorageHandoffFailed, startedAt)
+                }
             val doc =
                 PdfDocument(
                     id = PdfDocumentId(deps.idGenerator()),
@@ -204,8 +231,18 @@ internal class DefaultPdfImporter(
 
     private fun openSource(source: PdfImportSource): InputStream? =
         when (source) {
-            is PdfImportSource.ContentUri ->
-                runCatching { source.resolver.openInputStream(source.uri) }.getOrNull()
+            is PdfImportSource.ContentUri -> {
+                // Scheme allowlist: ContentResolver.openInputStream will happily resolve a
+                // `file://` URI to an arbitrary filesystem path, which is exactly the
+                // path-arm escape hatch the sealed PdfImportSource shape was supposed to
+                // close. Refusing non-`content://` schemes here keeps the implementation
+                // aligned with the documented threat model on PdfImportSource.
+                if (source.uri.scheme != ContentResolver.SCHEME_CONTENT) {
+                    null
+                } else {
+                    runCatching { source.resolver.openInputStream(source.uri) }.getOrNull()
+                }
+            }
             is PdfImportSource.FileDescriptor -> {
                 // Dup the caller's PFD so AutoCloseInputStream's `close()` releases only
                 // our duplicate; the caller's original fd survives, honouring the

@@ -21,21 +21,28 @@ internal interface ThumbnailEncoder {
 
 internal object PngThumbnailEncoder : ThumbnailEncoder {
     override fun encode(render: RenderResult.Ok): ByteArray {
-        val buffer = render.sharedMemory.mapReadOnly()
+        // Outer try/finally ensures `sharedMemory.close()` runs even if `mapReadOnly()`
+        // itself throws — otherwise the SharedMemory handle leaks across the IPC
+        // ownership boundary, which is exactly the surface this module spends most of
+        // its energy locking down.
         try {
-            val bitmap = Bitmap.createBitmap(render.widthPx, render.heightPx, Bitmap.Config.ARGB_8888)
+            val buffer = render.sharedMemory.mapReadOnly()
             try {
-                bitmap.copyPixelsFromBuffer(buffer)
-                val baos = ByteArrayOutputStream()
-                // PNG is lossless; the quality argument is ignored. Pinning at 100 is
-                // documentation for the call-site reader.
-                bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
-                return baos.toByteArray()
+                val bitmap = Bitmap.createBitmap(render.widthPx, render.heightPx, Bitmap.Config.ARGB_8888)
+                try {
+                    bitmap.copyPixelsFromBuffer(buffer)
+                    val baos = ByteArrayOutputStream()
+                    // PNG is lossless; the quality argument is ignored. Pinning at 100 is
+                    // documentation for the call-site reader.
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, baos)
+                    return baos.toByteArray()
+                } finally {
+                    bitmap.recycle()
+                }
             } finally {
-                bitmap.recycle()
+                SharedMemory.unmap(buffer)
             }
         } finally {
-            SharedMemory.unmap(buffer)
             render.sharedMemory.close()
         }
     }

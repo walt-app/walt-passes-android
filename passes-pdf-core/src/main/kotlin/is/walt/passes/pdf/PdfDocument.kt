@@ -57,6 +57,14 @@ public enum class Provenance {
  *    `android.graphics.pdf.PdfRenderer` is not available. Fired by the importer entry
  *    point *before* any source bytes are read or the renderer service is bound; the
  *    isolated process never starts on a device that cannot satisfy the version floor.
+ *  - [EncoderFailed] → SharedMemory mapping, `Bitmap.copyPixelsFromBuffer`, or
+ *    `Bitmap.compress(PNG)` threw after the renderer service returned `Ok`. This is a
+ *    *post-renderer* failure inside the importer's PNG-encoding step. Distinct from
+ *    [RendererFailed] so telemetry can tell "PDFium choked on this file" apart from
+ *    "the device ran out of RAM during PNG encoding."
+ *  - [StorageHandoffFailed] → the consumer-supplied `persist` callback threw after a
+ *    successful render. Trust band is the storage layer (downstream of this module);
+ *    a spike here points the consumer at SQLCipher / DB infra rather than the renderer.
  *
  * Reviewers should treat any future addition of a string-bearing failure arm (e.g. an
  * "ErrorMessage" data class) as a security-policy change.
@@ -75,4 +83,6 @@ public enum class DocumentRejectedKind {
     TooManyPages,
     RendererFailed,
     UnsupportedAndroidVersion,
+    EncoderFailed,
+    StorageHandoffFailed,
 }

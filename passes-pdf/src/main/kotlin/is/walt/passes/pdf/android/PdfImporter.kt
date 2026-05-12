@@ -36,11 +36,12 @@ public interface PdfImporter {
      *
      * [persist] is invoked exactly once on the success path, after the page-zero render
      * succeeds and before the [PdfImportResult.Imported] arm is constructed. It is never
-     * invoked on a rejection. If [persist] throws, the import returns
-     * [is.walt.passes.pdf.DocumentRejectedKind.RendererFailed] (the persist call sits at
-     * the same trust band as the renderer handoff — a thrown exception there is a
-     * downstream infrastructure failure the importer cannot recover from), and telemetry
-     * fires `onImportFailed`.
+     * invoked on a rejection. If [persist] throws (other than `CancellationException`,
+     * which is rethrown to preserve structured concurrency), the import returns
+     * [is.walt.passes.pdf.DocumentRejectedKind.StorageHandoffFailed] — distinct from
+     * the renderer's own [is.walt.passes.pdf.DocumentRejectedKind.RendererFailed] so
+     * telemetry can separate "PDFium choked on this file" from "the consumer's storage
+     * layer blew up." Telemetry fires `onImportFailed`.
      *
      * [displayLabel] is supplied by the consumer; the importer does not derive it from
      * the source, because the source's metadata is part of the no-extraction-from-content
