@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -40,10 +39,15 @@ import java.nio.BufferUnderflowException
 import java.nio.ByteBuffer
 
 /**
- * Full-screen presentation of a [PdfDocument]. Pages are rasterised on demand by the
- * isolated-process renderer reached through [renderer] (the `PdfRendererBinder`
- * interface, never the concrete `PdfRendererClient`, so test fakes substitute cleanly)
- * and held in a small per-document LRU cache to amortise re-render on quick swipes.
+ * Presentation of a [PdfDocument] — a non-suppressible trust caption above a swipeable
+ * pager of rasterised pages. `DocumentView` fills the bounds the consumer gives it and
+ * does NOT assume a full screen: the caption takes its natural height, the pager takes
+ * the rest, and each page is letterboxed into the pager slot rather than sized from a
+ * fixed aspect ratio — so a short consumer slot can never make a page overflow upward
+ * into the caption. Pages are rasterised on demand by the isolated-process renderer
+ * reached through [renderer] (the `PdfRendererBinder` interface, never the concrete
+ * `PdfRendererClient`, so test fakes substitute cleanly) and held in a small
+ * per-document LRU cache to amortise re-render on quick swipes.
  *
  * Trust contract:
  *
@@ -178,10 +182,17 @@ private fun DocumentPage(
         }
     }
 
+    // The page fills the slot the pager hands it (which is the pager's `weight(1f)`
+    // share of DocumentView's Column) and lets ContentScale.Fit letterbox the bitmap
+    // inside it. An earlier version sized this Box with `fillMaxWidth().aspectRatio(3:4)`,
+    // which derives height from width and IGNORES the height it is given: when a
+    // consumer hands DocumentView a short slot (e.g. walt-android sandwiches it
+    // between a title and a details section), the 3:4 box grew taller than the pager
+    // viewport and drew over the trust caption above it. fillMaxSize cannot overflow
+    // its slot, so the caption / page boundary is structural regardless of how little
+    // height the consumer gives the surface.
     Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(TARGET_PAGE_ASPECT_RATIO),
+        modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
         rendered?.let { bitmap ->
@@ -192,7 +203,7 @@ private fun DocumentPage(
                 // navigationally useful.
                 contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxSize(),
             )
         }
     }
@@ -242,7 +253,8 @@ internal const val LRU_PAGE_WINDOW: Int = 5
 
 // Render budget defaults. The renderer service caps the bitmap area independently
 // (ADR 0005 D7); these are the UI-side request size, picked to look reasonable on
-// phone-class displays without committing to a particular host density.
+// phone-class displays without committing to a particular host density. The on-screen
+// page size is the pager slot, not these values — ContentScale.Fit scales the
+// rasterised bitmap into whatever space the consumer gives DocumentView.
 private const val TARGET_PAGE_WIDTH_DP: Int = 360
 private const val TARGET_PAGE_HEIGHT_DP: Int = 480
-private const val TARGET_PAGE_ASPECT_RATIO: Float = 3f / 4f
