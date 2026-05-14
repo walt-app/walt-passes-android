@@ -176,6 +176,14 @@ private fun finalizeVerification(
  * both because none of the call sites here require registry lookup and because
  * trampling whatever the host process registered under `"BC"` would surprise other
  * code in the same process.
+ *
+ * **Minified consumers (wpass-at6).** Holding our own instance is necessary but not
+ * sufficient in a release build: `BouncyCastleProvider`'s constructor registers its
+ * algorithms by reflectively loading `<pkg>.<Alg>$Mappings` classes, which R8 strips
+ * as unreferenced unless kept. `passes-core` ships the required keep rules in
+ * `META-INF/proguard/passes-core.pro`; without them this provider constructs but
+ * registers almost nothing, and every Apple-signed pkpass collapses onto
+ * [TamperReason.SignatureCryptoFailure].
  */
 private val BC_PROVIDER: BouncyCastleProvider by lazy { BouncyCastleProvider() }
 

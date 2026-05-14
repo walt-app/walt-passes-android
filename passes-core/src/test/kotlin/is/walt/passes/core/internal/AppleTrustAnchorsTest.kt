@@ -72,16 +72,21 @@ class AppleTrustAnchorsTest {
     }
 
     @Test
-    fun shippedProguardRulesKeepTheTrustAnchorLoader() {
-        // passes-core ships defense-in-depth R8 rules at META-INF/proguard/ so a
-        // minified consumer auto-applies them. Guard against a typo'd or dropped
-        // rule file going unnoticed.
+    fun shippedProguardRulesCoverThePassesCoreR8Footguns() {
+        // passes-core ships R8 rules at META-INF/proguard/ so a minified consumer
+        // auto-applies them. Guard against a typo'd or dropped rule going unnoticed:
+        //  - AppleTrustAnchors: belt-and-suspenders pin for the cert loader.
+        //  - BouncyCastle provider packages: without these, R8 strips the
+        //    reflectively-loaded $Mappings/SPI classes and EVERY Apple-signed pkpass
+        //    fails as Failed(SignatureCryptoFailure) in release builds (wpass-at6).
         val rules =
             Thread.currentThread().contextClassLoader
                 .getResourceAsStream("META-INF/proguard/passes-core.pro")
                 ?.bufferedReader()?.use { it.readText() }
         assertThat(rules).isNotNull()
         assertThat(rules).contains("-keep class is.walt.passes.core.internal.AppleTrustAnchors")
+        assertThat(rules).contains("-keep class org.bouncycastle.jcajce.provider.** { *; }")
+        assertThat(rules).contains("-keep class org.bouncycastle.jce.provider.** { *; }")
     }
 
     private fun sha256(bytes: ByteArray): String =
