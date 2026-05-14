@@ -24,7 +24,12 @@ import `is`.walt.passes.ui.core.ArgbColor
  * into a separate accent gets a consistent monochrome caption; a consumer that wants
  * the info glyph in a brand accent colour sets it explicitly. The default is wired in
  * the constructor (Kotlin lets a later parameter's default reference an earlier one),
- * which keeps the slot's addition non-breaking for existing call sites.
+ * which keeps the slot's addition non-breaking for existing call sites. Because that
+ * default references an earlier parameter, the field order is load-bearing here —
+ * [captionIconTint] must stay after [captionForeground]. A future slot that needs no
+ * such cross-reference should prefer the end of the list (the conventional
+ * defaults-last shape), so it does not shift `componentN()` indices for the slots
+ * below it.
  *
  * Color values follow the same packed-ARGB shape as `passes-ui::SignatureBadgeColors`:
  * 32 bits `0xAARRGGBB`. The shared `ArgbColor` value class lives in `passes-ui-core`.

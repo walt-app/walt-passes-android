@@ -5,7 +5,6 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -194,30 +192,26 @@ private fun DocumentPage(
         }
     }
 
-    // The page fills the slot the pager hands it (which is the pager's `weight(1f)`
-    // share of DocumentView's Column) and lets ContentScale.Fit letterbox the bitmap
-    // inside it. An earlier version sized this Box with `fillMaxWidth().aspectRatio(3:4)`,
-    // which derives height from width and IGNORES the height it is given: when a
-    // consumer hands DocumentView a short slot (e.g. walt-android sandwiches it
-    // between a title and a details section), the 3:4 box grew taller than the pager
-    // viewport and drew over the trust caption above it. fillMaxSize cannot overflow
-    // its slot, so the caption / page boundary is structural regardless of how little
-    // height the consumer gives the surface.
-    Box(
-        modifier = Modifier.fillMaxSize(),
-        contentAlignment = Alignment.Center,
-    ) {
-        rendered?.let { bitmap ->
-            Image(
-                bitmap = bitmap,
-                // ADR 0005 D4 forbids extracting text from the PDF; positional caption
-                // is the only safe TalkBack fallback. "Page 3 of 7" is non-content but
-                // navigationally useful.
-                contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
+    // The page fills the slot the pager hands it (the pager's `weight(1f)` share of
+    // DocumentView's Column) and lets ContentScale.Fit letterbox the bitmap inside it.
+    // An earlier version sized the page with `fillMaxWidth().aspectRatio(3:4)`, which
+    // derives height from width and IGNORES the height it is given: when a consumer
+    // hands DocumentView a short slot (e.g. walt-android sandwiches it between a title
+    // and a details section), the 3:4 page grew taller than the pager viewport and drew
+    // over the trust caption above it. fillMaxSize cannot overflow its slot, so the
+    // caption / page boundary is structural regardless of how little height the
+    // consumer gives the surface. No wrapping Box: the Image already fills the slot, so
+    // a Box around it would only add an inert layout node.
+    rendered?.let { bitmap ->
+        Image(
+            bitmap = bitmap,
+            // ADR 0005 D4 forbids extracting text from the PDF; positional caption
+            // is the only safe TalkBack fallback. "Page 3 of 7" is non-content but
+            // navigationally useful.
+            contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
