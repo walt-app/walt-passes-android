@@ -56,6 +56,45 @@ class AppleTrustAnchorsTest {
         }
     }
 
+    @Test
+    fun bundledCertsResolveAtAbsoluteClasspathPath() {
+        // Locks the fix for the R8-repackaging bug (wpass-3kv): the .cer files MUST
+        // be reachable by an absolute, package-independent classpath name. A
+        // package-relative lookup resolves against the class's runtime package,
+        // which a minified consumer build renames — breaking every Apple signature
+        // check. Resolving through the production `RESOURCE_DIR` constant (minus its
+        // leading `/`, which `ClassLoader.getResourceAsStream` does not take) via the
+        // context classloader — not `AppleTrustAnchors::class.java` — proves the path
+        // is the real one and needs no package context. If someone moves the certs
+        // resource directory, this fails in plain `:passes-core:check`.
+        val base = AppleTrustAnchors.RESOURCE_DIR.removePrefix("/")
+        val loader = Thread.currentThread().contextClassLoader
+        val bundled =
+            AppleTrustAnchors.BUNDLED_TRUST_ANCHOR_FILENAMES +
+                AppleTrustAnchors.BUNDLED_INTERMEDIATE_FILENAMES
+        for (file in bundled) {
+            assertThat(loader.getResourceAsStream("$base/$file")).isNotNull()
+        }
+    }
+
+    @Test
+    fun shippedProguardRulesCoverThePassesCoreR8Footguns() {
+        // passes-core ships R8 rules at META-INF/proguard/ so a minified consumer
+        // auto-applies them. Guard against a typo'd or dropped rule going unnoticed:
+        //  - AppleTrustAnchors: belt-and-suspenders pin for the cert loader.
+        //  - BouncyCastle provider packages: without these, R8 strips the
+        //    reflectively-loaded $Mappings/SPI classes and EVERY Apple-signed pkpass
+        //    fails as Failed(SignatureCryptoFailure) in release builds (wpass-at6).
+        val rules =
+            Thread.currentThread().contextClassLoader
+                .getResourceAsStream("META-INF/proguard/passes-core.pro")
+                ?.bufferedReader()?.use { it.readText() }
+        assertThat(rules).isNotNull()
+        assertThat(rules).contains("-keep class is.walt.passes.core.internal.AppleTrustAnchors")
+        assertThat(rules).contains("-keep class org.bouncycastle.jcajce.provider.** { *; }")
+        assertThat(rules).contains("-keep class org.bouncycastle.jce.provider.** { *; }")
+    }
+
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString(":") { "%02X".format(it) }

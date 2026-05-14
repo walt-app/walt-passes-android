@@ -6,10 +6,13 @@ import java.security.cert.X509Certificate
 
 /**
  * Loads the Apple trust anchors and known WWDR intermediates bundled under
- * `passes-core/src/main/resources/is/walt/passes/core/internal/certs/`. Loaded once on
- * first access and held in [BundledCerts]. The fingerprints and provenance of every
- * certificate are documented in `certs/SECURITY-CERTS.md`; an auditor or downstream
- * security reviewer can verify the bundled set without running the parser.
+ * `passes-core/src/main/resources/is/walt/passes/core/internal/certs/`. The files are
+ * resolved by **absolute** classpath name (see [RESOURCE_DIR]) so the lookup is
+ * independent of any package renaming an R8/ProGuard consumer build applies to this
+ * class. Loaded once on first access and held in [BundledCerts]. The fingerprints and
+ * provenance of every certificate are documented in `certs/SECURITY-CERTS.md`; an
+ * auditor or downstream security reviewer can verify the bundled set without running
+ * the parser.
  *
  * **Why bundled, not platform-trusted.** The JVM truststore is mutable at runtime
  * (system properties, `keytool`, OS-level CA changes). Walt's trust claim is "this
@@ -27,14 +30,17 @@ import java.security.cert.X509Certificate
  * with a network footgun.
  */
 internal object AppleTrustAnchors {
-    private val BUNDLED_TRUST_ANCHOR_FILENAMES =
+    // `internal`, not `private`, so AppleTrustAnchorsTest consumes these directly
+    // instead of mirroring them — the test then exercises the real bundled set and
+    // the real resource path, and adding a future anchor cannot leave a stale copy.
+    internal val BUNDLED_TRUST_ANCHOR_FILENAMES: List<String> =
         listOf(
             "apple-root-ca.cer",
             "apple-root-ca-g2.cer",
             "apple-root-ca-g3.cer",
         )
 
-    private val BUNDLED_INTERMEDIATE_FILENAMES =
+    internal val BUNDLED_INTERMEDIATE_FILENAMES: List<String> =
         listOf(
             "apple-wwdr-g3.cer",
             "apple-wwdr-g6.cer",
@@ -81,5 +87,20 @@ internal object AppleTrustAnchors {
     )
 
     private const val X509_TYPE = "X.509"
-    private const val RESOURCE_DIR = "certs"
+
+    /**
+     * Absolute, classpath-rooted directory for the bundled `.cer` files. MUST stay
+     * absolute (leading `/`): a package-relative name is resolved by
+     * [Class.getResourceAsStream] against the class's *runtime* package, and a
+     * minified consumer build (walt-android, R8 `isMinifyEnabled = true`) repackages
+     * `AppleTrustAnchors` to a synthetic package — a relative lookup then resolves
+     * against the wrong package, returns `null`, and collapses every Apple-signed
+     * pkpass onto `Failed(SignatureCryptoFailure)`. R8 relocates classes, not java
+     * resources, so the absolute path is stable across minification.
+     *
+     * `internal` (not `private`) so `AppleTrustAnchorsTest` resolves against this
+     * exact constant rather than a hand-kept copy; if this directory moves, the
+     * constant moves with it and the test follows.
+     */
+    internal const val RESOURCE_DIR: String = "/is/walt/passes/core/internal/certs"
 }
