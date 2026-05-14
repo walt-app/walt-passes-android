@@ -44,7 +44,10 @@ import java.nio.ByteBuffer
  * does NOT assume a full screen: the caption takes its natural height, the pager takes
  * the rest, and each page is letterboxed into the pager slot rather than sized from a
  * fixed aspect ratio — so a short consumer slot can never make a page overflow upward
- * into the caption. Pages are rasterised on demand by the isolated-process renderer
+ * into the caption. The trust caption is composed on the consumer's own background;
+ * only the pager carries [is.walt.passes.pdf.ui.theme.DocumentSemantics.laneBackground],
+ * so the caption reads as host screen chrome rather than part of the document surface.
+ * Pages are rasterised on demand by the isolated-process renderer
  * reached through [renderer] (the `PdfRendererBinder` interface, never the concrete
  * `PdfRendererClient`, so test fakes substitute cleanly) and held in a small
  * per-document LRU cache to amortise re-render on quick swipes.
@@ -103,22 +106,31 @@ public fun DocumentView(
     val pagerState = rememberPagerState(pageCount = { doc.pageCount })
 
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(semantics.laneBackground.toComposeColor()),
+        modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // The caption is composed directly on whatever background the consumer puts
+        // behind DocumentView — it deliberately does NOT sit on `laneBackground`. The
+        // trust caption reads as host screen chrome; only the pager below carries the
+        // document-surface tone.
         DocumentTrustCaption()
 
         // pageCount = 0 is rejected at import (DocumentRejectedKind.RendererFailed),
         // so the pager renders nothing. HorizontalPager handles a 0-count state
         // gracefully without a placeholder; a custom branch here would only mask a
         // future regression in the import path with a silent empty surface.
+        //
+        // `laneBackground` is painted here, behind the pager only — it is the
+        // document-surface tone the rasterised page sits on (and shows through the
+        // ContentScale.Fit letterbox bars). `.background` before `.padding` so the tone
+        // fills the whole pager slot edge-to-edge and the padding insets only the page
+        // content within it.
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .background(semantics.laneBackground.toComposeColor())
                 .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp)),
         ) { page ->
             DocumentPage(
