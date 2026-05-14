@@ -1,14 +1,20 @@
 package `is`.walt.passes.pdf.ui
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import `is`.walt.passes.pdf.ui.internal.InfoOutlineIcon
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
 
@@ -25,6 +31,22 @@ import `is`.walt.passes.ui.core.toComposeColor
  * (which counts the largest method named `DocumentTrustCaption` and asserts the
  * exact arity).
  *
+ * Layout is a flat [Row] of an info-outline icon followed by the caption text, both
+ * center-aligned, with the [Row] still painting `captionBackground` behind itself. A
+ * consumer that wants the historical filled colour-block keeps a non-transparent
+ * `captionBackground`; a consumer matching a flat, borderless house style sets
+ * `captionBackground` transparent and the caption reads as inline chrome rather than
+ * a separate surface. This is a RESTYLE only — the caption is composed at exactly the
+ * same sites, the wording is byte-for-byte unchanged and still a single [Text] node,
+ * and there is still no way to suppress it (ADR 0005 D5; no ADR amendment needed
+ * because non-suppressibility is unchanged).
+ *
+ * The icon tint is its own theme slot, `DocumentSemantics.captionIconTint`, defaulted
+ * to `captionForeground` so a consumer that does not care gets a consistent
+ * monochrome caption for free, while a consumer that wants an accent-coloured glyph
+ * sets it explicitly. The glyph itself is hand-authored in-module (see
+ * `internal.InfoOutlineIcon`) so this module does not pull in `material-icons-extended`.
+ *
  * The displayed text is a fixed English literal; no part of it comes from the
  * document. There is therefore no BiDi isolation here — nothing user-controlled to
  * isolate. The user-controlled `displayLabel` is wrapped by `DocumentTile` /
@@ -35,15 +57,29 @@ public fun DocumentTrustCaption(
     modifier: Modifier = Modifier,
 ) {
     val semantics = LocalDocumentSemantics.current
-    Text(
-        text = TRUST_CAPTION_TEXT,
-        style = MaterialTheme.typography.labelMedium,
-        color = semantics.captionForeground.toComposeColor(),
+    Row(
         modifier = modifier
             .fillMaxWidth()
             .background(semantics.captionBackground.toComposeColor())
             .padding(PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
-    )
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(
+            imageVector = InfoOutlineIcon,
+            // Decorative: the verbatim caption text sits immediately beside it and is
+            // the audit-relevant semantics node. A contentDescription here would only
+            // add a redundant TalkBack stop on top of the text.
+            contentDescription = null,
+            tint = semantics.captionIconTint.toComposeColor(),
+            modifier = Modifier.size(16.dp),
+        )
+        Text(
+            text = TRUST_CAPTION_TEXT,
+            style = MaterialTheme.typography.labelMedium,
+            color = semantics.captionForeground.toComposeColor(),
+        )
+    }
 }
 
 /**
