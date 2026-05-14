@@ -9,8 +9,8 @@ whose chain extends beyond what is bundled here surfaces as
 `AppleTrustAnchors` resolves these files by the **absolute** classpath path
 `/is/walt/passes/core/internal/certs/` so the lookup survives an R8/ProGuard
 consumer build repackaging that class. Moving this directory therefore requires
-updating `RESOURCE_DIR` in `AppleTrustAnchors.kt` and the path constants in
-`AppleTrustAnchorsTest`.
+updating `RESOURCE_DIR` in `AppleTrustAnchors.kt`; `AppleTrustAnchorsTest`
+consumes that constant directly, so it follows automatically.
 
 ## Trust anchors (root CAs)
 

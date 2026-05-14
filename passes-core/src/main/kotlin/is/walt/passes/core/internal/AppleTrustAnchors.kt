@@ -30,14 +30,17 @@ import java.security.cert.X509Certificate
  * with a network footgun.
  */
 internal object AppleTrustAnchors {
-    private val BUNDLED_TRUST_ANCHOR_FILENAMES =
+    // `internal`, not `private`, so AppleTrustAnchorsTest consumes these directly
+    // instead of mirroring them — the test then exercises the real bundled set and
+    // the real resource path, and adding a future anchor cannot leave a stale copy.
+    internal val BUNDLED_TRUST_ANCHOR_FILENAMES: List<String> =
         listOf(
             "apple-root-ca.cer",
             "apple-root-ca-g2.cer",
             "apple-root-ca-g3.cer",
         )
 
-    private val BUNDLED_INTERMEDIATE_FILENAMES =
+    internal val BUNDLED_INTERMEDIATE_FILENAMES: List<String> =
         listOf(
             "apple-wwdr-g3.cer",
             "apple-wwdr-g6.cer",
@@ -93,8 +96,11 @@ internal object AppleTrustAnchors {
      * `AppleTrustAnchors` to a synthetic package — a relative lookup then resolves
      * against the wrong package, returns `null`, and collapses every Apple-signed
      * pkpass onto `Failed(SignatureCryptoFailure)`. R8 relocates classes, not java
-     * resources, so the absolute path is stable across minification. If this
-     * directory ever moves, update this constant and `AppleTrustAnchorsTest`.
+     * resources, so the absolute path is stable across minification.
+     *
+     * `internal` (not `private`) so `AppleTrustAnchorsTest` resolves against this
+     * exact constant rather than a hand-kept copy; if this directory moves, the
+     * constant moves with it and the test follows.
      */
-    private const val RESOURCE_DIR = "/is/walt/passes/core/internal/certs"
+    internal const val RESOURCE_DIR: String = "/is/walt/passes/core/internal/certs"
 }
