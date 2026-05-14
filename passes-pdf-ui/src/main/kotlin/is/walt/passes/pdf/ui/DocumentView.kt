@@ -5,10 +5,8 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,7 +19,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -40,10 +37,18 @@ import java.nio.BufferUnderflowException
 import java.nio.ByteBuffer
 
 /**
- * Full-screen presentation of a [PdfDocument]. Pages are rasterised on demand by the
- * isolated-process renderer reached through [renderer] (the `PdfRendererBinder`
- * interface, never the concrete `PdfRendererClient`, so test fakes substitute cleanly)
- * and held in a small per-document LRU cache to amortise re-render on quick swipes.
+ * Presentation of a [PdfDocument] — a non-suppressible trust caption above a swipeable
+ * pager of rasterised pages. `DocumentView` fills the bounds the consumer gives it and
+ * does NOT assume a full screen: the caption takes its natural height, the pager takes
+ * the rest, and each page is letterboxed into the pager slot rather than sized from a
+ * fixed aspect ratio — so a short consumer slot can never make a page overflow upward
+ * into the caption. The trust caption is composed on the consumer's own background;
+ * only the pager carries [is.walt.passes.pdf.ui.theme.DocumentSemantics.laneBackground],
+ * so the caption reads as host screen chrome rather than part of the document surface.
+ * Pages are rasterised on demand by the isolated-process renderer
+ * reached through [renderer] (the `PdfRendererBinder` interface, never the concrete
+ * `PdfRendererClient`, so test fakes substitute cleanly) and held in a small
+ * per-document LRU cache to amortise re-render on quick swipes.
  *
  * Trust contract:
  *
@@ -99,22 +104,31 @@ public fun DocumentView(
     val pagerState = rememberPagerState(pageCount = { doc.pageCount })
 
     Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(semantics.laneBackground.toComposeColor()),
+        modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        // The caption is composed directly on whatever background the consumer puts
+        // behind DocumentView — it deliberately does NOT sit on `laneBackground`. The
+        // trust caption reads as host screen chrome; only the pager below carries the
+        // document-surface tone.
         DocumentTrustCaption()
 
         // pageCount = 0 is rejected at import (DocumentRejectedKind.RendererFailed),
         // so the pager renders nothing. HorizontalPager handles a 0-count state
         // gracefully without a placeholder; a custom branch here would only mask a
         // future regression in the import path with a silent empty surface.
+        //
+        // `laneBackground` is painted here, behind the pager only — it is the
+        // document-surface tone the rasterised page sits on (and shows through the
+        // ContentScale.Fit letterbox bars). `.background` before `.padding` so the tone
+        // fills the whole pager slot edge-to-edge and the padding insets only the page
+        // content within it.
         HorizontalPager(
             state = pagerState,
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .background(semantics.laneBackground.toComposeColor())
                 .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp)),
         ) { page ->
             DocumentPage(
@@ -178,23 +192,26 @@ private fun DocumentPage(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(TARGET_PAGE_ASPECT_RATIO),
-        contentAlignment = Alignment.Center,
-    ) {
-        rendered?.let { bitmap ->
-            Image(
-                bitmap = bitmap,
-                // ADR 0005 D4 forbids extracting text from the PDF; positional caption
-                // is the only safe TalkBack fallback. "Page 3 of 7" is non-content but
-                // navigationally useful.
-                contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
+    // The page fills the slot the pager hands it (the pager's `weight(1f)` share of
+    // DocumentView's Column) and lets ContentScale.Fit letterbox the bitmap inside it.
+    // An earlier version sized the page with `fillMaxWidth().aspectRatio(3:4)`, which
+    // derives height from width and IGNORES the height it is given: when a consumer
+    // hands DocumentView a short slot (e.g. walt-android sandwiches it between a title
+    // and a details section), the 3:4 page grew taller than the pager viewport and drew
+    // over the trust caption above it. fillMaxSize cannot overflow its slot, so the
+    // caption / page boundary is structural regardless of how little height the
+    // consumer gives the surface. No wrapping Box: the Image already fills the slot, so
+    // a Box around it would only add an inert layout node.
+    rendered?.let { bitmap ->
+        Image(
+            bitmap = bitmap,
+            // ADR 0005 D4 forbids extracting text from the PDF; positional caption
+            // is the only safe TalkBack fallback. "Page 3 of 7" is non-content but
+            // navigationally useful.
+            contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 
@@ -242,7 +259,8 @@ internal const val LRU_PAGE_WINDOW: Int = 5
 
 // Render budget defaults. The renderer service caps the bitmap area independently
 // (ADR 0005 D7); these are the UI-side request size, picked to look reasonable on
-// phone-class displays without committing to a particular host density.
+// phone-class displays without committing to a particular host density. The on-screen
+// page size is the pager slot, not these values — ContentScale.Fit scales the
+// rasterised bitmap into whatever space the consumer gives DocumentView.
 private const val TARGET_PAGE_WIDTH_DP: Int = 360
 private const val TARGET_PAGE_HEIGHT_DP: Int = 480
-private const val TARGET_PAGE_ASPECT_RATIO: Float = 3f / 4f

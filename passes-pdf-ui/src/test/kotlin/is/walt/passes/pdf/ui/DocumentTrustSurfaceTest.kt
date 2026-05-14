@@ -37,6 +37,9 @@ class DocumentTrustSurfaceTest {
     private val semantics = DocumentSemantics(
         captionBackground = ArgbColor(0xFF202020.toInt()),
         captionForeground = ArgbColor(0xFFFFFFFF.toInt()),
+        // Set explicitly (rather than relying on the captionForeground default) so the
+        // restyled icon+text caption is exercised with a distinct, non-default tint.
+        captionIconTint = ArgbColor(0xFFFFAA00.toInt()),
         tileBackground = ArgbColor(0xFFF5F5F5.toInt()),
         tileForeground = ArgbColor(0xFF202020.toInt()),
         tileLabelForeground = ArgbColor(0xFF606060.toInt()),

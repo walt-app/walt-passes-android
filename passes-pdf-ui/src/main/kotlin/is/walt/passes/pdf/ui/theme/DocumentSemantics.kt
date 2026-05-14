@@ -11,12 +11,25 @@ import `is`.walt.passes.ui.core.ArgbColor
  * `DocumentSemantics` alongside; one is not nested inside the other so the modules
  * stay independent peers.
  *
- * The trust-claim slots on this surface are [captionBackground] / [captionForeground]:
- * they style the non-suppressible "user-provided document" caption that mirrors the
- * "Self-signed" pill on signed passes. Because the caption is non-removable (see the
- * KDoc on `DocumentTrustCaption`), its style is fixed by the host theme rather than
- * per-document, and it is the host theme's responsibility to keep contrast legal so
- * the caption stays readable.
+ * The trust-claim slots on this surface are [captionBackground] / [captionForeground]
+ * / [captionIconTint]: they style the non-suppressible "user-provided document"
+ * caption that mirrors the "Self-signed" pill on signed passes. Because the caption is
+ * non-removable (see the KDoc on `DocumentTrustCaption`), its style is fixed by the
+ * host theme rather than per-document, and it is the host theme's responsibility to
+ * keep contrast legal so the caption stays readable. None of these slots can hide the
+ * caption — a host wanting a flat, borderless treatment sets [captionBackground]
+ * transparent, which restyles the caption but does not suppress it.
+ *
+ * [captionIconTint] defaults to [captionForeground] so a consumer that does not opt
+ * into a separate accent gets a consistent monochrome caption; a consumer that wants
+ * the info glyph in a brand accent colour sets it explicitly. The default is wired in
+ * the constructor (Kotlin lets a later parameter's default reference an earlier one),
+ * which keeps the slot's addition non-breaking for existing call sites. Because that
+ * default references an earlier parameter, the field order is load-bearing here —
+ * [captionIconTint] must stay after [captionForeground]. A future slot that needs no
+ * such cross-reference should prefer the end of the list (the conventional
+ * defaults-last shape), so it does not shift `componentN()` indices for the slots
+ * below it.
  *
  * Color values follow the same packed-ARGB shape as `passes-ui::SignatureBadgeColors`:
  * 32 bits `0xAARRGGBB`. The shared `ArgbColor` value class lives in `passes-ui-core`.
@@ -24,6 +37,7 @@ import `is`.walt.passes.ui.core.ArgbColor
 public data class DocumentSemantics(
     public val captionBackground: ArgbColor,
     public val captionForeground: ArgbColor,
+    public val captionIconTint: ArgbColor = captionForeground,
     public val tileBackground: ArgbColor,
     public val tileForeground: ArgbColor,
     public val tileLabelForeground: ArgbColor,

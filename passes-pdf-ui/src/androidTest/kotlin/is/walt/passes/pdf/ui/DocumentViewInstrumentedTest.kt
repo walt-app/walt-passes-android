@@ -2,14 +2,21 @@ package `is`.walt.passes.pdf.ui
 
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.pdf.DocumentRejectedKind
@@ -160,6 +167,41 @@ class DocumentViewInstrumentedTest {
         composeRule.onNodeWithText(
             "User-provided document. Walt has not verified the source.",
         ).assertIsDisplayed()
+    }
+
+    @Test
+    fun trustCaptionDoesNotOverlapThePageWhenTheConsumerGivesAShortSlot() {
+        // Regression for wpass-b6h: walt-android embeds DocumentView in a short slot —
+        // sandwiched between a document title and a details section — not the full
+        // screen. The page must letterbox into whatever height it is given. An earlier
+        // `fillMaxWidth().aspectRatio(3:4)` page derived its height from its width and
+        // ignored the slot height, so in a short slot it grew taller than the pager
+        // viewport and drew up over the non-suppressible trust caption. Pinning
+        // caption.bottom <= page.top keeps that boundary structural.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                Box(modifier = Modifier.fillMaxWidth().height(300.dp)) {
+                    DocumentView(
+                        doc = doc(pageCount = 3),
+                        pdfFile = pipeRead,
+                        renderer = recorder,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val captionBottom = composeRule
+            .onNodeWithText("User-provided document. Walt has not verified the source.")
+            .getUnclippedBoundsInRoot()
+            .bottom
+        val pageTop = composeRule
+            .onNodeWithContentDescription("Page 1 of 3")
+            .getUnclippedBoundsInRoot()
+            .top
+
+        assertThat(pageTop.value).isAtLeast(captionBottom.value)
     }
 
     private fun doc(pageCount: Int) = PdfDocument(
