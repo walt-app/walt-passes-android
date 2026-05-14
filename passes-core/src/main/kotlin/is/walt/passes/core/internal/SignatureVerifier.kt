@@ -85,8 +85,10 @@ internal fun verifySignature(
 ): SignatureVerifyResult {
     // Anchor lookups MUST live inside the runCatching: AppleTrustAnchors.trustAnchors()
     // calls into resource I/O and CertificateFactory.generateCertificate, both of which
-    // can throw if the JAR is repackaged (proguard/R8 stripping, shaded classpath, a
-    // corrupted .cer file). Kotlin's default `by lazy` (LazyThreadSafetyMode.SYNCHRONIZED)
+    // can still throw on a genuinely stripped JAR or a corrupted .cer file. (The loader
+    // resolves the bundled certs by absolute classpath name, so it is itself robust to
+    // an R8/ProGuard consumer build *repackaging* this class — see AppleTrustAnchors.)
+    // Kotlin's default `by lazy` (LazyThreadSafetyMode.SYNCHRONIZED)
     // does NOT cache the exception: each call retries the initializer and re-throws on
     // failure. The end-user effect is the same (every parse fails until the JAR is
     // rebuilt), but the mechanic is "retry and re-throw," not "first call poisons the

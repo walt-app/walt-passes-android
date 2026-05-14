@@ -56,10 +56,54 @@ class AppleTrustAnchorsTest {
         }
     }
 
+    @Test
+    fun bundledCertsResolveAtAbsoluteClasspathPath() {
+        // Locks the fix for the R8-repackaging bug (wpass-3kv): the .cer files MUST
+        // be reachable by an absolute, package-independent classpath name. A
+        // package-relative lookup resolves against the class's runtime package,
+        // which a minified consumer build renames — breaking every Apple signature
+        // check. Using the context classloader here (not AppleTrustAnchors::class.java)
+        // proves the path needs no package context. If someone moves the certs
+        // resource directory, this fails in plain `:passes-core:check`.
+        val loader = Thread.currentThread().contextClassLoader
+        for (file in BUNDLED_CERT_FILENAMES) {
+            assertThat(loader.getResourceAsStream("$CERTS_RESOURCE_DIR/$file")).isNotNull()
+        }
+    }
+
+    @Test
+    fun shippedProguardRulesKeepTheTrustAnchorLoader() {
+        // passes-core ships defense-in-depth R8 rules at META-INF/proguard/ so a
+        // minified consumer auto-applies them. Guard against a typo'd or dropped
+        // rule file going unnoticed.
+        val rules =
+            Thread.currentThread().contextClassLoader
+                .getResourceAsStream("META-INF/proguard/passes-core.pro")
+                ?.bufferedReader()?.use { it.readText() }
+        assertThat(rules).isNotNull()
+        assertThat(rules).contains("-keep class is.walt.passes.core.internal.AppleTrustAnchors")
+    }
+
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes)
             .joinToString(":") { "%02X".format(it) }
 }
+
+/**
+ * Classpath-absolute certs directory, mirrored from `AppleTrustAnchors.RESOURCE_DIR`
+ * (private there) minus the leading `/` so it works with `ClassLoader.getResourceAsStream`.
+ */
+private const val CERTS_RESOURCE_DIR = "is/walt/passes/core/internal/certs"
+
+/** Every bundled `.cer` file — trust anchors plus known WWDR intermediates. */
+private val BUNDLED_CERT_FILENAMES =
+    listOf(
+        "apple-root-ca.cer",
+        "apple-root-ca-g2.cer",
+        "apple-root-ca-g3.cer",
+        "apple-wwdr-g3.cer",
+        "apple-wwdr-g6.cer",
+    )
 
 private const val APPLE_ROOT_CA_SHA256 =
     "B0:B1:73:0E:CB:C7:FF:45:05:14:2C:49:F1:29:5E:6E:DA:6B:CA:ED:7E:2C:68:C5:BE:91:B5:A1:10:01:F0:24"

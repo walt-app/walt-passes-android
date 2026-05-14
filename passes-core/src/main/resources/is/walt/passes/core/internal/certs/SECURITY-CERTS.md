@@ -6,6 +6,12 @@ the parser **never** fetches certificates over the network. A valid signature
 whose chain extends beyond what is bundled here surfaces as
 [`SignatureStatus.CertChainIncomplete`].
 
+`AppleTrustAnchors` resolves these files by the **absolute** classpath path
+`/is/walt/passes/core/internal/certs/` so the lookup survives an R8/ProGuard
+consumer build repackaging that class. Moving this directory therefore requires
+updating `RESOURCE_DIR` in `AppleTrustAnchors.kt` and the path constants in
+`AppleTrustAnchorsTest`.
+
 ## Trust anchors (root CAs)
 
 These are added to the `PKIXBuilderParameters` trust anchor set. A chain that

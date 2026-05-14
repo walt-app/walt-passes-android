@@ -6,10 +6,13 @@ import java.security.cert.X509Certificate
 
 /**
  * Loads the Apple trust anchors and known WWDR intermediates bundled under
- * `passes-core/src/main/resources/is/walt/passes/core/internal/certs/`. Loaded once on
- * first access and held in [BundledCerts]. The fingerprints and provenance of every
- * certificate are documented in `certs/SECURITY-CERTS.md`; an auditor or downstream
- * security reviewer can verify the bundled set without running the parser.
+ * `passes-core/src/main/resources/is/walt/passes/core/internal/certs/`. The files are
+ * resolved by **absolute** classpath name (see [RESOURCE_DIR]) so the lookup is
+ * independent of any package renaming an R8/ProGuard consumer build applies to this
+ * class. Loaded once on first access and held in [BundledCerts]. The fingerprints and
+ * provenance of every certificate are documented in `certs/SECURITY-CERTS.md`; an
+ * auditor or downstream security reviewer can verify the bundled set without running
+ * the parser.
  *
  * **Why bundled, not platform-trusted.** The JVM truststore is mutable at runtime
  * (system properties, `keytool`, OS-level CA changes). Walt's trust claim is "this
@@ -81,5 +84,17 @@ internal object AppleTrustAnchors {
     )
 
     private const val X509_TYPE = "X.509"
-    private const val RESOURCE_DIR = "certs"
+
+    /**
+     * Absolute, classpath-rooted directory for the bundled `.cer` files. MUST stay
+     * absolute (leading `/`): a package-relative name is resolved by
+     * [Class.getResourceAsStream] against the class's *runtime* package, and a
+     * minified consumer build (walt-android, R8 `isMinifyEnabled = true`) repackages
+     * `AppleTrustAnchors` to a synthetic package — a relative lookup then resolves
+     * against the wrong package, returns `null`, and collapses every Apple-signed
+     * pkpass onto `Failed(SignatureCryptoFailure)`. R8 relocates classes, not java
+     * resources, so the absolute path is stable across minification. If this
+     * directory ever moves, update this constant and `AppleTrustAnchorsTest`.
+     */
+    private const val RESOURCE_DIR = "/is/walt/passes/core/internal/certs"
 }
