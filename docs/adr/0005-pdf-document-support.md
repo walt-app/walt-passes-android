@@ -330,3 +330,151 @@ neither module hosts the forbidden surface.
 
 The Android-side renderer module remains tracked under `wpass-5v9`. Its
 manifest, JNI source, and binder code land there.
+
+## Addendum 2026-05-15: Pinch-zoom + pan in `DocumentView`
+
+Tracks: `wpass-6ag` (parent), `wpass-1wq` (UI gesture surface), `wpass-f4b`
+(renderer zoom-aware path), `wpass-0nn` (this addendum). Cross-repo
+consumer-side tracker: walt-android `wlt-o72.4`. Storage precondition
+verified by walt-android `wlt-o72.3` (imported PDF bytes are persisted at
+full resolution, no re-encode or downscale).
+
+### Context
+
+The original Consequences section framed `DocumentView` as "minimally
+featured", and `DocumentView` shipped as a `HorizontalPager` of
+`ContentScale.Fit`-letterboxed pages with no zoom and no pan. In
+practice, the #1 reason a user imports a PDF into the wallet is to
+scan an embedded barcode (PDF417 / QR / EAN) at a venue or transit
+gate. A fit-resolution rasterised page does not enlarge a typical
+barcode enough for a scanner to read it, so the feature as originally
+shipped fails its primary use case.
+
+This addendum records pinch-to-zoom and single-touch pan-when-zoomed as
+explicit features of `DocumentView`, and reconciles them with the trust
+contracts in D4, D5, D7, and D8.
+
+### Z.1 Pinch-zoom and pan are features; gesture priority interlocks with the pager
+
+Pinch-to-zoom (two-finger) and pan-when-zoomed (single-finger, only when
+`scale > 1`) are part of `DocumentView`'s gesture surface. Implementation
+constants live in `passes-pdf-ui/.../DocumentView.kt`:
+
+- `MIN_SCALE = 1f` (zooming out below fit is meaningless on a
+  single-page surface).
+- `MAX_SCALE = 3f` (interim ceiling against the current fit-resolution
+  bitmap — at 5x, each source pixel becomes a 5x5 bilinear block and
+  the smearing crosses into "bigger but less scannable" territory for
+  phone-camera barcode decoders. Moves to 5f once `wpass-f4b` lands the
+  viewport-aware renderer so the upsampling cost disappears).
+- `DOUBLE_TAP_SCALE = 2f` (double-tap toggle target).
+
+Gesture priority with the enclosing `HorizontalPager` is the
+load-bearing UX interlock:
+
+- Two-finger pinch is always consumed by the page-scoped zoom surface.
+  It never advances the pager.
+- Single-touch drag is consumed by the zoom surface only when
+  `scale > MIN_SCALE`. At fit, single-touch horizontal drag passes
+  through to the pager — page-swipe behaviour is unchanged from before
+  the addendum.
+- Translation is clamped so the scaled page cannot be panned entirely
+  off the slot. The user cannot lose the barcode by overshooting.
+
+Zoom state is per-page and resets on page change (the
+`remember(document.id, pageIndex)` frame in the rendering composable
+owns it). Paging away from a zoomed-in barcode and back returns the
+page to fit — no cross-page zoom persistence, which keeps the swipe
+gesture's mental model clean.
+
+### Z.2 The 4 MP per-bitmap cap (D7) stands unchanged
+
+`PdfRendererService.MAX_PIXELS = 4 MP` is **not** raised by this
+addendum. The cap is defense-in-depth against
+decompression-bomb-style memory abuse; raising it would be a
+separate security-policy change requiring its own addendum.
+
+Both candidate renderer designs under evaluation in `wpass-f4b` (tiled
+rendering; viewport re-render) fit within the cap:
+
+- Tiled rendering caps **per-tile** at <= 4 MP. Total tile RAM is
+  bounded by how many tiles are visible in the zoomed viewport, not
+  by the zoom factor.
+- Viewport re-render caps the **single** bitmap at <= 4 MP. One
+  bitmap per zoom level; the visible document-rect is what gets
+  rasterised at viewport resolution.
+
+The gesture surface (Z.1) is correct against the existing
+fit-resolution bitmap — pixelated when zoomed past about 1.3-1.5x, but
+functionally correct. The renderer change in `wpass-f4b` is what
+delivers sharp-at-zoom; it can land independently as a follow-up.
+
+### Z.3 The binder API surface does not widen
+
+`PdfRendererBinder` continues to expose exactly two methods: `probe`
+and `render`. The renderer zoom-aware path (`wpass-f4b`) extends
+`render`'s parameter shape with a sub-rect / viewport indicator (see
+that bead for the exact wire shape), but does not add a third
+transaction. D4's no-extraction guarantee is therefore preserved:
+`PublicApiSurfaceTest`'s reflection check still passes after
+`wpass-f4b` lands.
+
+### Z.4 The non-suppressible trust caption (D5) stays docked above the pager
+
+This is the explicit decision the addendum is being filed to record:
+**the trust caption ("User-provided document. Walt has not verified
+the source.") stays docked above the pager and is NOT subject to the
+zoom transform.** It cannot be panned off-screen, and it remains
+visible at every zoom level.
+
+Two implementation options were considered:
+
+- (a) Caption stays in its row in `DocumentView`'s `Column`, above the
+  pager. The zoom transform applies inside the pager slot only.
+- (b) Caption pans / scales with the page. Could be scrolled off
+  screen if the user pans up while zoomed.
+
+Option (a) is adopted. The reasoning:
+
+- D5's "non-suppressible" promise reads naturally as "the user can
+  always see it." Option (b) makes the caption *suppressible by pan*
+  in practice — a user zoomed in on the lower half of a page would
+  not see the caption, which dilutes the trust signal.
+- Option (a) is what the current `DocumentView` layout already does:
+  the caption is a sibling of the pager in a `Column`, and the zoom
+  transform is structurally scoped to the page slot inside the
+  pager. No layout change is needed for the addendum.
+- The cost of option (a) is zero: caption never interferes with the
+  gesture surface, and the gesture surface never interferes with the
+  caption.
+
+### Z.5 No share-out path is introduced (D8 unchanged)
+
+Zoom is a view-side affordance. No new code path moves PDF bytes off
+device or into a sharing intent. D8's classpath-scan test
+(`Intent.ACTION_SEND` is forbidden in `passes-ui`, `passes-pdf-ui`,
+and `passes-pdf`) continues to pass.
+
+### Z.6 Consumer-side integration is the host's responsibility
+
+walt-android embeds `DocumentView` inside a vertical scroll container
+on the document-detail screen. Now that `DocumentView` consumes
+single-touch drags when zoomed, the host screen will need to defer to
+the embedded gesture (nested-scroll or zoom-state-gated suppression).
+Tracked on the consumer side as walt-android `wlt-o72.4`. This
+addendum does not commit `passes-pdf-ui` to a nested-scroll API; the
+gesture surface is self-contained at scale > 1 and the integration
+contract is documented in the bead.
+
+### Tests pinning the addendum
+
+| Decision | Test                                                                                                  |
+|----------|-------------------------------------------------------------------------------------------------------|
+| Z.1      | `DocumentViewInstrumentedTest.pinchToZoomDoesNotAdvanceThePagerAndKeepsTheTrustCaptionVisible`        |
+| Z.1      | `DocumentViewInstrumentedTest.singleTouchHorizontalDragAtFitScaleStillAdvancesThePager`               |
+| Z.1      | `DocumentViewInstrumentedTest.singleTouchHorizontalDragWhileZoomedDoesNotAdvanceThePager`             |
+| Z.1      | `DocumentViewInstrumentedTest.doubleTapOnThePageDoesNotAdvanceThePager`                               |
+| Z.2      | existing `PdfRendererService.MAX_PIXELS` pin in renderer service code — value unchanged.              |
+| Z.3      | existing `PublicApiSurfaceTest` reflection check on `PdfRendererBinder` — still exactly two methods.  |
+| Z.4      | `DocumentViewInstrumentedTest.pinchToZoomDoesNotAdvanceThePagerAndKeepsTheTrustCaptionVisible` asserts caption visibility post-pinch; existing `trustCaptionDoesNotOverlapThePageWhenTheConsumerGivesAShortSlot` pins the structural layout boundary. |
+| Z.5      | existing classpath-scan test for `Intent.ACTION_SEND` — surface unchanged.                            |
