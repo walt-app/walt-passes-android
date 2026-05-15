@@ -362,8 +362,12 @@ constants live in `passes-pdf-ui/.../DocumentView.kt`:
 
 - `MIN_SCALE = 1f` (zooming out below fit is meaningless on a
   single-page surface).
-- `MAX_SCALE = 5f` (brings a typical barcode to slot-filling size).
-- `DOUBLE_TAP_SCALE = 2.5f` (double-tap toggle target).
+- `MAX_SCALE = 3f` (interim ceiling against the current fit-resolution
+  bitmap — at 5x, each source pixel becomes a 5x5 bilinear block and
+  the smearing crosses into "bigger but less scannable" territory for
+  phone-camera barcode decoders. Moves to 5f once `wpass-f4b` lands the
+  viewport-aware renderer so the upsampling cost disappears).
+- `DOUBLE_TAP_SCALE = 2f` (double-tap toggle target).
 
 Gesture priority with the enclosing `HorizontalPager` is the
 load-bearing UX interlock:
@@ -468,6 +472,7 @@ contract is documented in the bead.
 |----------|-------------------------------------------------------------------------------------------------------|
 | Z.1      | `DocumentViewInstrumentedTest.pinchToZoomDoesNotAdvanceThePagerAndKeepsTheTrustCaptionVisible`        |
 | Z.1      | `DocumentViewInstrumentedTest.singleTouchHorizontalDragAtFitScaleStillAdvancesThePager`               |
+| Z.1      | `DocumentViewInstrumentedTest.singleTouchHorizontalDragWhileZoomedDoesNotAdvanceThePager`             |
 | Z.1      | `DocumentViewInstrumentedTest.doubleTapOnThePageDoesNotAdvanceThePager`                               |
 | Z.2      | existing `PdfRendererService.MAX_PIXELS` pin in renderer service code — value unchanged.              |
 | Z.3      | existing `PublicApiSurfaceTest` reflection check on `PdfRendererBinder` — still exactly two methods.  |

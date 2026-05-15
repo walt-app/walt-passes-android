@@ -384,16 +384,20 @@ private const val TARGET_PAGE_HEIGHT_DP: Int = 480
 // page is already letterboxed and ContentScale.Fit owns "see the whole page in one
 // glance." Below 1 would just paint a smaller page inside empty slot real estate.
 //
-// MAX_SCALE = 5f: a typical PDF417 / QR / EAN barcode rasterised at fit fills roughly
-// 1/4 of a phone page; 5x brings the barcode to roughly fill the slot, which puts it
-// in the legible range for venue / gate scanners. The follow-up renderer bead
-// (wpass-f4b) re-rasterises at viewport resolution so the zoomed bitmap is sharp,
-// not just larger.
+// MAX_SCALE = 3f (interim): held at 3x rather than 5x until wpass-f4b lands the
+// viewport-aware renderer. Against a fit-resolution bitmap, every source pixel
+// becomes a 3x3 block under bilinear filtering at this scale, which is usually
+// still inside the decoder's edge-detection budget for PDF417 / QR / EAN — at 5x
+// each source pixel is a 5x5 block, and the smearing crosses into "looks bigger
+// but actually less scannable" territory for many phone-camera scanners. Once
+// wpass-f4b re-renders the visible viewport at viewport-pixel resolution within
+// the same 4 MP cap, the upsampling cost disappears and this constant can move
+// to 5f without producing a degraded UX at the top end.
 //
-// DOUBLE_TAP_SCALE = 2.5f: the toggle-target for a double-tap. Picked roughly
-// half-way between fit and the max so a single tap is a clear "zoom in" affordance
-// without immediately committing to the maximum, while still being useful for
-// previewing whether the visible content survives at non-fit scale.
+// DOUBLE_TAP_SCALE = 2f: the toggle-target for a double-tap. Held below MAX_SCALE
+// so a single tap is a clear "zoom in" affordance that picks the
+// most-likely-actually-readable point, with the user free to pinch further if a
+// specific scanner needs more.
 private const val MIN_SCALE: Float = 1f
-private const val MAX_SCALE: Float = 5f
-private const val DOUBLE_TAP_SCALE: Float = 2.5f
+private const val MAX_SCALE: Float = 3f
+private const val DOUBLE_TAP_SCALE: Float = 2f

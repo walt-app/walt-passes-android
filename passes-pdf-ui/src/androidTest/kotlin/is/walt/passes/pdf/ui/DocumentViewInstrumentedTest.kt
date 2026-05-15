@@ -235,6 +235,46 @@ class DocumentViewInstrumentedTest {
     }
 
     @Test
+    fun singleTouchHorizontalDragWhileZoomedDoesNotAdvanceThePager() {
+        // wpass-1wq: the load-bearing half of the `canPan = { scale > MIN_SCALE }`
+        // contract. A single-touch horizontal drag at fit scale advances the pager
+        // (pinned by singleTouchHorizontalDragAtFitScaleStillAdvancesThePager); the
+        // SAME gesture once the user is zoomed in must instead pan the page and leave
+        // the pager position untouched, or scanning a barcode becomes impossible the
+        // moment the user tries to drag inside the zoomed view. Removing canPan, or
+        // replacing it with `{ true }` / `{ false }`, would silently regress this
+        // direction without the existing three tests catching it.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 3),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
+
+        // Pinch outward to enter scale > 1, then single-touch swipe-left in the same
+        // pager that the fit-scale test confirms WOULD advance.
+        composeRule.onNodeWithContentDescription("Page 1 of 3").performTouchInput {
+            pinch(
+                start0 = center + Offset(-100f, 0f),
+                end0 = center + Offset(-300f, 0f),
+                start1 = center + Offset(100f, 0f),
+                end1 = center + Offset(300f, 0f),
+            )
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 3").performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
+    }
+
+    @Test
     fun singleTouchHorizontalDragAtFitScaleStillAdvancesThePager() {
         // wpass-1wq: gesture priority at scale == 1 must defer to the pager. A
         // single-touch horizontal drag from the fit state has to advance the pager
