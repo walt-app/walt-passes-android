@@ -87,10 +87,16 @@ public sealed interface ProbeResult {
  * same dimensions.
  */
 public sealed interface RenderResult {
+    /**
+     * [pageAspect] is the page's natural width/height ratio. Lets the UI compute where
+     * inside the destination bitmap the actual page content lives so zoom math can
+     * normalise against the on-screen page rect rather than the slot (`wpass-6ag` C3).
+     */
     public data class Ok(
         public val sharedMemory: SharedMemory,
         public val widthPx: Int,
         public val heightPx: Int,
+        public val pageAspect: Float,
     ) : RenderResult
 
     public data class Rejected(public val kind: DocumentRejectedKind) : RenderResult

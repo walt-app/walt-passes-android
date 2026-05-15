@@ -2,6 +2,7 @@ package `is`.walt.passes.pdf.ui
 
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.pdf.ConsumerRenderFailure
+import `is`.walt.passes.pdf.ui.internal.consumerRenderFailureFor
 import org.junit.Test
 import java.nio.BufferUnderflowException
 

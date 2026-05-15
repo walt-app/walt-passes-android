@@ -123,7 +123,8 @@ public class PdfRendererClient(
                             ?: error("Render reply missing SharedMemory")
                         val w = reply.readInt()
                         val h = reply.readInt()
-                        RenderResult.Ok(sm, w, h)
+                        val pageAspect = reply.readFloat()
+                        RenderResult.Ok(sm, w, h, pageAspect)
                     }
                     TAG_REJECTED -> RenderResult.Rejected(RejectedKindWire.decode(reply.readInt()))
                     else -> error("Unknown render reply tag: $tag")

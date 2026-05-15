@@ -30,16 +30,15 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
-import `is`.walt.passes.pdf.ConsumerRenderFailure
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
+import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
+import `is`.walt.passes.pdf.ui.internal.decodePage
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
-import java.nio.BufferUnderflowException
-import java.nio.ByteBuffer
 
 /**
  * Presentation of a [PdfDocument] — a non-suppressible trust caption above a swipeable
@@ -202,13 +201,12 @@ private fun DocumentPage(
         }
         val result = renderer.render(pdfFile, pageIndex, requestWidthPx, requestHeightPx)
         if (result is RenderResult.Ok) {
-            // ADR 0005 D7: the renderer service caps bitmap area independently and may
-            // return a downsized buffer. Use the renderer's reported dimensions, NOT
-            // the request, when reconstructing the Bitmap.
-            val bitmap = bitmapFromSharedMemory(result, telemetry)
-            if (bitmap != null) {
-                cache.put(document.id, pageIndex, bitmap)
-                rendered = bitmap.asImageBitmap()
+            // ADR 0005 D7: the renderer may downsize past the request; decodePage uses
+            // the renderer's reported dimensions.
+            val decoded = decodePage(result, telemetry)
+            if (decoded != null) {
+                cache.put(document.id, pageIndex, decoded.bitmap)
+                rendered = decoded.image
             }
         }
     }
@@ -228,52 +226,8 @@ private fun DocumentPage(
     }
 }
 
-private fun bitmapFromSharedMemory(
-    ok: RenderResult.Ok,
-    telemetry: DocumentTelemetryGuard,
-): Bitmap? {
-    // The renderer service writes ARGB_8888 packed row-major with no padding using the
-    // dimensions it reports back in `ok.widthPx` / `ok.heightPx` (which may differ from
-    // the request — see the call-site comment for D7).
-    //
-    // The runCatching swallow remains intentional: OOM on Bitmap.createBitmap,
-    // BufferUnderflowException from copyPixelsFromBuffer if the SharedMemory size
-    // mismatches the bitmap, and IllegalStateException if the SharedMemory was already
-    // closed by a parallel render each surface as a blank page that the next swipe
-    // re-attempts. Telemetry is observability, not a user-facing error path; the failure
-    // mapping is what wpass-8v4 added so the silent path stops being invisible.
-    return runCatching {
-        val mapped: ByteBuffer = ok.sharedMemory.mapReadOnly()
-        try {
-            val bitmap = Bitmap.createBitmap(ok.widthPx, ok.heightPx, Bitmap.Config.ARGB_8888)
-            bitmap.copyPixelsFromBuffer(mapped)
-            bitmap
-        } finally {
-            android.os.SharedMemory.unmap(mapped)
-            ok.sharedMemory.close()
-        }
-    }.onFailure { t ->
-        telemetry.onConsumerRenderFailed(consumerRenderFailureFor(t))
-    }.getOrNull()
-}
-
-internal fun consumerRenderFailureFor(t: Throwable): ConsumerRenderFailure = when (t) {
-    is OutOfMemoryError -> ConsumerRenderFailure.OutOfMemory
-    is BufferUnderflowException -> ConsumerRenderFailure.DimensionMismatch
-    is IllegalStateException -> ConsumerRenderFailure.SharedMemoryUnavailable
-    else -> ConsumerRenderFailure.Other
-}
-
-// HorizontalPager retains composed Image references for adjacent pages during a swipe
-// transition. A window equal to "current ± 2" gives the access-ordered LRU enough room
-// that an evicted bitmap is never the one the pager is still painting; recycling a
-// bitmap whose Image is on screen crashes the draw pass. See PR review C2.
-internal const val LRU_PAGE_WINDOW: Int = 5
-
 // Render budget defaults. The renderer service caps the bitmap area independently
-// (ADR 0005 D7); these are the UI-side request size, picked to look reasonable on
-// phone-class displays without committing to a particular host density. The on-screen
-// page size is the pager slot, not these values — ContentScale.Fit scales the
-// rasterised bitmap into whatever space the consumer gives DocumentView.
+// (ADR 0005 D7); these are the UI-side request size for the inline surface, picked to
+// look reasonable on phone-class displays. ContentScale.Fit handles the slot.
 private const val TARGET_PAGE_WIDTH_DP: Int = 360
 private const val TARGET_PAGE_HEIGHT_DP: Int = 480

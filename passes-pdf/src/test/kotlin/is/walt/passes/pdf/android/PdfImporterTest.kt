@@ -189,7 +189,7 @@ class PdfImporterTest {
             RecordingSessionFactory(
                 binder = StaticBinder(
                     probeResult = ProbeResult.Ok(pageCount = 4),
-                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H, 1f),
                 ),
             )
         val persists = mutableListOf<PersistArgs>()
@@ -222,7 +222,7 @@ class PdfImporterTest {
             RecordingSessionFactory(
                 binder = StaticBinder(
                     probeResult = ProbeResult.Ok(pageCount = 2),
-                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H, 1f),
                 ),
             )
 
@@ -244,7 +244,7 @@ class PdfImporterTest {
             RecordingSessionFactory(
                 binder = StaticBinder(
                     probeResult = ProbeResult.Ok(pageCount = 2),
-                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H, 1f),
                 ),
             )
         val throwingEncoder =
@@ -273,7 +273,7 @@ class PdfImporterTest {
             RecordingSessionFactory(
                 binder = StaticBinder(
                     probeResult = ProbeResult.Ok(pageCount = 1),
-                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H, 1f),
                 ),
             )
 
@@ -300,7 +300,7 @@ class PdfImporterTest {
             RecordingSessionFactory(
                 binder = StaticBinder(
                     probeResult = ProbeResult.Ok(pageCount = 1),
-                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                    renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H, 1f),
                 ),
             )
         val cancellingEncoder =
@@ -369,7 +369,7 @@ class PdfImporterTest {
         val factory = RecordingSessionFactory(
             binder = StaticBinder(
                 probeResult = ProbeResult.Ok(pageCount = 1),
-                renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H, 1f),
             ),
         )
         val telemetry = RecordingTelemetry()
@@ -422,7 +422,7 @@ class PdfImporterTest {
         val factory = RecordingSessionFactory(
             binder = StaticBinder(
                 probeResult = ProbeResult.Ok(pageCount = 1),
-                renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H),
+                renderResult = RenderResult.Ok(sm, DEFAULT_THUMB_W, DEFAULT_THUMB_H, 1f),
             ),
         )
         val u = uri("content://walt-test/import.pdf")

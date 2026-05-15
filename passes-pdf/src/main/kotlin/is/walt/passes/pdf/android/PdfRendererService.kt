@@ -146,7 +146,13 @@ private fun rasterise(
     try {
         val transform = matrixFor(sourceRect, p.width, p.height, widthPx, heightPx)
         p.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-        return RenderResult.Ok(packIntoSharedMemory(bitmap, widthPx, heightPx), widthPx, heightPx)
+        val pageAspect = p.width.toFloat() / p.height.toFloat()
+        return RenderResult.Ok(
+            sharedMemory = packIntoSharedMemory(bitmap, widthPx, heightPx),
+            widthPx = widthPx,
+            heightPx = heightPx,
+            pageAspect = pageAspect,
+        )
     } finally {
         bitmap.recycle()
     }

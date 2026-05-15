@@ -67,6 +67,7 @@ internal class PdfRendererBinderProxy(
                     reply.writeTypedObject(result.sharedMemory, 0)
                     reply.writeInt(result.widthPx)
                     reply.writeInt(result.heightPx)
+                    reply.writeFloat(result.pageAspect)
                 }
                 is RenderResult.Rejected -> {
                     reply.writeInt(TAG_REJECTED)

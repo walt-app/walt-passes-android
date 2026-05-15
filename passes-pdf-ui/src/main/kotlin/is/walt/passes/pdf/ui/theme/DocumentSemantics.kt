@@ -50,4 +50,7 @@ public data class DocumentSemantics(
     public val fullScreenBannerLabel: String = "Tap for full screen",
     public val fullScreenBannerBackground: ArgbColor = documentBadgeBackground,
     public val fullScreenBannerForeground: ArgbColor = documentBadgeForeground,
+    // wpass-6ag review M1: close affordance on the full-screen surface is themed
+    // alongside the banner so every consumer-facing string flows through this contract.
+    public val closeFullScreenLabel: String = "Close",
 )

@@ -5,6 +5,8 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,7 +20,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,37 +32,35 @@ import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
 import `is`.walt.passes.pdf.android.RenderSourceRect
+import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
 import `is`.walt.passes.pdf.ui.internal.ZoomableImage
+import `is`.walt.passes.pdf.ui.internal.decodePage
+import `is`.walt.passes.pdf.ui.internal.discardRenderResult
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
-import kotlinx.coroutines.launch
 
 /**
  * Full-screen detail surface for a [PdfDocument] (`wpass-jil`). The ONLY place inside
- * `passes-pdf-ui` where pinch-zoom and pan are available; inline `DocumentView` is fixed
- * 1x after the `wpass-ny4` pivot.
+ * `passes-pdf-ui` where pinch-zoom and pan are available; inline `DocumentView` is
+ * fixed 1x after the `wpass-ny4` pivot.
  *
  * Trust contract:
  *
  *  - The non-suppressible [DocumentTrustCaption] is composed inside this surface and
- *    docked to the bottom edge of the screen. It is NOT subject to the zoom transform
- *    and cannot be panned off-screen (ADR 0005 D5 / addendum Z.8). The caption sits
- *    above the page region in the [Box] and is structurally outside the zoom surface.
- *  - Zoom is purely view-side. No share, export, print, or open-with affordance
+ *    docked to the bottom edge of the screen, structurally outside the zoom transform
+ *    (ADR 0005 D5 / Z.8).
+ *  - Zoom is purely view-side. No share / export / print / open-with affordance
  *    (ADR 0005 D8); `DocumentPublicApiSurfaceTest` continues to enforce the
  *    classpath-scan rule on `Intent.ACTION_SEND`.
- *  - On pinch settle the surface fires a `renderer.render(... SubRect ...)` call
- *    against the currently-visible normalised page rect so the displayed bitmap stays
- *    sharp within the unchanged 4 MP per-bitmap cap (`wpass-f4b`).
+ *  - On pinch settle the surface fires a `renderer.render(SubRect)` call against the
+ *    currently-visible normalised page rect and SWAPS the displayed bitmap when the
+ *    result returns, so the visible region stays sharp within the 4 MP per-bitmap cap
+ *    (`wpass-f4b`).
  *
- * Page cache: a per-document LRU mirrors [DocumentView]'s cache so swiping back and
- * forth between pages re-uses fit-resolution renders. Sub-rect renders are NOT cached
- * (they would explode the cache key space and stale entries would surface as a
+ * Page cache: fit-resolution renders are cached per page; sub-rect renders are not
+ * (cache-keying them would explode the key space and stale entries surface as a
  * sharper-but-wrong region after a pan).
- *
- * [pdfFile] ownership matches [DocumentView]: the caller keeps the descriptor open for
- * as long as `FullScreenDocumentView` is composed.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -77,9 +76,7 @@ public fun FullScreenDocumentView(
     val cache = remember(doc.id) {
         RenderedPageCache<Bitmap>(
             maxSize = LRU_PAGE_WINDOW,
-            onEvict = { bitmap ->
-                if (!bitmap.isRecycled) bitmap.recycle()
-            },
+            onEvict = { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() },
         )
     }
     DisposableEffect(doc.id) {
@@ -93,39 +90,56 @@ public fun FullScreenDocumentView(
             .fillMaxSize()
             .background(semantics.laneBackground.toComposeColor()),
     ) {
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(PaddingValues(bottom = TRUST_CAPTION_DOCK_HEIGHT_DP.dp)),
-        ) { page ->
-            FullScreenPage(
-                document = doc,
-                pageIndex = page,
-                pdfFile = pdfFile,
-                renderer = renderer,
-                cache = cache,
-                telemetry = telemetry,
-            )
+        // Trust caption docked to bottom edge; outside the zoom transform (Z.8). The
+        // pager is offset above it via a BottomDockedLayout so the page surface uses
+        // the actual measured caption height instead of a hardcoded constant
+        // (`wpass-6ag` review M2 partial — drives the pager padding from the caption's
+        // intrinsic height, no SubcomposeLayout needed because the caption is a sibling
+        // in a Box layered above).
+        BottomDockedLayout(
+            dock = { DocumentTrustCaption() },
+            modifier = Modifier.fillMaxSize(),
+        ) {
+            HorizontalPager(
+                state = pagerState,
+                modifier = Modifier.fillMaxSize(),
+            ) { page ->
+                FullScreenPage(
+                    document = doc,
+                    pageIndex = page,
+                    pdfFile = pdfFile,
+                    renderer = renderer,
+                    cache = cache,
+                    telemetry = telemetry,
+                )
+            }
         }
 
-        // ADR 0005 Z.8: trust caption docks to a screen edge in the full-screen surface
-        // and is NOT subject to the zoom transform. Aligned to the bottom of the root
-        // Box so pan within the pager cannot push it off-screen.
-        Box(modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter)) {
-            DocumentTrustCaption()
-        }
-
-        // Discreet close affordance docked to the top-start corner. Hosts that prefer a
-        // gesture-only close hide it via their own theming chrome.
         Box(modifier = Modifier.align(Alignment.TopStart)) {
             CloseFullScreenButton(onClick = onClose)
         }
     }
 }
 
+/**
+ * Hosts the pager content in the region above [dock]. The dock composes at its natural
+ * height at the bottom; the content fills the rest. Avoids the hardcoded
+ * TRUST_CAPTION_DOCK_HEIGHT constant the original full-screen surface used.
+ */
 @Composable
-@Suppress("LongParameterList")
+private fun BottomDockedLayout(
+    dock: @Composable () -> Unit,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = modifier) {
+        Box(modifier = Modifier.fillMaxWidth().weight(1f)) { content() }
+        Box(modifier = Modifier.fillMaxWidth()) { dock() }
+    }
+}
+
+@Composable
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 private fun FullScreenPage(
     document: PdfDocument,
     pageIndex: Int,
@@ -134,57 +148,107 @@ private fun FullScreenPage(
     cache: RenderedPageCache<Bitmap>,
     telemetry: DocumentTelemetryGuard,
 ) {
-    val density = LocalDensity.current
-    val scope = rememberCoroutineScope()
-    var rendered by remember(document.id, pageIndex) {
-        mutableStateOf<ImageBitmap?>(cache.get(document.id, pageIndex)?.asImageBitmap())
-    }
-    val requestWidthPx = with(density) { FULL_SCREEN_PAGE_WIDTH_DP.dp.toPx().toInt().coerceAtLeast(1) }
-    val requestHeightPx = with(density) { FULL_SCREEN_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1) }
-
-    LaunchedEffect(document.id, pageIndex, requestWidthPx, requestHeightPx) {
-        val cached = cache.get(document.id, pageIndex)
-        if (cached != null && !cached.isRecycled) {
-            rendered = cached.asImageBitmap()
-            return@LaunchedEffect
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val density = LocalDensity.current
+        // wpass-6ag review A3: request size derived from the actual pager slot, not a
+        // hardcoded dp pair. Clamped at MAX_REQUEST_PIXELS so the renderer is never
+        // asked to allocate beyond the 4 MP cap (ADR 0005 D7).
+        val (requestW, requestH) = with(density) {
+            val rawW = maxWidth.toPx().toInt().coerceAtLeast(1)
+            val rawH = maxHeight.toPx().toInt().coerceAtLeast(1)
+            clampToMaxPixels(rawW, rawH, MAX_REQUEST_PIXELS)
         }
-        val result = renderer.render(
-            pdf = pdfFile,
-            page = pageIndex,
-            widthPx = requestWidthPx,
-            heightPx = requestHeightPx,
-            sourceRect = RenderSourceRect.FullPage,
-        )
-        if (result is RenderResult.Ok) {
-            val bitmap = fullScreenBitmapFromSharedMemory(result, telemetry)
-            if (bitmap != null) {
-                cache.put(document.id, pageIndex, bitmap)
-                rendered = bitmap.asImageBitmap()
+
+        var baseImage by remember(document.id, pageIndex) {
+            mutableStateOf<ImageBitmap?>(cache.get(document.id, pageIndex)?.asImageBitmap())
+        }
+        var pageAspect by remember(document.id, pageIndex) { mutableStateOf<Float?>(null) }
+        var zoomedReplacement by remember(document.id, pageIndex) {
+            mutableStateOf<ImageBitmap?>(null)
+        }
+        var zoomedReplacementHandle by remember(document.id, pageIndex) {
+            mutableStateOf<Bitmap?>(null)
+        }
+        var pendingRect by remember(document.id, pageIndex) {
+            mutableStateOf<RenderSourceRect?>(null)
+        }
+
+        DisposableEffect(document.id, pageIndex) {
+            onDispose {
+                zoomedReplacementHandle?.let { if (!it.isRecycled) it.recycle() }
+                zoomedReplacementHandle = null
+                zoomedReplacement = null
             }
         }
-    }
 
-    rendered?.let { bitmap ->
-        ZoomableImage(
-            bitmap = bitmap,
-            // ADR 0005 D4 forbids extracting text from the PDF; positional caption
-            // is the only safe TalkBack fallback.
-            contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
-            modifier = Modifier.fillMaxSize(),
-            // wpass-jil: invoked after the gesture settles. The sub-rect re-render
-            // keeps the visible region sharp within the 4 MP per-bitmap cap.
-            onZoomedRegionChanged = { rect ->
-                scope.launch {
-                    renderer.render(
-                        pdf = pdfFile,
-                        page = pageIndex,
-                        widthPx = requestWidthPx,
-                        heightPx = requestHeightPx,
-                        sourceRect = rect,
-                    )
+        LaunchedEffect(document.id, pageIndex, requestW, requestH) {
+            val cached = cache.get(document.id, pageIndex)
+            if (cached != null && !cached.isRecycled && baseImage == null) {
+                baseImage = cached.asImageBitmap()
+            }
+            if (baseImage != null && pageAspect != null) return@LaunchedEffect
+            val result = renderer.render(
+                pdf = pdfFile,
+                page = pageIndex,
+                widthPx = requestW,
+                heightPx = requestH,
+                sourceRect = RenderSourceRect.FullPage,
+            )
+            if (result is RenderResult.Ok) {
+                val decoded = decodePage(result, telemetry)
+                if (decoded != null) {
+                    cache.put(document.id, pageIndex, decoded.bitmap)
+                    baseImage = decoded.image
+                    pageAspect = decoded.pageAspect
                 }
-            },
-        )
+            }
+        }
+
+        baseImage?.let { bitmap ->
+            ZoomableImage(
+                bitmap = bitmap,
+                // ADR 0005 D4 forbids extracting text; the positional caption is the
+                // only safe TalkBack fallback.
+                contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
+                modifier = Modifier.fillMaxSize(),
+                pageAspect = pageAspect,
+                zoomedReplacement = zoomedReplacement,
+                // wpass-6ag review M3: edge-triggered. New gesture clears the prior
+                // sub-rect bitmap and frees its native memory so the next pinch starts
+                // from the base bitmap with the live transform.
+                onTransformStarted = {
+                    zoomedReplacementHandle?.let { if (!it.isRecycled) it.recycle() }
+                    zoomedReplacementHandle = null
+                    zoomedReplacement = null
+                },
+                onZoomedRegionChanged = { rect -> pendingRect = rect },
+            )
+        }
+
+        LaunchedEffect(pendingRect, document.id, pageIndex, requestW, requestH) {
+            val pending = pendingRect ?: return@LaunchedEffect
+            val result = renderer.render(
+                pdf = pdfFile,
+                page = pageIndex,
+                widthPx = requestW,
+                heightPx = requestH,
+                sourceRect = pending,
+            )
+            // If a newer pinch arrived while the render was in flight, free this
+            // bitmap's SharedMemory and skip the swap (`wpass-6ag` review C2).
+            if (pendingRect !== pending) {
+                discardRenderResult(result)
+                return@LaunchedEffect
+            }
+            if (result is RenderResult.Ok) {
+                val decoded = decodePage(result, telemetry)
+                if (decoded != null) {
+                    zoomedReplacementHandle?.let { if (!it.isRecycled) it.recycle() }
+                    zoomedReplacementHandle = decoded.bitmap
+                    zoomedReplacement = decoded.image
+                }
+            }
+        }
     }
 }
 
@@ -199,38 +263,22 @@ private fun CloseFullScreenButton(onClick: () -> Unit) {
             .padding(PaddingValues(horizontal = 12.dp, vertical = 8.dp)),
     ) {
         Text(
-            text = "Close",
+            text = semantics.closeFullScreenLabel,
             color = semantics.fullScreenBannerForeground.toComposeColor(),
         )
     }
 }
 
-// Same reconstruction shape as the inline DocumentView path; lifted into its own
-// helper so the full-screen surface does not depend on DocumentView's private helpers.
-private fun fullScreenBitmapFromSharedMemory(
-    ok: RenderResult.Ok,
-    telemetry: DocumentTelemetryGuard,
-): Bitmap? =
-    runCatching {
-        val mapped = ok.sharedMemory.mapReadOnly()
-        try {
-            val bitmap = Bitmap.createBitmap(ok.widthPx, ok.heightPx, Bitmap.Config.ARGB_8888)
-            bitmap.copyPixelsFromBuffer(mapped)
-            bitmap
-        } finally {
-            android.os.SharedMemory.unmap(mapped)
-            ok.sharedMemory.close()
-        }
-    }.onFailure { t -> telemetry.onConsumerRenderFailed(consumerRenderFailureFor(t)) }
-        .getOrNull()
+private fun clampToMaxPixels(widthPx: Int, heightPx: Int, maxPixels: Long): Pair<Int, Int> {
+    val product = widthPx.toLong() * heightPx.toLong()
+    if (product <= maxPixels) return widthPx to heightPx
+    val scale = kotlin.math.sqrt(maxPixels.toDouble() / product.toDouble())
+    val w = (widthPx * scale).toInt().coerceAtLeast(1)
+    val h = (heightPx * scale).toInt().coerceAtLeast(1)
+    return w to h
+}
 
-// Caps the pixel-size of the initial fit-resolution render on the full-screen surface.
-// Chosen to give a reasonable ARGB_8888 budget on phone-class displays without crossing
-// the 4 MP cap; sub-rect re-renders use the same widthPx / heightPx (= viewport
-// resolution) so the renderer never exceeds the cap.
-private const val FULL_SCREEN_PAGE_WIDTH_DP: Int = 720
-private const val FULL_SCREEN_PAGE_HEIGHT_DP: Int = 960
-
-// Reserved at the bottom of the full-screen surface for the docked trust caption so the
-// pager does not paint behind it.
-private const val TRUST_CAPTION_DOCK_HEIGHT_DP: Int = 56
+// Mirrors PdfRendererService.MAX_PIXELS so the request never asks for a bitmap the
+// renderer would have to downsize on its end. Concrete value lives in passes-pdf; this
+// re-declaration is a defensive ceiling, not the load-bearing cap.
+private const val MAX_REQUEST_PIXELS: Long = 4L * 1024 * 1024

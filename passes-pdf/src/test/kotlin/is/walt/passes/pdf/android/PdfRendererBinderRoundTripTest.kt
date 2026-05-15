@@ -74,7 +74,7 @@ class PdfRendererBinderRoundTripTest {
     fun renderOkRoundTripCarriesSharedMemoryAndDimensions() = runTest {
         val sm = SharedMemory.create("walt-test-render", PIXEL_BYTES)
         val client = clientFor(
-            StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX)),
+            StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX, 1f)),
         )
         val result = client.render(pipeRead, page = 0, widthPx = WIDTH_PX, heightPx = HEIGHT_PX)
         assertThat(result).isInstanceOf(RenderResult.Ok::class.java)
@@ -148,7 +148,7 @@ class PdfRendererBinderRoundTripTest {
         // The default value lives on the interface; verify the client writes the
         // expected wire bytes and the proxy decodes them back to FullPage.
         val sm = SharedMemory.create("walt-test-render-default", PIXEL_BYTES)
-        val impl = StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX))
+        val impl = StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX, 1f))
         val client = clientFor(impl)
         client.render(pipeRead, page = 0, widthPx = WIDTH_PX, heightPx = HEIGHT_PX)
         assertThat(impl.lastSourceRect).isEqualTo(RenderSourceRect.FullPage)
@@ -162,7 +162,7 @@ class PdfRendererBinderRoundTripTest {
         // representation) so any precision loss in the wire format would surface as
         // an inequality here.
         val sm = SharedMemory.create("walt-test-render-subrect", PIXEL_BYTES)
-        val impl = StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX))
+        val impl = StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX, 1f))
         val client = clientFor(impl)
         val rect = RenderSourceRect.SubRect(
             left = 0.25f,

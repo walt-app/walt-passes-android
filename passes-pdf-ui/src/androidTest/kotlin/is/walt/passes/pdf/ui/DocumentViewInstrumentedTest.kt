@@ -31,6 +31,7 @@ import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.ProbeResult
 import `is`.walt.passes.pdf.android.RenderResult
 import `is`.walt.passes.pdf.android.RenderSourceRect
+import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.theme.DocumentSemantics
 import `is`.walt.passes.pdf.ui.theme.DocumentTheme
 import `is`.walt.passes.ui.core.ArgbColor
@@ -295,10 +296,9 @@ class DocumentViewInstrumentedTest {
     @Test
     fun pinchOnFullScreenDrivesAZoomAwareRerenderCall() {
         // wpass-jil + wpass-f4b: after the user pinches in the full-screen surface,
-        // the surface issues a renderer.render() call whose sourceRect is a SubRect of
-        // the page. Asserting "at least one render call used a SubRect" pins the
-        // integration without coupling to specific rect coordinates (which depend on
-        // pinch trajectory + slot size).
+        // the surface fires a renderer.render(SubRect) call AND the bitmap swap from
+        // wpass-6ag C1 surfaces the new bitmap. Recorder also tracks per-call
+        // SharedMemory open/close so C2 is structurally pinned.
         val recorder = RecordingBinder()
         composeRule.setContent {
             ThemedHost {
@@ -323,6 +323,10 @@ class DocumentViewInstrumentedTest {
         composeRule.waitForIdle()
         val sourceRects = recorder.sourceRects()
         assertThat(sourceRects.any { it is RenderSourceRect.SubRect }).isTrue()
+        // wpass-6ag C2: every Ok bitmap allocated by the recorder is either consumed by
+        // decodePage (which closes the SharedMemory) or by discardRenderResult on a
+        // superseded sub-rect render. None should remain open by test end.
+        assertThat(recorder.openSharedMemoryCount()).isEqualTo(0)
     }
 
     @Test
@@ -395,6 +399,7 @@ class DocumentViewInstrumentedTest {
         private val pages = CopyOnWriteArrayList<Int>()
         private val rects = CopyOnWriteArrayList<RenderSourceRect>()
         private val allocations = AtomicInteger(0)
+        private val openSharedMemories = CopyOnWriteArrayList<SharedMemory>()
 
         override suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult =
             ProbeResult.Ok(pageCount = 6)
@@ -411,12 +416,23 @@ class DocumentViewInstrumentedTest {
             allocations.incrementAndGet()
             val size = widthPx * heightPx * BYTES_PER_PIXEL
             val sm = SharedMemory.create("walt-test-render-$page-${allocations.get()}", size)
-            return RenderResult.Ok(sm, widthPx, heightPx)
+            openSharedMemories += sm
+            return RenderResult.Ok(sm, widthPx, heightPx, 1f)
         }
 
         fun renderedPages(): List<Int> = pages.toList()
 
         fun sourceRects(): List<RenderSourceRect> = rects.toList()
+
+        // SharedMemory has no public isClosed; the closest check is mapReadOnly()
+        // throwing IllegalStateException after close. Count failures-to-map as "still
+        // open" (i.e., a closed handle is no longer open).
+        fun openSharedMemoryCount(): Int = openSharedMemories.count { sm ->
+            runCatching {
+                val buf = sm.mapReadOnly()
+                SharedMemory.unmap(buf)
+            }.isSuccess
+        }
     }
 
     private companion object {
