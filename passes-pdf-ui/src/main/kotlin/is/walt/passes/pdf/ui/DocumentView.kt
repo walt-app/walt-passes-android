@@ -4,7 +4,11 @@ import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.rememberTransformableState
+import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,14 +20,21 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.pdf.ConsumerRenderFailure
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
@@ -200,17 +211,119 @@ private fun DocumentPage(
     // and a details section), the 3:4 page grew taller than the pager viewport and drew
     // over the trust caption above it. fillMaxSize cannot overflow its slot, so the
     // caption / page boundary is structural regardless of how little height the
-    // consumer gives the surface. No wrapping Box: the Image already fills the slot, so
-    // a Box around it would only add an inert layout node.
+    // consumer gives the surface.
+    //
+    // The wrapping Box is the zoom/pan surface (wpass-1wq). It scopes the gesture and
+    // graphicsLayer transform to the current page so swiping to the next page resets the
+    // zoom state, and so the trust caption — which lives in DocumentView's Column above
+    // the pager — is unaffected by any zoom transform applied here.
     rendered?.let { bitmap ->
+        ZoomableDocumentPage(
+            bitmap = bitmap,
+            contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
+        )
+    }
+}
+
+/**
+ * Per-page pinch-zoom + pan surface (wpass-1wq). Scoped strictly to a single page slot:
+ * the [Box]'s state lives in the caller's `remember(document.id, pageIndex)` frame, so
+ * paging away resets `scale` to 1 and `offset` to zero for the next page composition.
+ *
+ * Gesture priority with the enclosing [HorizontalPager]:
+ *
+ *  - Two-finger pinch is always consumed here — [transformable] handles it independently
+ *    of `canPan`, so the user can zoom out to fit even when the pager owns single-touch.
+ *  - Single-touch drag is consumed here only when `scale > 1f` (`canPan = { scale > 1f }`).
+ *    At `scale == 1f` the gesture passes through to the pager so horizontal swipes still
+ *    advance pages. Once zoomed in, single-touch drags pan the page within the slot until
+ *    the user double-taps or pinches back to fit.
+ *  - Double-tap toggles between fit (scale = 1, offset = zero) and the canonical zoomed
+ *    scale ([DOUBLE_TAP_SCALE]).
+ *
+ * Translation is clamped so the scaled page cannot be panned entirely off the slot:
+ * `maxOffset = ((scale - 1) * slotSize / 2)`, which keeps the page centered at fit and
+ * lets the user pan up to the edges of the scaled-up image but no further. Without this
+ * clamp the user could fling the barcode out of frame and lose the slot's contents.
+ *
+ * The graphicsLayer transform applies to the [Image] alone; the trust caption is composed
+ * outside this Box (in [DocumentView]'s Column) and is therefore structurally not part of
+ * any transform applied here. ADR 0005 D5's non-suppressible-trust-caption contract is
+ * preserved by layout, not by gesture-handling discipline.
+ *
+ * The 4 MP raster the renderer hands us (ADR 0005 D7) is sampled into a fit-resolution
+ * bitmap, so it pixelates when scaled above ~1.3-1.5x. The follow-up renderer bead
+ * (wpass-f4b) lifts the sharp-at-zoom property by re-rendering the visible viewport at
+ * higher resolution within the same 4 MP per-bitmap cap; this gesture surface is correct
+ * against the existing bitmap (pixelated but functional) and gets sharper for free once
+ * wpass-f4b lands.
+ */
+@Composable
+private fun ZoomableDocumentPage(
+    bitmap: ImageBitmap,
+    contentDescription: String,
+) {
+    // Local state, not rememberSaveable: zoom state intentionally does not survive a
+    // process death — the page reverts to fit, which matches the user-mental-model of
+    // "the wallet just reopened, show me the page at its natural size."
+    var scale by remember { mutableFloatStateOf(1f) }
+    var offset by remember { mutableStateOf(Offset.Zero) }
+    var slotSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
+        val newScale = (scale * zoomChange).coerceIn(MIN_SCALE, MAX_SCALE)
+        val maxX = ((newScale - 1f) * slotSize.width / 2f).coerceAtLeast(0f)
+        val maxY = ((newScale - 1f) * slotSize.height / 2f).coerceAtLeast(0f)
+        val proposed = offset + panChange
+        offset = Offset(
+            proposed.x.coerceIn(-maxX, maxX),
+            proposed.y.coerceIn(-maxY, maxY),
+        )
+        scale = newScale
+        if (newScale <= MIN_SCALE) offset = Offset.Zero
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .onSizeChanged { slotSize = it }
+            // pointerInput keyed on Unit because the only state the handler reads is the
+            // mutable `scale` (re-read on every callback). Re-keying would tear down and
+            // recreate the gesture detector on every zoom step.
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onDoubleTap = {
+                        if (scale > MIN_SCALE) {
+                            scale = MIN_SCALE
+                            offset = Offset.Zero
+                        } else {
+                            scale = DOUBLE_TAP_SCALE
+                            // Leave offset at zero; the user pans afterward if they need
+                            // to bring a specific region to centre. Centring on the tap
+                            // point would jump the page under the finger and surprise the
+                            // user — see wpass-1wq design notes.
+                        }
+                    },
+                )
+            }
+            .transformable(state = transformableState, canPan = { scale > MIN_SCALE }),
+        contentAlignment = Alignment.Center,
+    ) {
         Image(
             bitmap = bitmap,
             // ADR 0005 D4 forbids extracting text from the PDF; positional caption
             // is the only safe TalkBack fallback. "Page 3 of 7" is non-content but
             // navigationally useful.
-            contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
+            contentDescription = contentDescription,
             contentScale = ContentScale.Fit,
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer(
+                    scaleX = scale,
+                    scaleY = scale,
+                    translationX = offset.x,
+                    translationY = offset.y,
+                ),
         )
     }
 }
@@ -264,3 +377,23 @@ internal const val LRU_PAGE_WINDOW: Int = 5
 // rasterised bitmap into whatever space the consumer gives DocumentView.
 private const val TARGET_PAGE_WIDTH_DP: Int = 360
 private const val TARGET_PAGE_HEIGHT_DP: Int = 480
+
+// Zoom bounds for ZoomableDocumentPage (wpass-1wq).
+//
+// MIN_SCALE = 1f: zooming out below fit is meaningless on a single-page surface — the
+// page is already letterboxed and ContentScale.Fit owns "see the whole page in one
+// glance." Below 1 would just paint a smaller page inside empty slot real estate.
+//
+// MAX_SCALE = 5f: a typical PDF417 / QR / EAN barcode rasterised at fit fills roughly
+// 1/4 of a phone page; 5x brings the barcode to roughly fill the slot, which puts it
+// in the legible range for venue / gate scanners. The follow-up renderer bead
+// (wpass-f4b) re-rasterises at viewport resolution so the zoomed bitmap is sharp,
+// not just larger.
+//
+// DOUBLE_TAP_SCALE = 2.5f: the toggle-target for a double-tap. Picked roughly
+// half-way between fit and the max so a single tap is a clear "zoom in" affordance
+// without immediately committing to the maximum, while still being useful for
+// previewing whether the visible content survives at non-fit scale.
+private const val MIN_SCALE: Float = 1f
+private const val MAX_SCALE: Float = 5f
+private const val DOUBLE_TAP_SCALE: Float = 2.5f

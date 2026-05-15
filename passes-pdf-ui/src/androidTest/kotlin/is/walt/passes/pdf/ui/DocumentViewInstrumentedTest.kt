@@ -8,13 +8,16 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pinch
 import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -167,6 +170,91 @@ class DocumentViewInstrumentedTest {
         composeRule.onNodeWithText(
             "User-provided document. Walt has not verified the source.",
         ).assertIsDisplayed()
+    }
+
+    @Test
+    fun pinchToZoomDoesNotAdvanceThePagerAndKeepsTheTrustCaptionVisible() {
+        // wpass-1wq: pinch-to-zoom is a two-finger gesture; HorizontalPager treats
+        // single-touch horizontal drags as page-swipes. The gesture-priority contract
+        // requires that pinch (multi-touch) be consumed by the page-scoped zoom surface
+        // and never advance the pager. The trust caption (D5 non-suppressible) sits in
+        // DocumentView's Column above the pager and must remain visible regardless of
+        // gesture state — the zoom surface is structurally inside the pager slot, so a
+        // failure here would mean the caption was wrongly nested under the zoom
+        // transform.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 3),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
+
+        composeRule.onNodeWithContentDescription("Page 1 of 3").performTouchInput {
+            pinch(
+                start0 = center + Offset(-100f, 0f),
+                end0 = center + Offset(-300f, 0f),
+                start1 = center + Offset(100f, 0f),
+                end1 = center + Offset(300f, 0f),
+            )
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "User-provided document. Walt has not verified the source.",
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun doubleTapOnThePageDoesNotAdvanceThePager() {
+        // wpass-1wq: double-tap toggles between fit and DOUBLE_TAP_SCALE. It must not
+        // bubble as a swipe-equivalent or otherwise change the pager position. Visible
+        // page index unchanged is the contract.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 3),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 3").performTouchInput {
+            doubleClick()
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
+    }
+
+    @Test
+    fun singleTouchHorizontalDragAtFitScaleStillAdvancesThePager() {
+        // wpass-1wq: gesture priority at scale == 1 must defer to the pager. A
+        // single-touch horizontal drag from the fit state has to advance the pager
+        // exactly as it did before the zoom surface was added — otherwise the surface
+        // has accidentally swallowed swipe-to-page.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 3),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
+        composeRule.onRoot().performTouchInput { swipeLeft() }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 2 of 3").assertIsDisplayed()
     }
 
     @Test
