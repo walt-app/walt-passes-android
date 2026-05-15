@@ -28,6 +28,7 @@ import `is`.walt.passes.pdf.PdfDocumentId
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.ProbeResult
 import `is`.walt.passes.pdf.android.RenderResult
+import `is`.walt.passes.pdf.android.RenderSourceRect
 import `is`.walt.passes.pdf.ui.theme.DocumentSemantics
 import `is`.walt.passes.pdf.ui.theme.DocumentTheme
 import `is`.walt.passes.ui.core.ArgbColor
@@ -156,6 +157,7 @@ class DocumentViewInstrumentedTest {
                 page: Int,
                 widthPx: Int,
                 heightPx: Int,
+                sourceRect: RenderSourceRect,
             ): RenderResult = RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
         }
         composeRule.setContent {
@@ -375,6 +377,7 @@ class DocumentViewInstrumentedTest {
             page: Int,
             widthPx: Int,
             heightPx: Int,
+            sourceRect: RenderSourceRect,
         ): RenderResult {
             pages += page
             allocations.incrementAndGet()

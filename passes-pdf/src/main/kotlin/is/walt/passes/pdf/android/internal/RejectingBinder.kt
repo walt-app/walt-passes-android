@@ -5,6 +5,7 @@ import `is`.walt.passes.pdf.DocumentRejectedKind
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.ProbeResult
 import `is`.walt.passes.pdf.android.RenderResult
+import `is`.walt.passes.pdf.android.RenderSourceRect
 
 /**
  * A [PdfRendererBinder] that returns the same [DocumentRejectedKind] for every probe
@@ -26,5 +27,6 @@ internal class RejectingBinder(
         page: Int,
         widthPx: Int,
         heightPx: Int,
+        sourceRect: RenderSourceRect,
     ): RenderResult = RenderResult.Rejected(kind)
 }

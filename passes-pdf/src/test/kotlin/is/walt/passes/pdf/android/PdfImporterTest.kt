@@ -561,6 +561,7 @@ class PdfImporterTest {
             page: Int,
             widthPx: Int,
             heightPx: Int,
+            sourceRect: RenderSourceRect,
         ): RenderResult = renderResult
     }
 

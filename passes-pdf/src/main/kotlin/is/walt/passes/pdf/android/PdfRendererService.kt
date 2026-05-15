@@ -3,6 +3,7 @@ package `is`.walt.passes.pdf.android
 import android.app.Service
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
@@ -45,7 +46,8 @@ public class PdfRendererService : Service() {
                 page: Int,
                 widthPx: Int,
                 heightPx: Int,
-            ): RenderResult = doRender(pdf, page, widthPx, heightPx, watchdog)
+                sourceRect: RenderSourceRect,
+            ): RenderResult = doRender(pdf, page, widthPx, heightPx, sourceRect, watchdog)
         }
 
     public companion object {
@@ -83,23 +85,41 @@ internal suspend fun doRender(
     page: Int,
     widthPx: Int,
     heightPx: Int,
+    sourceRect: RenderSourceRect,
     watchdog: RenderWatchdog,
 ): RenderResult {
     val dimsOk = widthPx > 0 && heightPx > 0 && widthPx.toLong() * heightPx.toLong() <= PdfRendererService.MAX_PIXELS
-    return if (!dimsOk) {
+    val rectOk = isSourceRectValid(sourceRect)
+    return if (!dimsOk || !rectOk) {
         RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
     } else {
         runCatching {
-            watchdog.guard { renderToSharedMemory(pdf, page, widthPx, heightPx) }
+            watchdog.guard { renderToSharedMemory(pdf, page, widthPx, heightPx, sourceRect) }
         }.getOrElse { RenderResult.Rejected(DocumentRejectedKind.RendererFailed) }
     }
 }
+
+// Strict ordering rules out zero-area rects (would produce a degenerate Matrix); the
+// unit-square bound keeps the consumer's failures visible instead of silently blank.
+internal fun isSourceRectValid(sourceRect: RenderSourceRect): Boolean =
+    when (sourceRect) {
+        is RenderSourceRect.FullPage -> true
+        is RenderSourceRect.SubRect -> {
+            val l = sourceRect.left
+            val t = sourceRect.top
+            val r = sourceRect.right
+            val b = sourceRect.bottom
+            val finite = l.isFinite() && t.isFinite() && r.isFinite() && b.isFinite()
+            finite && l in 0f..1f && t in 0f..1f && r in 0f..1f && b in 0f..1f && l < r && t < b
+        }
+    }
 
 private fun renderToSharedMemory(
     pdf: ParcelFileDescriptor,
     page: Int,
     widthPx: Int,
     heightPx: Int,
+    sourceRect: RenderSourceRect,
 ): RenderResult =
     PdfRenderer(pdf).use { renderer ->
         // Defense-in-depth: doProbe also enforces MAX_PAGES, but the binder does not
@@ -111,19 +131,48 @@ private fun renderToSharedMemory(
         if (!pageCountOk || !pageOk) {
             RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
         } else {
-            renderer.openPage(page).use { p -> rasterise(p, widthPx, heightPx) }
+            renderer.openPage(page).use { p -> rasterise(p, widthPx, heightPx, sourceRect) }
         }
     }
 
-private fun rasterise(p: PdfRenderer.Page, widthPx: Int, heightPx: Int): RenderResult.Ok {
+private fun rasterise(
+    p: PdfRenderer.Page,
+    widthPx: Int,
+    heightPx: Int,
+    sourceRect: RenderSourceRect,
+): RenderResult.Ok {
     val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
     try {
-        p.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        val transform = matrixFor(sourceRect, p.width, p.height, widthPx, heightPx)
+        p.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
         return RenderResult.Ok(packIntoSharedMemory(bitmap, widthPx, heightPx), widthPx, heightPx)
     } finally {
         bitmap.recycle()
     }
 }
+
+// FullPage keeps the legacy `null` transform (fit page to bitmap). SubRect maps the
+// sub-rect's page-point coords onto the full destination bitmap, sharp under zoom.
+private fun matrixFor(
+    sourceRect: RenderSourceRect,
+    pageWidth: Int,
+    pageHeight: Int,
+    widthPx: Int,
+    heightPx: Int,
+): Matrix? =
+    when (sourceRect) {
+        is RenderSourceRect.FullPage -> null
+        is RenderSourceRect.SubRect -> {
+            val srcLeft = sourceRect.left * pageWidth
+            val srcTop = sourceRect.top * pageHeight
+            val srcWidth = (sourceRect.right - sourceRect.left) * pageWidth
+            val srcHeight = (sourceRect.bottom - sourceRect.top) * pageHeight
+            Matrix().apply {
+                setScale(widthPx / srcWidth, heightPx / srcHeight)
+                preTranslate(-srcLeft, -srcTop)
+            }
+        }
+    }
 
 private fun packIntoSharedMemory(bitmap: Bitmap, widthPx: Int, heightPx: Int): SharedMemory {
     val byteCount = widthPx * heightPx * BYTES_PER_PIXEL

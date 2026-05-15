@@ -21,11 +21,16 @@ import org.junit.Test
 class PublicApiSurfaceTest {
     @Test
     fun binderHasExactlyProbeAndRender() {
+        // declaredMethods on an interface includes the abstract methods and any
+        // synthetic $default helpers Kotlin generates for parameters with default
+        // values. Compare against the set of human-named methods (filtering the
+        // mangled `$default` suffix) so that adding a default value to an existing
+        // method does not flip the test red, but adding a third method does.
         val methodNames =
             PdfRendererBinder::class
                 .java
                 .declaredMethods
-                .map { it.name }
+                .map { it.name.substringBefore('$') }
                 .toSet()
         assertThat(methodNames).containsExactly("probe", "render")
     }
@@ -43,14 +48,19 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun renderTakesPfdAndDimensions() {
+    fun renderTakesPfdAndDimensionsAndSourceRect() {
         val render = PdfRendererBinder::class.java.declaredMethods.single { it.name == "render" }
         val params = render.parameterTypes
-        assertThat(params).hasLength(5)
+        // wpass-f4b extends render() with a RenderSourceRect parameter (between
+        // heightPx and the Continuation). The pin matters because reordering the
+        // parameters at the interface level would invalidate the wire format the proxy
+        // and client agree on by position.
+        assertThat(params).hasLength(6)
         assertThat(params[0].name).isEqualTo("android.os.ParcelFileDescriptor")
         assertThat(params[1]).isEqualTo(java.lang.Integer.TYPE)
         assertThat(params[2]).isEqualTo(java.lang.Integer.TYPE)
         assertThat(params[3]).isEqualTo(java.lang.Integer.TYPE)
-        assertThat(params[4].name).isEqualTo("kotlin.coroutines.Continuation")
+        assertThat(params[4].name).isEqualTo("is.walt.passes.pdf.android.RenderSourceRect")
+        assertThat(params[5].name).isEqualTo("kotlin.coroutines.Continuation")
     }
 }

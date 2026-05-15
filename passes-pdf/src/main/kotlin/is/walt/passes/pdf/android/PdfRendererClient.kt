@@ -10,6 +10,8 @@ import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_PROBE
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_RENDER
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.TAG_OK
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.TAG_REJECTED
+import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.TAG_SOURCE_RECT_FULL_PAGE
+import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.TAG_SOURCE_RECT_SUB_RECT
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -95,6 +97,7 @@ public class PdfRendererClient(
         page: Int,
         widthPx: Int,
         heightPx: Int,
+        sourceRect: RenderSourceRect,
     ): RenderResult =
         withContext(Dispatchers.IO) {
             val data = Parcel.obtain()
@@ -104,6 +107,7 @@ public class PdfRendererClient(
                 data.writeInt(page)
                 data.writeInt(widthPx)
                 data.writeInt(heightPx)
+                writeSourceRect(data, sourceRect)
                 val accepted =
                     try {
                         binder.transact(CODE_RENDER, data, reply, 0)
@@ -129,4 +133,17 @@ public class PdfRendererClient(
                 data.recycle()
             }
         }
+
+    private fun writeSourceRect(data: Parcel, sourceRect: RenderSourceRect) {
+        when (sourceRect) {
+            is RenderSourceRect.FullPage -> data.writeInt(TAG_SOURCE_RECT_FULL_PAGE)
+            is RenderSourceRect.SubRect -> {
+                data.writeInt(TAG_SOURCE_RECT_SUB_RECT)
+                data.writeFloat(sourceRect.left)
+                data.writeFloat(sourceRect.top)
+                data.writeFloat(sourceRect.right)
+                data.writeFloat(sourceRect.bottom)
+            }
+        }
+    }
 }

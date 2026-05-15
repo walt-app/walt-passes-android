@@ -144,6 +144,43 @@ class PdfRendererBinderRoundTripTest {
     }
 
     @Test
+    fun renderDefaultsToFullPageSourceRectAcrossTheWire() = runTest {
+        // The default value lives on the interface; verify the client writes the
+        // expected wire bytes and the proxy decodes them back to FullPage.
+        val sm = SharedMemory.create("walt-test-render-default", PIXEL_BYTES)
+        val impl = StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX))
+        val client = clientFor(impl)
+        client.render(pipeRead, page = 0, widthPx = WIDTH_PX, heightPx = HEIGHT_PX)
+        assertThat(impl.lastSourceRect).isEqualTo(RenderSourceRect.FullPage)
+    }
+
+    @Test
+    fun renderSubRectRoundTripPreservesFloatBoundaries() = runTest {
+        // wpass-f4b: the wire format must preserve the SubRect floats bit-for-bit so
+        // the renderer service can compose the right Matrix transform. Pick boundary
+        // values (0f, 1f, and a non-trivial decimal that has an exact IEEE-754
+        // representation) so any precision loss in the wire format would surface as
+        // an inequality here.
+        val sm = SharedMemory.create("walt-test-render-subrect", PIXEL_BYTES)
+        val impl = StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX))
+        val client = clientFor(impl)
+        val rect = RenderSourceRect.SubRect(
+            left = 0.25f,
+            top = 0.5f,
+            right = 0.75f,
+            bottom = 1.0f,
+        )
+        client.render(
+            pdf = pipeRead,
+            page = 0,
+            widthPx = WIDTH_PX,
+            heightPx = HEIGHT_PX,
+            sourceRect = rect,
+        )
+        assertThat(impl.lastSourceRect).isEqualTo(rect)
+    }
+
+    @Test
     fun transactionCodesArePinnedToTheirDocumentedValues() {
         // Pin the absolute codes, not just their distinctness: a contributor flipping
         // the +1 direction (or rebasing CODE_PROBE off a different IBinder constant)
@@ -190,6 +227,9 @@ class PdfRendererBinderRoundTripTest {
         private val probeResult: ProbeResult = ProbeResult.Rejected(DocumentRejectedKind.RendererFailed),
         private val renderResult: RenderResult = RenderResult.Rejected(DocumentRejectedKind.RendererFailed),
     ) : PdfRendererBinder {
+        var lastSourceRect: RenderSourceRect? = null
+            private set
+
         override suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult = probeResult
 
         override suspend fun render(
@@ -197,7 +237,11 @@ class PdfRendererBinderRoundTripTest {
             page: Int,
             widthPx: Int,
             heightPx: Int,
-        ): RenderResult = renderResult
+            sourceRect: RenderSourceRect,
+        ): RenderResult {
+            lastSourceRect = sourceRect
+            return renderResult
+        }
     }
 
     private companion object {
