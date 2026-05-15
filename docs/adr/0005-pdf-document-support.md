@@ -333,6 +333,11 @@ manifest, JNI source, and binder code land there.
 
 ## Addendum 2026-05-15: Pinch-zoom + pan in `DocumentView`
 
+**Superseded by the 2026-05-15 follow-on addendum below ("Zoom moves to a
+dedicated full-screen surface"). The follow-on retains Z.2, Z.3, and Z.5
+verbatim and replaces Z.1, Z.4, and Z.6.** The text below is retained for
+audit continuity; consult the follow-on for current behaviour.
+
 Tracks: `wpass-6ag` (parent), `wpass-1wq` (UI gesture surface), `wpass-f4b`
 (renderer zoom-aware path), `wpass-0nn` (this addendum). Cross-repo
 consumer-side tracker: walt-android `wlt-o72.4`. Storage precondition
@@ -477,4 +482,140 @@ contract is documented in the bead.
 | Z.2      | existing `PdfRendererService.MAX_PIXELS` pin in renderer service code — value unchanged.              |
 | Z.3      | existing `PublicApiSurfaceTest` reflection check on `PdfRendererBinder` — still exactly two methods.  |
 | Z.4      | `DocumentViewInstrumentedTest.pinchToZoomDoesNotAdvanceThePagerAndKeepsTheTrustCaptionVisible` asserts caption visibility post-pinch; existing `trustCaptionDoesNotOverlapThePageWhenTheConsumerGivesAShortSlot` pins the structural layout boundary. |
+| Z.5      | existing classpath-scan test for `Intent.ACTION_SEND` — surface unchanged.                            |
+
+## Addendum 2026-05-15: Zoom moves to a dedicated full-screen surface
+
+Tracks: `wpass-6ag` (parent), `wpass-jil` (full-screen surface + banner),
+`wpass-ny4` (inline pinch removal), `wpass-f4b` (renderer sub-rect path),
+`wpass-5n1` (this addendum). Supersedes the immediately-preceding
+`wpass-0nn` addendum.
+
+### Context
+
+The `wpass-0nn` addendum landed pinch-zoom and pan inside the inline
+`DocumentView`. Practical use surfaced two problems:
+
+- Mounting zoom in the same surface that the host app embeds inside a
+  vertical scroll forces a nested-gesture interlock at every embedding
+  site, with `scale > 1` as the toggle. The contract is correct but
+  fragile — a host that forgets to consume vertical drags appropriately
+  produces a pager that fights the parent scroll.
+- The inline surface is sized for browsing (a tile-shaped 360x480dp
+  slot). The zoom-to-scan use case wants the page to take the whole
+  screen; inline zoom against a small slot still leaves the barcode
+  smaller than the user wants even at `MAX_SCALE`.
+
+The pivot: inline `DocumentView` returns to a fixed 1x display. A
+dedicated full-screen detail surface in `passes-pdf-ui` hosts pinch-zoom
+and pan, entered from a "Tap for full screen" banner docked inside the
+inline `DocumentView`.
+
+This addendum records the resulting decisions and reconciles them with
+D4, D5, D7, and D8. Z.2, Z.3, and Z.5 from the prior addendum are
+retained verbatim; Z.1, Z.4, and Z.6 are replaced.
+
+### Z.7 Zoom lives in a full-screen detail surface only; inline `DocumentView` is fixed 1x
+
+The inline `DocumentView` carries no zoom, no pan, and no double-tap
+toggle. The pager-swipe gesture inside it is unchanged from the
+pre-`wpass-0nn` baseline: single-touch horizontal drag advances the
+pager, two-finger gestures are ignored by the surface, and the page is
+drawn at fit resolution into the slot the host gives it.
+
+Pinch-zoom (two-finger) and pan-when-zoomed (single-finger when
+`scale > 1`) live in a new full-screen detail surface in
+`passes-pdf-ui`. The surface is entered from a "Tap for full screen"
+banner docked at the bottom of the inline `DocumentView`, above the
+trust caption. The banner is themed via `DocumentSemantics`
+/ `DocumentTheme` — walt-android supplies the label string and the
+visual tokens; `passes-pdf-ui` ships the structural slot.
+
+The full-screen surface owns the same gesture-priority interlock the
+prior addendum specified, now inside its own root rather than inside an
+embedded pager:
+
+- Two-finger pinch always drives zoom.
+- Single-touch drag drives pan only when `scale > MIN_SCALE`. At fit,
+  single-touch horizontal drag advances the in-surface pager (if more
+  than one page) or is a no-op.
+- Translation is clamped so the scaled page cannot be panned entirely
+  off the slot.
+
+Zoom state is per-page and resets on page change inside the full-screen
+surface. Closing the full-screen surface and reopening it returns the
+page to fit — no cross-session zoom persistence. Exiting the surface
+(back gesture or close affordance) returns the user to the inline
+`DocumentView` in the document-detail screen.
+
+The implementation reuses the gesture surface from `wpass-1wq`,
+relocated to the full-screen composable per `wpass-ny4`. No duplicate
+gesture implementation exists across surfaces.
+
+### Z.8 Trust caption (D5) remains non-suppressible in full-screen and docks to a screen edge
+
+The trust caption ("User-provided document. Walt has not verified the
+source.") is rendered on the full-screen surface and is NOT subject to
+the zoom transform. It docks to a screen edge — concretely, an edge of
+the full-screen root, outside the pannable / zoomable page region — and
+stays visible regardless of pan position or zoom factor.
+
+This is the decisive choice between the two options the bead flagged:
+
+- (a) Caption docks to a screen edge and stays visible regardless of
+  pan/zoom. Adopted.
+- (b) Caption pans/zooms with the page and a duplicate docked
+  indicator stays visible. Rejected.
+
+Option (a) is adopted because D5's "non-suppressible" reads naturally
+as "the user can always see it." Option (b) would make the in-page
+caption suppressible by pan in practice, and adds a second copy that
+itself becomes a new audit surface for the trust signal. The cost of
+(a) is zero: caption never interferes with the gesture surface and
+vice versa. This is the same structural argument the prior addendum
+used for Z.4 in the inline case, now applied to the full-screen root.
+
+Inline `DocumentView` continues to render the trust caption in its
+existing layout slot above the pager (now with the full-screen banner
+between caption and pager region). Inline behaviour is unchanged
+from before `wpass-0nn`.
+
+### Z.9 Consumer-side integration is simpler than under `wpass-0nn`
+
+Because inline `DocumentView` no longer consumes single-touch drags at
+any zoom level, the nested-scroll interlock that `wpass-0nn`'s Z.6
+made the host responsible for goes away on the inline surface. The
+host embeds `DocumentView` inside a vertical scroll exactly as before
+the gesture work landed.
+
+The full-screen surface takes the whole screen and is outside any host
+scroll container, so the gesture surface there is self-contained by
+construction. No nested-gesture API is committed to `passes-pdf-ui` by
+this addendum.
+
+Cross-repo: walt-android `wlt-o72.4` covers the consumer-side wiring
+(launching the full-screen surface from `DocumentDetailScreen.kt`,
+back-navigation handling). The wiring is a navigation hop only, not a
+gesture contract.
+
+### Z.2, Z.3, Z.5 retained from the prior addendum
+
+The 4 MP per-bitmap cap (Z.2), the no-binder-widening guarantee (Z.3),
+and the no-share-out rule (Z.5) are unchanged. The sub-rect / viewport
+re-render path in `wpass-f4b` extends `render`'s parameter shape in
+place; it remains a single transaction. The full-screen surface
+consumes the same `PdfRendererBinder.render` call site shape that the
+inline surface used.
+
+### Tests pinning the addendum
+
+| Decision | Test                                                                                                  |
+|----------|-------------------------------------------------------------------------------------------------------|
+| Z.7      | Compose test: inline `DocumentView` does not respond to pinch gestures (regression after `wpass-ny4`).|
+| Z.7      | Compose test: tapping the full-screen banner inside `DocumentView` navigates to the full-screen surface. |
+| Z.7      | Compose test: the full-screen surface drives a zoom-aware re-render call on pinch (mock binder).      |
+| Z.8      | Compose test: trust caption is visible on the full-screen surface at fit, after zoom, and after pan.  |
+| Z.8      | Existing inline `DocumentTrustSurfaceTest` continues to pin caption visibility on the inline surface. |
+| Z.2      | existing `PdfRendererService.MAX_PIXELS` pin — value unchanged.                                       |
+| Z.3      | existing `PublicApiSurfaceTest` reflection check on `PdfRendererBinder` — still exactly two methods.  |
 | Z.5      | existing classpath-scan test for `Intent.ACTION_SEND` — surface unchanged.                            |
