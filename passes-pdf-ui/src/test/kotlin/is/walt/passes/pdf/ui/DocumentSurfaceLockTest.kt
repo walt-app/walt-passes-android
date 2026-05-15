@@ -33,15 +33,13 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun documentViewHasExactlyFiveUserVisibleParameters() {
-        // (doc, pdfFile, renderer, modifier, telemetry). D5: no flag to hide the trust
-        // caption, no flag to render anything from PDF metadata, no overflow into
-        // Share. The fifth slot is the wpass-8v4 telemetry guard with a NoOp default;
-        // bumping this count from 4 to 5 is the deliberate change for that issue, not
-        // a slip. Integration coverage of the failure-mapping path lives in
-        // `DocumentViewInstrumentedTest`; the JVM-pure mapping helper is covered by
-        // `ConsumerRenderFailureMappingTest`.
-        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 5)
+    fun documentViewHasExactlySixUserVisibleParameters() {
+        // (doc, pdfFile, renderer, modifier, telemetry, onOpenFullScreen). D5: still no
+        // flag to hide the trust caption. The sixth slot is the wpass-jil full-screen
+        // navigation callback with a `null` default — when null the banner is hidden,
+        // when non-null the banner appears and invokes the callback on tap. Bumping
+        // from 5 to 6 is the deliberate change for that issue, not a slip.
+        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 6)
     }
 
     @Test
@@ -67,6 +65,32 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
+    fun fullScreenDocumentViewHasExactlySixUserVisibleParameters() {
+        // (doc, pdfFile, renderer, onClose, modifier, telemetry). D5: trust caption is
+        // composed inside the surface; no parameter omits it. Required onClose forces
+        // the host to provide a back path — there is no "stuck in full-screen" state.
+        assertUserVisibleParamCount(
+            "FullScreenDocumentViewKt",
+            "FullScreenDocumentView",
+            expected = 6,
+        )
+    }
+
+    @Test
+    fun fullScreenDocumentViewConsumesPdfRendererBinderInterfaceNotConcreteClient() {
+        // Same contract as DocumentView: the full-screen surface takes the binder
+        // interface so test fakes inject cleanly.
+        val method = findComposable("FullScreenDocumentViewKt", "FullScreenDocumentView")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("FullScreenDocumentView must accept the PdfRendererBinder interface")
+            .that(typeNames)
+            .contains("PdfRendererBinder")
+        assertWithMessage("FullScreenDocumentView must NOT bind to the concrete PdfRendererClient")
+            .that(typeNames)
+            .doesNotContain("PdfRendererClient")
+    }
+
+    @Test
     fun documentSurfacesHaveNoOverloads() {
         // The trust-caption non-suppressibility rule extends to overloads: a future
         // contributor cannot quietly add `DocumentView(..., showCaption: Boolean)` as
@@ -77,6 +101,7 @@ class DocumentSurfaceLockTest {
             "DocumentTileKt" to "DocumentTile",
             "DocumentViewKt" to "DocumentView",
             "DocumentsLaneKt" to "DocumentsLane",
+            "FullScreenDocumentViewKt" to "FullScreenDocumentView",
         ).forEach { (file, name) ->
             val klass = Class.forName("is.walt.passes.pdf.ui.$file")
             val matches = klass.methods.filter { it.name == name || it.name.startsWith("$name-") }

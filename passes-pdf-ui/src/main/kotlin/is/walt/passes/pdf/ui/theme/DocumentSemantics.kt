@@ -44,4 +44,18 @@ public data class DocumentSemantics(
     public val laneBackground: ArgbColor,
     public val documentBadgeBackground: ArgbColor,
     public val documentBadgeForeground: ArgbColor,
+    // wpass-jil: the "Tap for full screen" banner inside DocumentView. Label text is
+    // sourced from the consumer so walt-android controls wording; the colour slots
+    // default to the existing badge tokens to keep the addition non-breaking.
+    //
+    // The String defaults below are soft — English placeholders so the surface still
+    // composes in tests / dev builds. Production hosts (walt-android et al.) are
+    // expected to override with localised copy through their `DocumentSemantics`
+    // construction. Defaults are NOT a contract.
+    public val fullScreenBannerLabel: String = "Tap for full screen",
+    public val fullScreenBannerBackground: ArgbColor = documentBadgeBackground,
+    public val fullScreenBannerForeground: ArgbColor = documentBadgeForeground,
+    // wpass-6ag review M1: close affordance on the full-screen surface is themed
+    // alongside the banner so every consumer-facing string flows through this contract.
+    public val closeFullScreenLabel: String = "Close",
 )
