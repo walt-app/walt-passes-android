@@ -9,12 +9,15 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.compose.ui.test.swipeLeft
@@ -230,6 +233,99 @@ class DocumentViewInstrumentedTest {
     }
 
     @Test
+    fun fullScreenBannerIsHiddenWhenNoCallbackIsProvided() {
+        // wpass-jil: the banner is opt-in. Hosts that do not provide an
+        // `onOpenFullScreen` callback see no banner; existing call sites stay
+        // unchanged after the addition.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                )
+            }
+        }
+        composeRule.onAllNodesWithText("Tap for full screen").assertCountEquals(0)
+    }
+
+    @Test
+    fun fullScreenBannerAppearsAndInvokesTheCallbackOnTap() {
+        // wpass-jil: tapping the banner is the only call site for the host's
+        // navigation hop into the full-screen surface.
+        val recorder = RecordingBinder()
+        var tapped = false
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                    onOpenFullScreen = { tapped = true },
+                )
+            }
+        }
+        composeRule.onNodeWithText("Tap for full screen").assertIsDisplayed()
+        composeRule.onNodeWithText("Tap for full screen").performClick()
+        assertThat(tapped).isTrue()
+    }
+
+    @Test
+    fun fullScreenSurfaceShowsTheTrustCaption() {
+        // wpass-jil / ADR 0005 Z.8: the trust caption is docked on the full-screen
+        // surface and visible at first composition. The bitmap-availability path is
+        // gated on a renderer round-trip so the assertion targets the caption only.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                FullScreenDocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                    onClose = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText(
+            "User-provided document. Walt has not verified the source.",
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun pinchOnFullScreenDrivesAZoomAwareRerenderCall() {
+        // wpass-jil + wpass-f4b: after the user pinches in the full-screen surface,
+        // the surface issues a renderer.render() call whose sourceRect is a SubRect of
+        // the page. Asserting "at least one render call used a SubRect" pins the
+        // integration without coupling to specific rect coordinates (which depend on
+        // pinch trajectory + slot size).
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                FullScreenDocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                    onClose = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 1").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Page 1 of 1").performTouchInput {
+            pinch(
+                start0 = center + Offset(-100f, 0f),
+                end0 = center + Offset(-300f, 0f),
+                start1 = center + Offset(100f, 0f),
+                end1 = center + Offset(300f, 0f),
+            )
+        }
+        composeRule.waitForIdle()
+        val sourceRects = recorder.sourceRects()
+        assertThat(sourceRects.any { it is RenderSourceRect.SubRect }).isTrue()
+    }
+
+    @Test
     fun trustCaptionDoesNotOverlapThePageWhenTheConsumerGivesAShortSlot() {
         // Regression for wpass-b6h: walt-android embeds DocumentView in a short slot —
         // sandwiched between a document title and a details section — not the full
@@ -297,6 +393,7 @@ class DocumentViewInstrumentedTest {
      */
     private class RecordingBinder : PdfRendererBinder {
         private val pages = CopyOnWriteArrayList<Int>()
+        private val rects = CopyOnWriteArrayList<RenderSourceRect>()
         private val allocations = AtomicInteger(0)
 
         override suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult =
@@ -310,6 +407,7 @@ class DocumentViewInstrumentedTest {
             sourceRect: RenderSourceRect,
         ): RenderResult {
             pages += page
+            rects += sourceRect
             allocations.incrementAndGet()
             val size = widthPx * heightPx * BYTES_PER_PIXEL
             val sm = SharedMemory.create("walt-test-render-$page-${allocations.get()}", size)
@@ -317,6 +415,8 @@ class DocumentViewInstrumentedTest {
         }
 
         fun renderedPages(): List<Int> = pages.toList()
+
+        fun sourceRects(): List<RenderSourceRect> = rects.toList()
     }
 
     private companion object {

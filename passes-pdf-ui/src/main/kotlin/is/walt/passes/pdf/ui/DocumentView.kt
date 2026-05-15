@@ -4,9 +4,14 @@ import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -83,12 +88,14 @@ import java.nio.ByteBuffer
  * composition.
  */
 @Composable
+@Suppress("LongParameterList")
 public fun DocumentView(
     doc: PdfDocument,
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    onOpenFullScreen: (() -> Unit)? = null,
 ) {
     val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) {
@@ -132,6 +139,36 @@ public fun DocumentView(
                 telemetry = telemetry,
             )
         }
+
+        // wpass-jil: full-screen banner. Only shown when the host supplies a navigation
+        // callback. Docked at the bottom of the page region, below the pager and above
+        // any other host chrome. The trust caption remains structurally above the pager
+        // in this Column, so the banner cannot push it off-screen.
+        if (onOpenFullScreen != null) {
+            FullScreenBanner(onClick = onOpenFullScreen)
+        }
+    }
+}
+
+// wpass-jil: docked banner inside DocumentView whose tap launches the full-screen
+// detail surface. Label and colours come from DocumentSemantics so the host owns the
+// wording and styling.
+@Composable
+private fun FullScreenBanner(onClick: () -> Unit) {
+    val semantics = LocalDocumentSemantics.current
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(semantics.fullScreenBannerBackground.toComposeColor())
+            .clickable(onClick = onClick)
+            .padding(PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = semantics.fullScreenBannerLabel,
+            style = MaterialTheme.typography.labelMedium,
+            color = semantics.fullScreenBannerForeground.toComposeColor(),
+        )
     }
 }
 

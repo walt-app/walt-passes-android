@@ -80,6 +80,7 @@ internal suspend fun doProbe(pdf: ParcelFileDescriptor, maxPages: Int): ProbeRes
         }
     }.getOrElse { t -> ProbeResult.Rejected(rejectedKindForOpenFailure(t)) }
 
+@Suppress("LongParameterList")
 internal suspend fun doRender(
     pdf: ParcelFileDescriptor,
     page: Int,

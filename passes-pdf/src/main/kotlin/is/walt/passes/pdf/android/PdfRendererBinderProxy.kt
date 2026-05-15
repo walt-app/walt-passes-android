@@ -52,6 +52,7 @@ internal class PdfRendererBinderProxy(
         return true
     }
 
+    @Suppress("ReturnCount")
     private fun handleRender(data: Parcel, reply: Parcel?): Boolean {
         val pfd = data.readTypedObject(ParcelFileDescriptor.CREATOR) ?: return false
         val page = data.readInt()
