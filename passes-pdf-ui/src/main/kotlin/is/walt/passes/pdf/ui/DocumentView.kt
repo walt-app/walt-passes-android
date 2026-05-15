@@ -34,9 +34,11 @@ import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
+import `is`.walt.passes.pdf.android.RenderSourceRect
 import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
 import `is`.walt.passes.pdf.ui.internal.decodePage
+import `is`.walt.passes.pdf.ui.internal.renderOrDiscard
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
 
@@ -121,14 +123,21 @@ public fun DocumentView(
         // tone the rasterised page sits on (showing through ContentScale.Fit letterbox
         // bars). The trust caption above sits on the consumer's background, reading as
         // host screen chrome.
-        HorizontalPager(
-            state = pagerState,
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .background(semantics.laneBackground.toComposeColor())
-                .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp)),
-        ) { page ->
+        //
+        // When the host wires `onOpenFullScreen`, a tap anywhere on the page region
+        // launches the full-screen surface — the banner below is a discoverability
+        // affordance, the page itself is the primary tap target. `.clickable` and
+        // the pager's drag handling coexist: Compose's gesture system routes quick
+        // press-and-release to the click handler and horizontal drag to the pager.
+        val pagerModifier = Modifier
+            .fillMaxWidth()
+            .weight(1f)
+            .background(semantics.laneBackground.toComposeColor())
+            .let {
+                if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
+            }
+            .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
+        HorizontalPager(state = pagerState, modifier = pagerModifier) { page ->
             DocumentPage(
                 document = doc,
                 pageIndex = page,
@@ -139,10 +148,12 @@ public fun DocumentView(
             )
         }
 
-        // wpass-jil: full-screen banner. Only shown when the host supplies a navigation
-        // callback. Docked at the bottom of the page region, below the pager and above
-        // any other host chrome. The trust caption remains structurally above the pager
-        // in this Column, so the banner cannot push it off-screen.
+        // wpass-jil: full-screen banner. Opt-in via `onOpenFullScreen` — hosts without
+        // a full-screen route render no banner, which is a legitimate configuration
+        // (the affordance is the page tap above). When wired, the banner is a docked
+        // discoverability hint below the pager, above any other host chrome. The trust
+        // caption sits above the pager in this Column so the banner cannot push it
+        // off-screen.
         if (onOpenFullScreen != null) {
             FullScreenBanner(onClick = onOpenFullScreen)
         }
@@ -199,7 +210,17 @@ private fun DocumentPage(
             rendered = cached.asImageBitmap()
             return@LaunchedEffect
         }
-        val result = renderer.render(pdfFile, pageIndex, requestWidthPx, requestHeightPx)
+        // wpass-6ag review N1: cancellation-safe so a page-swipe mid-render never
+        // orphans the result's SharedMemory.
+        val result = renderOrDiscard(
+            renderer = renderer,
+            pdf = pdfFile,
+            page = pageIndex,
+            widthPx = requestWidthPx,
+            heightPx = requestHeightPx,
+            sourceRect = RenderSourceRect.FullPage,
+            isStillWanted = { rendered == null },
+        )
         if (result is RenderResult.Ok) {
             // ADR 0005 D7: the renderer may downsize past the request; decodePage uses
             // the renderer's reported dimensions.
@@ -227,7 +248,10 @@ private fun DocumentPage(
 }
 
 // Render budget defaults. The renderer service caps the bitmap area independently
-// (ADR 0005 D7); these are the UI-side request size for the inline surface, picked to
-// look reasonable on phone-class displays. ContentScale.Fit handles the slot.
+// (ADR 0005 D7); these are the UI-side request size for the inline surface.
+// Unlike `FullScreenDocumentView` (which derives the request from the actual slot
+// via BoxWithConstraints), the inline surface is fixed 1x and ContentScale.Fit masks
+// any over/under-render — the BoxWithConstraints cost isn't worth it for a thumbnail-
+// sized slot.
 private const val TARGET_PAGE_WIDTH_DP: Int = 360
 private const val TARGET_PAGE_HEIGHT_DP: Int = 480

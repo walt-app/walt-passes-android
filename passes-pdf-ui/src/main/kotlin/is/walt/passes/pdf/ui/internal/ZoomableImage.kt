@@ -197,9 +197,10 @@ private fun pageRectInSlot(slotW: Float, slotH: Float, pageAspect: Float?): Page
     }
 }
 
-// Defaults match the original inline zoom surface (`wpass-1wq`). Hold MAX at 3f until
-// `wpass-f4b`'s sub-rect re-render is wired in by the full-screen surface; once that
-// lands the cap can move to 5f without producing pixelation past about 1.3-1.5x.
+// Sub-rect re-render lands the sharp-at-zoom property (`wpass-f4b`), so MAX_SCALE can
+// sit at 5f — the renderer rasterises the visible region at viewport resolution within
+// the unchanged 4 MP per-bitmap cap, so the user-perceived pixel density at 5x is the
+// same as at 1x rather than 5x-bilinear-smeared.
 internal const val DEFAULT_MIN_SCALE: Float = 1f
-internal const val DEFAULT_MAX_SCALE: Float = 3f
+internal const val DEFAULT_MAX_SCALE: Float = 5f
 internal const val DEFAULT_DOUBLE_TAP_SCALE: Float = 2f

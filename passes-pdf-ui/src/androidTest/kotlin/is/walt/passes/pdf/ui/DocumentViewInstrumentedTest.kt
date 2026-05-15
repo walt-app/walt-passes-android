@@ -253,8 +253,9 @@ class DocumentViewInstrumentedTest {
 
     @Test
     fun fullScreenBannerAppearsAndInvokesTheCallbackOnTap() {
-        // wpass-jil: tapping the banner is the only call site for the host's
-        // navigation hop into the full-screen surface.
+        // wpass-jil: tapping the banner is one of two call sites for the host's
+        // navigation hop into the full-screen surface (the other is a tap on the page
+        // itself; see tapOnInlinePageInvokesTheFullScreenCallback).
         val recorder = RecordingBinder()
         var tapped = false
         composeRule.setContent {
@@ -269,6 +270,30 @@ class DocumentViewInstrumentedTest {
         }
         composeRule.onNodeWithText("Tap for full screen").assertIsDisplayed()
         composeRule.onNodeWithText("Tap for full screen").performClick()
+        assertThat(tapped).isTrue()
+    }
+
+    @Test
+    fun tapOnInlinePageInvokesTheFullScreenCallback() {
+        // wpass-6ag follow-up: the rendered page is also a tap target. The banner is
+        // discoverability; the page is the primary affordance. Drag-to-swipe still
+        // works because Compose routes quick press-and-release to clickable and
+        // horizontal drag to the pager.
+        val recorder = RecordingBinder()
+        var tapped = false
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                    onOpenFullScreen = { tapped = true },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Page 1 of 1").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Page 1 of 1").performClick()
         assertThat(tapped).isTrue()
     }
 

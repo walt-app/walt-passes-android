@@ -3,13 +3,18 @@
 package `is`.walt.passes.pdf.ui.internal
 
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import `is`.walt.passes.pdf.ConsumerRenderFailure
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
+import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
+import `is`.walt.passes.pdf.android.RenderSourceRect
 import java.nio.BufferUnderflowException
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
 
 /**
  * Shared bitmap-reconstruction + cleanup helpers for `DocumentView` and
@@ -54,6 +59,37 @@ internal fun decodePage(
 internal fun discardRenderResult(result: RenderResult) {
     if (result is RenderResult.Ok) {
         runCatching { result.sharedMemory.close() }
+    }
+}
+
+/**
+ * Runs [PdfRendererBinder.render] inside [NonCancellable] so the constructed
+ * [RenderResult] is always returned to this function, even when the caller's coroutine
+ * is cancelled mid-render (`wpass-6ag` review N1). `binder.transact` is blocking and
+ * uninterruptible; wrapping it in [NonCancellable] lets the IO worker complete and
+ * yield the `Ok` to us, where we either return it for the caller to consume or close
+ * its SharedMemory via [discardRenderResult] when [isStillWanted] reports the result
+ * is stale (superseded by a newer request, or the calling page disposed). Returns
+ * `null` when the result was discarded.
+ */
+@Suppress("LongParameterList")
+internal suspend fun renderOrDiscard(
+    renderer: PdfRendererBinder,
+    pdf: ParcelFileDescriptor,
+    page: Int,
+    widthPx: Int,
+    heightPx: Int,
+    sourceRect: RenderSourceRect,
+    isStillWanted: () -> Boolean,
+): RenderResult? {
+    val result = withContext(NonCancellable) {
+        renderer.render(pdf, page, widthPx, heightPx, sourceRect)
+    }
+    return if (isStillWanted()) {
+        result
+    } else {
+        discardRenderResult(result)
+        null
     }
 }
 

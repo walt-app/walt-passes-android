@@ -36,7 +36,7 @@ import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
 import `is`.walt.passes.pdf.ui.internal.ZoomableImage
 import `is`.walt.passes.pdf.ui.internal.decodePage
-import `is`.walt.passes.pdf.ui.internal.discardRenderResult
+import `is`.walt.passes.pdf.ui.internal.renderOrDiscard
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
 
@@ -187,12 +187,16 @@ private fun FullScreenPage(
                 baseImage = cached.asImageBitmap()
             }
             if (baseImage != null && pageAspect != null) return@LaunchedEffect
-            val result = renderer.render(
+            // wpass-6ag review N1: NonCancellable around the binder transact so a
+            // page-swipe-mid-render does not orphan the result's SharedMemory.
+            val result = renderOrDiscard(
+                renderer = renderer,
                 pdf = pdfFile,
                 page = pageIndex,
                 widthPx = requestW,
                 heightPx = requestH,
                 sourceRect = RenderSourceRect.FullPage,
+                isStillWanted = { baseImage == null || pageAspect == null },
             )
             if (result is RenderResult.Ok) {
                 val decoded = decodePage(result, telemetry)
@@ -227,19 +231,19 @@ private fun FullScreenPage(
 
         LaunchedEffect(pendingRect, document.id, pageIndex, requestW, requestH) {
             val pending = pendingRect ?: return@LaunchedEffect
-            val result = renderer.render(
+            // wpass-6ag review N1: stale-or-cancelled results free their SharedMemory
+            // before we drop them. The NonCancellable inside renderOrDiscard guarantees
+            // we own the result even if a newer pinch (re-keying this LaunchedEffect)
+            // strikes while binder.transact is in flight.
+            val result = renderOrDiscard(
+                renderer = renderer,
                 pdf = pdfFile,
                 page = pageIndex,
                 widthPx = requestW,
                 heightPx = requestH,
                 sourceRect = pending,
-            )
-            // If a newer pinch arrived while the render was in flight, free this
-            // bitmap's SharedMemory and skip the swap (`wpass-6ag` review C2).
-            if (pendingRect !== pending) {
-                discardRenderResult(result)
-                return@LaunchedEffect
-            }
+                isStillWanted = { pendingRect === pending },
+            ) ?: return@LaunchedEffect
             if (result is RenderResult.Ok) {
                 val decoded = decodePage(result, telemetry)
                 if (decoded != null) {
