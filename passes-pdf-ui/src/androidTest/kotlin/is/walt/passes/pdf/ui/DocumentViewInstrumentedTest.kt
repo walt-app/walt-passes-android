@@ -15,7 +15,6 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
-import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pinch
 import androidx.compose.ui.test.swipeLeft
@@ -175,15 +174,11 @@ class DocumentViewInstrumentedTest {
     }
 
     @Test
-    fun pinchToZoomDoesNotAdvanceThePagerAndKeepsTheTrustCaptionVisible() {
-        // wpass-1wq: pinch-to-zoom is a two-finger gesture; HorizontalPager treats
-        // single-touch horizontal drags as page-swipes. The gesture-priority contract
-        // requires that pinch (multi-touch) be consumed by the page-scoped zoom surface
-        // and never advance the pager. The trust caption (D5 non-suppressible) sits in
-        // DocumentView's Column above the pager and must remain visible regardless of
-        // gesture state — the zoom surface is structurally inside the pager slot, so a
-        // failure here would mean the caption was wrongly nested under the zoom
-        // transform.
+    fun pinchOnTheInlineSurfaceDoesNotZoomAndKeepsTheTrustCaptionVisible() {
+        // wpass-ny4: inline DocumentView is fixed 1x after the design pivot. Pinch
+        // gestures must NOT scale the page (no zoom surface inline) and the trust
+        // caption must remain visible. The actual zoom surface lives on the full-screen
+        // detail view (wpass-jil), entered via the banner.
         val recorder = RecordingBinder()
         composeRule.setContent {
             ThemedHost {
@@ -214,74 +209,9 @@ class DocumentViewInstrumentedTest {
     }
 
     @Test
-    fun doubleTapOnThePageDoesNotAdvanceThePager() {
-        // wpass-1wq: double-tap toggles between fit and DOUBLE_TAP_SCALE. It must not
-        // bubble as a swipe-equivalent or otherwise change the pager position. Visible
-        // page index unchanged is the contract.
-        val recorder = RecordingBinder()
-        composeRule.setContent {
-            ThemedHost {
-                DocumentView(
-                    doc = doc(pageCount = 3),
-                    pdfFile = pipeRead,
-                    renderer = recorder,
-                )
-            }
-        }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Page 1 of 3").performTouchInput {
-            doubleClick()
-        }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
-    }
-
-    @Test
-    fun singleTouchHorizontalDragWhileZoomedDoesNotAdvanceThePager() {
-        // wpass-1wq: the load-bearing half of the `canPan = { scale > MIN_SCALE }`
-        // contract. A single-touch horizontal drag at fit scale advances the pager
-        // (pinned by singleTouchHorizontalDragAtFitScaleStillAdvancesThePager); the
-        // SAME gesture once the user is zoomed in must instead pan the page and leave
-        // the pager position untouched, or scanning a barcode becomes impossible the
-        // moment the user tries to drag inside the zoomed view. Removing canPan, or
-        // replacing it with `{ true }` / `{ false }`, would silently regress this
-        // direction without the existing three tests catching it.
-        val recorder = RecordingBinder()
-        composeRule.setContent {
-            ThemedHost {
-                DocumentView(
-                    doc = doc(pageCount = 3),
-                    pdfFile = pipeRead,
-                    renderer = recorder,
-                )
-            }
-        }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
-
-        // Pinch outward to enter scale > 1, then single-touch swipe-left in the same
-        // pager that the fit-scale test confirms WOULD advance.
-        composeRule.onNodeWithContentDescription("Page 1 of 3").performTouchInput {
-            pinch(
-                start0 = center + Offset(-100f, 0f),
-                end0 = center + Offset(-300f, 0f),
-                start1 = center + Offset(100f, 0f),
-                end1 = center + Offset(300f, 0f),
-            )
-        }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithContentDescription("Page 1 of 3").performTouchInput { swipeLeft() }
-        composeRule.waitForIdle()
-
-        composeRule.onNodeWithContentDescription("Page 1 of 3").assertIsDisplayed()
-    }
-
-    @Test
     fun singleTouchHorizontalDragAtFitScaleStillAdvancesThePager() {
-        // wpass-1wq: gesture priority at scale == 1 must defer to the pager. A
-        // single-touch horizontal drag from the fit state has to advance the pager
-        // exactly as it did before the zoom surface was added — otherwise the surface
-        // has accidentally swallowed swipe-to-page.
+        // wpass-ny4: with zoom removed inline, single-touch drag is always available
+        // to the pager. Regression for the pre-`wpass-1wq` swipe-to-page behaviour.
         val recorder = RecordingBinder()
         composeRule.setContent {
             ThemedHost {
