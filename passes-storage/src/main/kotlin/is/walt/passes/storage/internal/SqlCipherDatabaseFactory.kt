@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.Log
 import `is`.walt.passes.storage.DatabaseKey
+import `is`.walt.passes.storage.RetainedKeyBuffer
 import `is`.walt.passes.storage.Schema
 import `is`.walt.passes.storage.StorageError
 import `is`.walt.passes.storage.StorageResult
@@ -152,33 +153,40 @@ internal object SqlCipherDatabaseFactory {
         context.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     /**
-     * Hands the raw key to [SQLiteDatabase.openOrCreateDatabase] under [retainAcross], and
-     * routes any failure (including a throw from the postKey hook) through [openCorrupt].
-     * On the success path the caller owns the [OpenedDatabase] and is responsible for
-     * closing it.
+     * Hands the raw key to [opener] (defaults to [SQLiteDatabase.openOrCreateDatabase])
+     * from a private [RetainedKeyBuffer], and routes any failure (including a throw from
+     * the postKey hook) through [openCorrupt]. On the success path the caller owns the
+     * [OpenedDatabase] and is responsible for closing it.
+     *
+     * [opener] is an injection seam for tests: it lets a JVM unit test verify that the
+     * [RetainedKeyBuffer] is zeroed when the open call throws, without standing up a
+     * real SQLCipher database. The default just delegates to the static `SQLiteDatabase`
+     * entry point, so the production call site is unaffected.
      */
-    private fun openHandleWithKey(
+    internal fun openHandleWithKey(
         dbFile: File,
         databaseKey: DatabaseKey,
         isDebuggable: Boolean,
+        opener: (File, ByteArray, SQLiteDatabaseHook) -> SQLiteDatabase =
+            { f, k, hook -> SQLiteDatabase.openOrCreateDatabase(f, k, null, null, hook) },
     ): StorageResult<OpenedDatabase> {
-        var openedDb: SQLiteDatabase? = null
-        val keyHandle: AutoCloseable = try {
-            databaseKey.retainAcross { rawKey ->
-                openedDb = SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null, cipherCompatV4Hook)
-            }
+        val keyBuffer = databaseKey.copyForRetainedConsumer()
+        val openedDb: SQLiteDatabase = try {
+            opener(dbFile, keyBuffer.bytes, cipherCompatV4Hook)
         } catch (e: CancellationException) {
+            keyBuffer.close()
             throw e
         } catch (e: Exception) {
+            keyBuffer.close()
             return openCorrupt(e, isDebuggable)
         }
-        return StorageResult.Success(OpenedDatabase(openedDb!!, keyHandle))
+        return StorageResult.Success(OpenedDatabase(openedDb, keyBuffer))
     }
 
     /**
      * Failure path for openOrCreateDatabase itself (including throws from the postKey
-     * hook). No SQLiteDatabase or keyHandle exist yet to close - retainAcross zeros the
-     * key buffer eagerly when its block throws, so this path has no resources to release.
+     * hook). [openHandleWithKey] has already zeroed the [RetainedKeyBuffer] on the throw
+     * path, so this method has no resources to release.
      */
     private fun openCorrupt(
         cause: Exception,
@@ -277,12 +285,12 @@ internal object SqlCipherDatabaseFactory {
 
 /**
  * The result of [SqlCipherDatabaseFactory.openOrCreate]. Bundles the SQLCipher handle
- * with the [AutoCloseable] that zeros the raw-key buffer SQLCipher's connection pool
+ * with the [RetainedKeyBuffer] that backs the raw-key buffer SQLCipher's connection pool
  * holds by reference. The owner ([SqlCipherPassStore]) MUST close the SQLiteDatabase
  * first, then the keyHandle - reversing the order would zero the buffer while the
  * pool may still be re-keying connections.
  */
 internal data class OpenedDatabase(
     val db: SQLiteDatabase,
-    val keyHandle: AutoCloseable,
+    val keyHandle: RetainedKeyBuffer,
 )

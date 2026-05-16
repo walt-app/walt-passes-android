@@ -213,40 +213,96 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun databaseKeyRetainAcrossZerosBufferIfBlockThrows() {
+    fun copyForRetainedConsumerZerosTheMasterAndReturnsLiveCopy() {
         val raw = ByteArray(32) { (it + 1).toByte() }
         val key = DatabaseKey(raw)
-        val boom = RuntimeException("simulated openOrCreateDatabase failure")
+        val buffer = key.copyForRetainedConsumer()
+        // Master buffer is zeroed as soon as the copy is handed off: a subsequent
+        // withBytes / copyForRetainedConsumer call cannot re-hand the live key, which
+        // is the type-level half of the wpass-aio symptom prevention.
+        assertThat(raw.all { it.toInt() == 0 }).isTrue()
+        // The copy is the live key, alive until the buffer is closed - this is the
+        // SQLCipher connection-pool contract: the binding holds the password byte[]
+        // by reference and lazily re-keys pool connections from it.
+        buffer.use { buf ->
+            assertThat(buf.bytes.any { it.toInt() != 0 }).isTrue()
+            assertThat(buf.bytes.toList()).isEqualTo((1..32).map { it.toByte() })
+        }
+    }
+
+    @Test
+    fun retainedKeyBufferCloseZerosTheBytes() {
+        val raw = ByteArray(32) { (it + 1).toByte() }
+        val buffer = DatabaseKey(raw).copyForRetainedConsumer()
+        val internalBytes = buffer.bytes
+        assertThat(internalBytes.any { it.toInt() != 0 }).isTrue()
+        buffer.close()
+        assertThat(internalBytes.all { it.toInt() == 0 }).isTrue()
+    }
+
+    @Test
+    fun copyForRetainedConsumerThrowsOnSecondCall() {
+        // The footgun the refactor closes: re-handing an already-zeroed master to
+        // SQLCipher is the exact wpass-aio symptom. Surface loudly at the call site
+        // instead of silently producing a pool keyed with zeros.
+        val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
+        key.copyForRetainedConsumer().close()
+        val thrown = assertFails { key.copyForRetainedConsumer() }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+        assertThat(thrown).hasMessageThat().contains("already consumed")
+    }
+
+    @Test
+    fun copyForRetainedConsumerThrowsAfterWithBytes() {
+        val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
+        key.withBytes { /* consume */ }
+        val thrown = assertFails { key.copyForRetainedConsumer() }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun withBytesThrowsOnSecondCall() {
+        val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
+        key.withBytes { /* consume */ }
+        val thrown = assertFails { key.withBytes { error("should not run") } }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+        assertThat(thrown).hasMessageThat().contains("already consumed")
+    }
+
+    @Test
+    fun withBytesThrowsAfterCopyForRetainedConsumer() {
+        val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
+        key.copyForRetainedConsumer().close()
+        val thrown = assertFails { key.withBytes { error("should not run") } }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun consumedFlagFlipsBeforeBlock_soWithBytesIsSingleUseEvenIfBlockThrows() {
+        // Set-before-block semantics: a throwing consumer still claims the key, so a
+        // retry against the same DatabaseKey is rejected. The buffer is zeroed by the
+        // finally block on the throw path.
+        val raw = ByteArray(32) { (it + 1).toByte() }
+        val key = DatabaseKey(raw)
+        val boom = RuntimeException("simulated consumer failure")
         try {
-            key.retainAcross { throw boom }
+            key.withBytes { throw boom }
             error("expected the block's exception to propagate")
         } catch (caught: RuntimeException) {
             assertThat(caught).isSameInstanceAs(boom)
         }
-        // The handle was never returned, so the caller cannot close() it.
-        // retainAcross MUST zero on the throw path itself - otherwise a
-        // failing SQLCipher open would leave the raw key resident in heap.
         assertThat(raw.all { it.toInt() == 0 }).isTrue()
+        val retry = assertFails { key.withBytes { error("should not run") } }
+        assertThat(retry).isInstanceOf(IllegalStateException::class.java)
     }
 
-    @Test
-    fun databaseKeyRetainAcrossKeepsBytesAliveUntilHandleClosed() {
-        val raw = ByteArray(32) { (it + 1).toByte() }
-        val key = DatabaseKey(raw)
-        var captured: ByteArray? = null
-        val handle: AutoCloseable = key.retainAcross { borrowed ->
-            captured = borrowed
-            assertThat(borrowed.any { it.toInt() != 0 }).isTrue()
+    private inline fun assertFails(block: () -> Unit): Throwable {
+        try {
+            block()
+        } catch (t: Throwable) {
+            return t
         }
-        // Bytes still alive after the block returns - this is the wpass-aio contract:
-        // SQLCipher's connection pool keys lazily-opened pool connections from this
-        // same array reference, so it must outlive retainAcross's lambda.
-        assertThat(captured!!.any { it.toInt() != 0 }).isTrue()
-        assertThat(raw.any { it.toInt() != 0 }).isTrue()
-
-        handle.close()
-        assertThat(raw.all { it.toInt() == 0 }).isTrue()
-        assertThat(captured!!.all { it.toInt() == 0 }).isTrue()
+        error("expected the block to throw")
     }
 
     /**

@@ -15,6 +15,7 @@ import `is`.walt.passes.core.toKind
 import `is`.walt.passes.storage.MigrationFailureKind
 import `is`.walt.passes.storage.PassRecordId
 import `is`.walt.passes.storage.PassSummary
+import `is`.walt.passes.storage.RetainedKeyBuffer
 import `is`.walt.passes.storage.Schema
 import `is`.walt.passes.storage.StorageTelemetryGuard
 import `is`.walt.passes.storage.StoredPass
@@ -33,7 +34,7 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase
  */
 internal class SqlCipherPassStore(
     private val db: SQLiteDatabase,
-    private val keyHandle: AutoCloseable,
+    private val keyHandle: RetainedKeyBuffer,
     private val telemetryGuard: StorageTelemetryGuard,
 ) : PassStore {
 
