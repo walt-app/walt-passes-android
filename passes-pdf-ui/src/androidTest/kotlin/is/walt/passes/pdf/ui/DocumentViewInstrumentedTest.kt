@@ -31,7 +31,7 @@ import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.ProbeResult
 import `is`.walt.passes.pdf.android.RenderResult
 import `is`.walt.passes.pdf.android.RenderSourceRect
-import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
+import `is`.walt.passes.pdf.ui.DEFAULT_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.theme.DocumentSemantics
 import `is`.walt.passes.pdf.ui.theme.DocumentTheme
 import `is`.walt.passes.ui.core.ArgbColor
@@ -141,12 +141,12 @@ class DocumentViewInstrumentedTest {
             }
         }
         composeRule.waitForIdle()
-        repeat(LRU_PAGE_WINDOW + 2) {
+        repeat(DEFAULT_PAGE_WINDOW + 2) {
             composeRule.onRoot().performTouchInput { swipeLeft() }
             composeRule.waitForIdle()
         }
         val distinct = recorder.renderedPages().distinct()
-        assertThat(distinct.size).isAtLeast(LRU_PAGE_WINDOW + 1)
+        assertThat(distinct.size).isAtLeast(DEFAULT_PAGE_WINDOW + 1)
     }
 
     @Test

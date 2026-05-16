@@ -27,7 +27,6 @@ import androidx.compose.ui.unit.dp
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
-import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
 
@@ -88,7 +87,7 @@ public fun DocumentView(
     onOpenFullScreen: (() -> Unit)? = null,
 ) {
     val semantics = LocalDocumentSemantics.current
-    val cache = remember(doc.id) { PdfThumbnailCache(maxSize = LRU_PAGE_WINDOW) }
+    val cache = remember(doc.id) { PdfThumbnailCache() }
     DisposableEffect(doc.id) {
         onDispose { cache.clear() }
     }
@@ -194,10 +193,14 @@ private fun DocumentPage(
 
     // The page fills the slot the pager hands it (the pager's `weight(1f)` share of
     // DocumentView's Column) and lets ContentScale.Fit letterbox the bitmap inside it.
-    // Fixed 1x — zoom lives in the full-screen surface (wpass-ny4 / wpass-jil).
-    (state as? PdfThumbnailState.Rendered)?.let { rendered ->
-        Image(
-            bitmap = rendered.image,
+    // Fixed 1x — zoom lives in the full-screen surface (wpass-ny4 / wpass-jil). The
+    // Loading and Failed arms render nothing in the inline surface; the pager itself
+    // is the placeholder. A future affordance for either belongs on `DocumentTile`,
+    // not here.
+    when (state) {
+        is PdfThumbnailState.Loading, is PdfThumbnailState.Failed -> Unit
+        is PdfThumbnailState.Rendered -> Image(
+            bitmap = state.image,
             // ADR 0005 D4 forbids extracting text from the PDF; positional caption
             // is the only safe TalkBack fallback.
             contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",

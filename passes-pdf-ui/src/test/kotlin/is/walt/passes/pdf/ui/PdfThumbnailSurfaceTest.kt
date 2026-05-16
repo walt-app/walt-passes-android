@@ -89,24 +89,22 @@ class PdfThumbnailSurfaceTest {
     }
 
     @Test
-    fun pdfThumbnailCachePublicSurfaceIsConstructorClearAndSize() {
+    fun pdfThumbnailCachePublicSurfaceIsConstructorAndClear() {
         // The cache is a thin RAM-bound LRU. Adding a `peek`, `entries`, `keys`, or
         // `toMap` method would let a consumer extract page bitmaps out of band of the
         // composable that owns them — an ownership-laundering surface that should not
-        // exist on this type.
+        // exist on this type. Kotlin `internal` members are JVM-public with a mangled
+        // `name$module` suffix; filter them out — they're inaccessible from Kotlin
+        // consumers outside the module by Kotlin's visibility rules.
         val klass = Class.forName("is.walt.passes.pdf.ui.PdfThumbnailCache")
         val declared = klass.declaredMethods
             .filter { JvmModifier.isPublic(it.modifiers) && !it.isSynthetic }
-            // Kotlin `internal` members are JVM-public with a mangled `name$module`
-            // suffix. They are not part of the Kotlin public surface, so filter them
-            // out of the lock — they're already inaccessible from Kotlin consumers
-            // outside the module.
             .filterNot { it.name.contains('$') }
             .map { it.name }
             .toSet()
         assertWithMessage("PdfThumbnailCache public method surface drifted")
             .that(declared)
-            .containsExactly("clear", "getSize")
+            .containsExactly("clear")
     }
 
     @Test
@@ -141,14 +139,20 @@ class PdfThumbnailSurfaceTest {
 
     private fun findTopLevel(fileClassSimpleName: String, methodName: String): Method {
         val klass = Class.forName("is.walt.passes.pdf.ui.$fileClassSimpleName")
-        return klass.methods
-            .filter { it.name == methodName || it.name.startsWith("$methodName-") }
-            .maxByOrNull { it.parameterCount }
-            ?: error("$fileClassSimpleName.$methodName not found")
+        val matches = klass.methods.filter {
+            it.name == methodName || it.name.startsWith("$methodName-")
+        }
+        assertWithMessage(
+            "Expected exactly one $fileClassSimpleName.$methodName method; a surprise " +
+                "overload should fail loudly so the surface lock catches the addition.",
+        ).that(matches).hasSize(1)
+        return matches.single()
     }
 
+    // Compose-compiler-dependent: synthetic `Composer` + `int $changed` trailing
+    // parameters are stripped. The exact mangling is an implementation detail of the
+    // current Compose compiler; if it changes, this helper needs to follow.
     private fun userVisibleParameterCount(method: Method): Int {
-        // Compose appends `Composer $composer` and `int $changed` (and `int $changed1`).
         val params = method.parameterTypes
         var count = params.size
         var i = params.lastIndex

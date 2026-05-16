@@ -32,7 +32,6 @@ import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
 import `is`.walt.passes.pdf.android.RenderSourceRect
-import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
 import `is`.walt.passes.pdf.ui.internal.ZoomableImage
 import `is`.walt.passes.pdf.ui.internal.decodePage
 import `is`.walt.passes.pdf.ui.internal.renderOrDiscard
@@ -72,7 +71,7 @@ public fun FullScreenDocumentView(
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
 ) {
     val semantics = LocalDocumentSemantics.current
-    val cache = remember(doc.id) { PdfThumbnailCache(maxSize = LRU_PAGE_WINDOW) }
+    val cache = remember(doc.id) { PdfThumbnailCache() }
     DisposableEffect(doc.id) {
         onDispose { cache.clear() }
     }
@@ -167,7 +166,13 @@ private fun FullScreenPage(
             telemetry = telemetry,
             cache = cache,
         )
-        val baseRendered = baseState as? PdfThumbnailState.Rendered
+        // Loading and Failed render nothing; the zoom path requires the base bitmap
+        // and aspect to exist before it can compose the overlay. Both arms map to
+        // "no base image yet."
+        val baseRendered = when (baseState) {
+            is PdfThumbnailState.Loading, is PdfThumbnailState.Failed -> null
+            is PdfThumbnailState.Rendered -> baseState
+        }
 
         var zoomedReplacement by remember(document.id, pageIndex) {
             mutableStateOf<ImageBitmap?>(null)
