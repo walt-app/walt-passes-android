@@ -100,8 +100,3 @@ internal fun consumerRenderFailureFor(t: Throwable): ConsumerRenderFailure = whe
     else -> ConsumerRenderFailure.Other
 }
 
-// HorizontalPager retains composed Image references for adjacent pages during a swipe
-// transition; "current ± 2" gives the access-ordered LRU room so an evicted bitmap is
-// never the one the pager is still painting (recycling a bitmap whose Image is on
-// screen crashes the draw pass; see PR review C2 on the original wpass-1wq landing).
-internal const val LRU_PAGE_WINDOW: Int = 5
