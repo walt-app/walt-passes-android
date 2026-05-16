@@ -33,7 +33,12 @@ public interface PassKeyProvider {
  * Wrapper around the raw 32-byte database key. Exists to make accidental logging
  * discouragingly verbose: the class deliberately overrides `toString()` to a redacted
  * form, and exposes byte access only via [withBytes] (synchronous borrow) or
- * [retainAcross] (lifetime-tied borrow).
+ * [copyForRetainedConsumer] (lifetime-tied handoff).
+ *
+ * Both access methods consume the master buffer: [withBytes] zeros after the block
+ * returns, [copyForRetainedConsumer] zeros after copying. A second call after either
+ * returns an all-zero buffer, so a future caller cannot accidentally hand zeros to
+ * SQLCipher by mixing the two (the wpass-aio symptom class).
  */
 public class DatabaseKey(private val bytes: ByteArray) {
     init {
@@ -53,33 +58,37 @@ public class DatabaseKey(private val bytes: ByteArray) {
     }
 
     /**
-     * Hands the raw key bytes to [block] for capture by a long-lived consumer that
-     * retains the [ByteArray] reference past the synchronous call. Returns an
-     * [AutoCloseable] that zeros the buffer when closed; the caller MUST close it
-     * once the consumer no longer needs the bytes.
+     * Returns a fresh [RetainedKeyBuffer] holding a private copy of the key bytes, then
+     * zeros this [DatabaseKey]'s internal buffer. Callers MUST [RetainedKeyBuffer.close]
+     * the result once the long-lived consumer no longer needs the bytes.
      *
-     * Required by `net.zetetic.database.sqlcipher`: `SQLiteDatabaseConfiguration`
-     * holds the password byte[] by reference (no copy), and `SQLiteConnection.open()`
-     * re-reads `mConfiguration.password` on every pool connection it opens, including
-     * read-only connections opened lazily on first cursor read. Zeroing the buffer
-     * before the connection pool is done with it re-keys new pool connections with
-     * all zeros, surfacing as `SQLiteOutOfMemoryException` from page-1 decrypt.
+     * Required by `net.zetetic.database.sqlcipher`: `SQLiteDatabaseConfiguration` holds
+     * the password byte[] by reference (no copy), and `SQLiteConnection.open()` re-reads
+     * `mConfiguration.password` on every pool connection it opens, including read-only
+     * connections opened lazily on first cursor read. Zeroing the buffer before the
+     * connection pool is done with it re-keys new pool connections with all zeros,
+     * surfacing as `SQLiteOutOfMemoryException` from page-1 decrypt (wpass-aio).
      */
-    public fun retainAcross(block: (ByteArray) -> Unit): AutoCloseable {
-        try {
-            block(bytes)
-        } catch (t: Throwable) {
-            // If the consumer throws before it has captured the buffer, the
-            // returned handle is never built and the caller cannot close it.
-            // Zero eagerly so a throwing openOrCreateDatabase (corrupt header,
-            // IO failure, JNI mismatch) does not leave the raw key resident.
-            bytes.fill(0)
-            throw t
-        }
-        return AutoCloseable { bytes.fill(0) }
+    public fun copyForRetainedConsumer(): RetainedKeyBuffer {
+        val copy = bytes.copyOf()
+        bytes.fill(0)
+        return RetainedKeyBuffer(copy)
     }
 
     override fun toString(): String = "DatabaseKey(redacted)"
+}
+
+/**
+ * A private 32-byte buffer handed off to a long-lived native consumer (SQLCipher's
+ * connection pool). The constructor is internal so the only construction path is
+ * [DatabaseKey.copyForRetainedConsumer]; [bytes] is internal so only same-module
+ * callers (the SQLCipher binding wrapper) can hand it to the native pool. [close]
+ * zeros the buffer; callers MUST close it once the consumer is done with it.
+ */
+public class RetainedKeyBuffer internal constructor(internal val bytes: ByteArray) : AutoCloseable {
+    override fun close() {
+        bytes.fill(0)
+    }
 }
 
 /**

@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.pm.ApplicationInfo
 import android.util.Log
 import `is`.walt.passes.storage.DatabaseKey
+import `is`.walt.passes.storage.RetainedKeyBuffer
 import `is`.walt.passes.storage.Schema
 import `is`.walt.passes.storage.StorageError
 import `is`.walt.passes.storage.StorageResult
@@ -152,33 +153,33 @@ internal object SqlCipherDatabaseFactory {
         context.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     /**
-     * Hands the raw key to [SQLiteDatabase.openOrCreateDatabase] under [retainAcross], and
-     * routes any failure (including a throw from the postKey hook) through [openCorrupt].
-     * On the success path the caller owns the [OpenedDatabase] and is responsible for
-     * closing it.
+     * Hands the raw key to [SQLiteDatabase.openOrCreateDatabase] from a private
+     * [RetainedKeyBuffer], and routes any failure (including a throw from the postKey
+     * hook) through [openCorrupt]. On the success path the caller owns the
+     * [OpenedDatabase] and is responsible for closing it.
      */
     private fun openHandleWithKey(
         dbFile: File,
         databaseKey: DatabaseKey,
         isDebuggable: Boolean,
     ): StorageResult<OpenedDatabase> {
-        var openedDb: SQLiteDatabase? = null
-        val keyHandle: AutoCloseable = try {
-            databaseKey.retainAcross { rawKey ->
-                openedDb = SQLiteDatabase.openOrCreateDatabase(dbFile, rawKey, null, null, cipherCompatV4Hook)
-            }
+        val keyBuffer = databaseKey.copyForRetainedConsumer()
+        val openedDb: SQLiteDatabase = try {
+            SQLiteDatabase.openOrCreateDatabase(dbFile, keyBuffer.bytes, null, null, cipherCompatV4Hook)
         } catch (e: CancellationException) {
+            keyBuffer.close()
             throw e
         } catch (e: Exception) {
+            keyBuffer.close()
             return openCorrupt(e, isDebuggable)
         }
-        return StorageResult.Success(OpenedDatabase(openedDb!!, keyHandle))
+        return StorageResult.Success(OpenedDatabase(openedDb, keyBuffer))
     }
 
     /**
      * Failure path for openOrCreateDatabase itself (including throws from the postKey
-     * hook). No SQLiteDatabase or keyHandle exist yet to close - retainAcross zeros the
-     * key buffer eagerly when its block throws, so this path has no resources to release.
+     * hook). [openHandleWithKey] has already zeroed the [RetainedKeyBuffer] on the throw
+     * path, so this method has no resources to release.
      */
     private fun openCorrupt(
         cause: Exception,
