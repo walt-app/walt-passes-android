@@ -52,6 +52,8 @@ Every extraction codepath is an attack surface (`Launch`/`URI`/`SubmitForm` acti
 
 The renderer service's binder API exposes exactly two methods, `probe(fd)` and `render(fd, page, w, h)`. Adding any extraction method (`getText`, `getMetadata`, `getAnnotations`) is a security-policy change requiring an ADR amendment.
 
+The `passes-pdf-ui` module exposes a Compose-level facade, `rememberPdfThumbnail(...) -> PdfThumbnailState` (with sibling `PdfThumbnailCache`), so consumers that need an asynchronously-rendered page bitmap in a list row do not have to reach for the binder primitives directly. The facade preserves D3 — it does not bind its own service connection, it consumes a [PdfRendererBinder] supplied by the caller — and preserves D4 — its body invokes only `render(...)` and its return type [PdfThumbnailState] exposes a single `ImageBitmap` + aspect float (no metadata accessor, no annotation list, no field through which a future contributor could quietly thread an extraction surface). `PdfThumbnailSurfaceTest` reflection-locks the arm list, the per-arm field shape, and the absence of any `getText` / `getMetadata` / `getAnnotations` / `getAttachments` accessor on every public symbol the facade introduces. Adding a fourth arm to [PdfThumbnailState] or a non-trivial accessor to [PdfThumbnailCache] is a security-policy change in the same audit register as adding a binder method.
+
 ### D5. PDF digital signatures are not verified
 
 Walt does not parse `/AcroForm/SigFlags`, does not validate PAdES/CMS signatures, does not surface a "signed" indicator.

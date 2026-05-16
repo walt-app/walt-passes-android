@@ -24,8 +24,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfDocument
@@ -33,7 +33,6 @@ import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.RenderResult
 import `is`.walt.passes.pdf.android.RenderSourceRect
 import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
-import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
 import `is`.walt.passes.pdf.ui.internal.ZoomableImage
 import `is`.walt.passes.pdf.ui.internal.decodePage
 import `is`.walt.passes.pdf.ui.internal.renderOrDiscard
@@ -73,12 +72,7 @@ public fun FullScreenDocumentView(
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
 ) {
     val semantics = LocalDocumentSemantics.current
-    val cache = remember(doc.id) {
-        RenderedPageCache<Bitmap>(
-            maxSize = LRU_PAGE_WINDOW,
-            onEvict = { bitmap -> if (!bitmap.isRecycled) bitmap.recycle() },
-        )
-    }
+    val cache = remember(doc.id) { PdfThumbnailCache(maxSize = LRU_PAGE_WINDOW) }
     DisposableEffect(doc.id) {
         onDispose { cache.clear() }
     }
@@ -145,7 +139,7 @@ private fun FullScreenPage(
     pageIndex: Int,
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
-    cache: RenderedPageCache<Bitmap>,
+    cache: PdfThumbnailCache,
     telemetry: DocumentTelemetryGuard,
 ) {
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -159,10 +153,22 @@ private fun FullScreenPage(
             clampToMaxPixels(rawW, rawH, MAX_REQUEST_PIXELS)
         }
 
-        var baseImage by remember(document.id, pageIndex) {
-            mutableStateOf<ImageBitmap?>(cache.get(document.id, pageIndex)?.asImageBitmap())
-        }
-        var pageAspect by remember(document.id, pageIndex) { mutableStateOf<Float?>(null) }
+        // Base page rendering goes through the shared public facade so the
+        // NonCancellable transact, SharedMemory cleanup, and LRU eviction live in
+        // exactly one place. The sub-rect zoom path below stays manual: sub-rects
+        // are not cache-keyed (would explode the key space; stale entries surface as
+        // sharper-but-wrong regions after a pan) and need bespoke overlay lifetime.
+        val baseState = rememberPdfThumbnail(
+            document = document,
+            pdfFile = pdfFile,
+            renderer = renderer,
+            targetSizePx = IntSize(requestW, requestH),
+            page = pageIndex,
+            telemetry = telemetry,
+            cache = cache,
+        )
+        val baseRendered = baseState as? PdfThumbnailState.Rendered
+
         var zoomedReplacement by remember(document.id, pageIndex) {
             mutableStateOf<ImageBitmap?>(null)
         }
@@ -181,41 +187,14 @@ private fun FullScreenPage(
             }
         }
 
-        LaunchedEffect(document.id, pageIndex, requestW, requestH) {
-            val cached = cache.get(document.id, pageIndex)
-            if (cached != null && !cached.isRecycled && baseImage == null) {
-                baseImage = cached.asImageBitmap()
-            }
-            if (baseImage != null && pageAspect != null) return@LaunchedEffect
-            // wpass-6ag review N1: NonCancellable around the binder transact so a
-            // page-swipe-mid-render does not orphan the result's SharedMemory.
-            val result = renderOrDiscard(
-                renderer = renderer,
-                pdf = pdfFile,
-                page = pageIndex,
-                widthPx = requestW,
-                heightPx = requestH,
-                sourceRect = RenderSourceRect.FullPage,
-                isStillWanted = { baseImage == null || pageAspect == null },
-            )
-            if (result is RenderResult.Ok) {
-                val decoded = decodePage(result, telemetry)
-                if (decoded != null) {
-                    cache.put(document.id, pageIndex, decoded.bitmap)
-                    baseImage = decoded.image
-                    pageAspect = decoded.pageAspect
-                }
-            }
-        }
-
-        baseImage?.let { bitmap ->
+        baseRendered?.let { rendered ->
             ZoomableImage(
-                bitmap = bitmap,
+                bitmap = rendered.image,
                 // ADR 0005 D4 forbids extracting text; the positional caption is the
                 // only safe TalkBack fallback.
                 contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
                 modifier = Modifier.fillMaxSize(),
-                pageAspect = pageAspect,
+                pageAspect = rendered.pageAspect,
                 zoomedReplacement = zoomedReplacement,
                 // wpass-6ag review M3: edge-triggered. New gesture clears the prior
                 // sub-rect bitmap and frees its native memory so the next pinch starts

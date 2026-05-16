@@ -1,44 +1,33 @@
 package `is`.walt.passes.pdf.ui
 
-import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.ui.Alignment
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.ImageBitmap
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
-import `is`.walt.passes.pdf.android.RenderResult
-import `is`.walt.passes.pdf.android.RenderSourceRect
 import `is`.walt.passes.pdf.ui.internal.LRU_PAGE_WINDOW
-import `is`.walt.passes.pdf.ui.internal.RenderedPageCache
-import `is`.walt.passes.pdf.ui.internal.decodePage
-import `is`.walt.passes.pdf.ui.internal.renderOrDiscard
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
 
@@ -99,14 +88,7 @@ public fun DocumentView(
     onOpenFullScreen: (() -> Unit)? = null,
 ) {
     val semantics = LocalDocumentSemantics.current
-    val cache = remember(doc.id) {
-        RenderedPageCache<Bitmap>(
-            maxSize = LRU_PAGE_WINDOW,
-            onEvict = { bitmap ->
-                if (!bitmap.isRecycled) bitmap.recycle()
-            },
-        )
-    }
+    val cache = remember(doc.id) { PdfThumbnailCache(maxSize = LRU_PAGE_WINDOW) }
     DisposableEffect(doc.id) {
         onDispose { cache.clear() }
     }
@@ -189,14 +171,10 @@ private fun DocumentPage(
     pageIndex: Int,
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
-    cache: RenderedPageCache<Bitmap>,
+    cache: PdfThumbnailCache,
     telemetry: DocumentTelemetryGuard,
 ) {
     val density = LocalDensity.current
-    var rendered by remember(document.id, pageIndex) {
-        mutableStateOf<ImageBitmap?>(cache.get(document.id, pageIndex)?.asImageBitmap())
-    }
-
     val requestWidthPx = with(density) {
         TARGET_PAGE_WIDTH_DP.dp.toPx().toInt().coerceAtLeast(1)
     }
@@ -204,40 +182,22 @@ private fun DocumentPage(
         TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1)
     }
 
-    LaunchedEffect(document.id, pageIndex, requestWidthPx, requestHeightPx) {
-        val cached = cache.get(document.id, pageIndex)
-        if (cached != null && !cached.isRecycled) {
-            rendered = cached.asImageBitmap()
-            return@LaunchedEffect
-        }
-        // wpass-6ag review N1: cancellation-safe so a page-swipe mid-render never
-        // orphans the result's SharedMemory.
-        val result = renderOrDiscard(
-            renderer = renderer,
-            pdf = pdfFile,
-            page = pageIndex,
-            widthPx = requestWidthPx,
-            heightPx = requestHeightPx,
-            sourceRect = RenderSourceRect.FullPage,
-            isStillWanted = { rendered == null },
-        )
-        if (result is RenderResult.Ok) {
-            // ADR 0005 D7: the renderer may downsize past the request; decodePage uses
-            // the renderer's reported dimensions.
-            val decoded = decodePage(result, telemetry)
-            if (decoded != null) {
-                cache.put(document.id, pageIndex, decoded.bitmap)
-                rendered = decoded.image
-            }
-        }
-    }
+    val state = rememberPdfThumbnail(
+        document = document,
+        pdfFile = pdfFile,
+        renderer = renderer,
+        targetSizePx = IntSize(requestWidthPx, requestHeightPx),
+        page = pageIndex,
+        telemetry = telemetry,
+        cache = cache,
+    )
 
     // The page fills the slot the pager hands it (the pager's `weight(1f)` share of
     // DocumentView's Column) and lets ContentScale.Fit letterbox the bitmap inside it.
     // Fixed 1x — zoom lives in the full-screen surface (wpass-ny4 / wpass-jil).
-    rendered?.let { bitmap ->
+    (state as? PdfThumbnailState.Rendered)?.let { rendered ->
         Image(
-            bitmap = bitmap,
+            bitmap = rendered.image,
             // ADR 0005 D4 forbids extracting text from the PDF; positional caption
             // is the only safe TalkBack fallback.
             contentDescription = "Page ${pageIndex + 1} of ${document.pageCount}",
