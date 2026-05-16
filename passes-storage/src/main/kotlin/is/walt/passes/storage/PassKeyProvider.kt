@@ -35,21 +35,28 @@ public interface PassKeyProvider {
  * form, and exposes byte access only via [withBytes] (synchronous borrow) or
  * [copyForRetainedConsumer] (lifetime-tied handoff).
  *
- * Both access methods consume the master buffer: [withBytes] zeros after the block
- * returns, [copyForRetainedConsumer] zeros after copying. A second call after either
- * returns an all-zero buffer, so a future caller cannot accidentally hand zeros to
- * SQLCipher by mixing the two (the wpass-aio symptom class).
+ * Each [DatabaseKey] is single-use: the first call to either access method consumes
+ * it, and any subsequent call throws [IllegalStateException]. Silently re-handing an
+ * already-zeroed master to SQLCipher is the exact wpass-aio symptom class
+ * (page-1 decrypt with all-zero key surfaces as `SQLiteOutOfMemoryException`), so the
+ * second hand-off must surface loudly at the call site, not as opaque corruption.
+ * Single-threaded by construction; callers must not consume from multiple threads.
  */
 public class DatabaseKey(private val bytes: ByteArray) {
+    private var consumed: Boolean = false
+
     init {
         require(bytes.size == 32) { "DatabaseKey must be exactly 32 bytes" }
     }
 
     /**
      * Hands the raw key bytes to [block] and zeros the internal buffer when [block]
-     * returns. Callers MUST NOT retain the [ByteArray] beyond the block.
+     * returns. Callers MUST NOT retain the [ByteArray] beyond the block. Throws
+     * [IllegalStateException] if this [DatabaseKey] has already been consumed.
      */
     public fun <R> withBytes(block: (ByteArray) -> R): R {
+        check(!consumed) { "DatabaseKey already consumed" }
+        consumed = true
         try {
             return block(bytes)
         } finally {
@@ -60,7 +67,8 @@ public class DatabaseKey(private val bytes: ByteArray) {
     /**
      * Returns a fresh [RetainedKeyBuffer] holding a private copy of the key bytes, then
      * zeros this [DatabaseKey]'s internal buffer. Callers MUST [RetainedKeyBuffer.close]
-     * the result once the long-lived consumer no longer needs the bytes.
+     * the result once the long-lived consumer no longer needs the bytes. Throws
+     * [IllegalStateException] if this [DatabaseKey] has already been consumed.
      *
      * Required by `net.zetetic.database.sqlcipher`: `SQLiteDatabaseConfiguration` holds
      * the password byte[] by reference (no copy), and `SQLiteConnection.open()` re-reads
@@ -70,6 +78,8 @@ public class DatabaseKey(private val bytes: ByteArray) {
      * surfacing as `SQLiteOutOfMemoryException` from page-1 decrypt (wpass-aio).
      */
     public fun copyForRetainedConsumer(): RetainedKeyBuffer {
+        check(!consumed) { "DatabaseKey already consumed" }
+        consumed = true
         val copy = bytes.copyOf()
         bytes.fill(0)
         return RetainedKeyBuffer(copy)

@@ -241,26 +241,68 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun copyForRetainedConsumerCalledTwiceReturnsZeroedSecondBuffer() {
-        // The footgun the refactor closes: a future caller cannot accidentally hand
-        // SQLCipher all zeros by routing through the same DatabaseKey twice, because
-        // the master is zeroed on the first hand-off. The second copy is harmless.
+    fun copyForRetainedConsumerThrowsOnSecondCall() {
+        // The footgun the refactor closes: re-handing an already-zeroed master to
+        // SQLCipher is the exact wpass-aio symptom. Surface loudly at the call site
+        // instead of silently producing a pool keyed with zeros.
         val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
         key.copyForRetainedConsumer().close()
-        key.copyForRetainedConsumer().use { second ->
-            assertThat(second.bytes.all { it.toInt() == 0 }).isTrue()
-        }
+        val thrown = assertFails { key.copyForRetainedConsumer() }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+        assertThat(thrown).hasMessageThat().contains("already consumed")
     }
 
     @Test
-    fun withBytesAfterCopyForRetainedConsumerHandsOverZeros() {
-        // Same footgun, mixed-method variant: withBytes after copyForRetainedConsumer
-        // sees the already-zeroed master.
+    fun copyForRetainedConsumerThrowsAfterWithBytes() {
+        val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
+        key.withBytes { /* consume */ }
+        val thrown = assertFails { key.copyForRetainedConsumer() }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun withBytesThrowsOnSecondCall() {
+        val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
+        key.withBytes { /* consume */ }
+        val thrown = assertFails { key.withBytes { error("should not run") } }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+        assertThat(thrown).hasMessageThat().contains("already consumed")
+    }
+
+    @Test
+    fun withBytesThrowsAfterCopyForRetainedConsumer() {
         val key = DatabaseKey(ByteArray(32) { (it + 1).toByte() })
         key.copyForRetainedConsumer().close()
-        key.withBytes { borrowed ->
-            assertThat(borrowed.all { it.toInt() == 0 }).isTrue()
+        val thrown = assertFails { key.withBytes { error("should not run") } }
+        assertThat(thrown).isInstanceOf(IllegalStateException::class.java)
+    }
+
+    @Test
+    fun consumedFlagFlipsBeforeBlock_soWithBytesIsSingleUseEvenIfBlockThrows() {
+        // Set-before-block semantics: a throwing consumer still claims the key, so a
+        // retry against the same DatabaseKey is rejected. The buffer is zeroed by the
+        // finally block on the throw path.
+        val raw = ByteArray(32) { (it + 1).toByte() }
+        val key = DatabaseKey(raw)
+        val boom = RuntimeException("simulated consumer failure")
+        try {
+            key.withBytes { throw boom }
+            error("expected the block's exception to propagate")
+        } catch (caught: RuntimeException) {
+            assertThat(caught).isSameInstanceAs(boom)
         }
+        assertThat(raw.all { it.toInt() == 0 }).isTrue()
+        val retry = assertFails { key.withBytes { error("should not run") } }
+        assertThat(retry).isInstanceOf(IllegalStateException::class.java)
+    }
+
+    private inline fun assertFails(block: () -> Unit): Throwable {
+        try {
+            block()
+        } catch (t: Throwable) {
+            return t
+        }
+        error("expected the block to throw")
     }
 
     /**

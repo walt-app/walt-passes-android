@@ -153,19 +153,26 @@ internal object SqlCipherDatabaseFactory {
         context.applicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
 
     /**
-     * Hands the raw key to [SQLiteDatabase.openOrCreateDatabase] from a private
-     * [RetainedKeyBuffer], and routes any failure (including a throw from the postKey
-     * hook) through [openCorrupt]. On the success path the caller owns the
+     * Hands the raw key to [opener] (defaults to [SQLiteDatabase.openOrCreateDatabase])
+     * from a private [RetainedKeyBuffer], and routes any failure (including a throw from
+     * the postKey hook) through [openCorrupt]. On the success path the caller owns the
      * [OpenedDatabase] and is responsible for closing it.
+     *
+     * [opener] is an injection seam for tests: it lets a JVM unit test verify that the
+     * [RetainedKeyBuffer] is zeroed when the open call throws, without standing up a
+     * real SQLCipher database. The default just delegates to the static `SQLiteDatabase`
+     * entry point, so the production call site is unaffected.
      */
-    private fun openHandleWithKey(
+    internal fun openHandleWithKey(
         dbFile: File,
         databaseKey: DatabaseKey,
         isDebuggable: Boolean,
+        opener: (File, ByteArray, SQLiteDatabaseHook) -> SQLiteDatabase =
+            { f, k, hook -> SQLiteDatabase.openOrCreateDatabase(f, k, null, null, hook) },
     ): StorageResult<OpenedDatabase> {
         val keyBuffer = databaseKey.copyForRetainedConsumer()
         val openedDb: SQLiteDatabase = try {
-            SQLiteDatabase.openOrCreateDatabase(dbFile, keyBuffer.bytes, null, null, cipherCompatV4Hook)
+            opener(dbFile, keyBuffer.bytes, cipherCompatV4Hook)
         } catch (e: CancellationException) {
             keyBuffer.close()
             throw e
@@ -278,12 +285,12 @@ internal object SqlCipherDatabaseFactory {
 
 /**
  * The result of [SqlCipherDatabaseFactory.openOrCreate]. Bundles the SQLCipher handle
- * with the [AutoCloseable] that zeros the raw-key buffer SQLCipher's connection pool
+ * with the [RetainedKeyBuffer] that backs the raw-key buffer SQLCipher's connection pool
  * holds by reference. The owner ([SqlCipherPassStore]) MUST close the SQLiteDatabase
  * first, then the keyHandle - reversing the order would zero the buffer while the
  * pool may still be re-keying connections.
  */
 internal data class OpenedDatabase(
     val db: SQLiteDatabase,
-    val keyHandle: AutoCloseable,
+    val keyHandle: RetainedKeyBuffer,
 )
