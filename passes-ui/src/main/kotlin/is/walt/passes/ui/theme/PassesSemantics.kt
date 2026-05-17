@@ -40,6 +40,7 @@ public data class PassesSemantics(
     public val expiredBadge: ExpiredBadgeStyle,
     public val securitySheet: SecuritySheetStyle,
     public val categoryAccent: CategoryAccentColors,
+    public val unverifiedArtifact: UnverifiedArtifactStyle = UnverifiedArtifactStyle.Placeholder,
 )
 
 /**
@@ -112,3 +113,44 @@ public data class CategoryAccentColors(
     public val storeCard: ArgbColor,
     public val generic: ArgbColor,
 )
+
+/**
+ * Visual treatment for a user-generated, unsigned scannable artifact (`ScannableCard`).
+ * Powers the chrome around `ScannableCardTile` and `ScannableCardScreen`, both of which
+ * must read as a different artifact class from a verified PKPASS tile at a glance.
+ *
+ * The trust-claim is C1 + C2 from `docs/SCANNABLE_CARD_THREAT_MODEL.md`: every
+ * `ScannableCardTile` renders the non-suppressible "Created by you" caption AND is
+ * visually distinct from a `PassFront`-style tile through redundant treatment (dashed
+ * border + leading color band + edit icon). The redundancy is load-bearing: theming any
+ * single dimension flat must not collapse the artifact-class distinction.
+ *
+ * These slots NEVER reuse `SignatureBadgeColors`. A `ScannableCard` has no signature to
+ * band; borrowing the verified palette would re-create the trust-conflation risk this
+ * style exists to prevent. Walt-android supplies concrete tokens — `passes-ui` ships
+ * [Placeholder] only so tests and Compose previews compose without a host theme.
+ *
+ * [accent] colors the dashed border and the leading band. [captionBackground] /
+ * [captionForeground] color the "Created by you" caption strip; [captionIconTint] tints
+ * the pencil glyph next to it. Contrast (WCAG AA) is the host theme's responsibility.
+ */
+public data class UnverifiedArtifactStyle(
+    public val accent: ArgbColor,
+    public val captionBackground: ArgbColor,
+    public val captionForeground: ArgbColor,
+    public val captionIconTint: ArgbColor = captionForeground,
+) {
+    public companion object {
+        /**
+         * Neutral grayscale placeholder so `PassesSemantics()` default-constructs and
+         * Compose previews / tests render without a host theme. Hosts MUST override
+         * with brand tokens; relying on the placeholder in production would leave the
+         * "Created by you" caption unstyled relative to surrounding chrome.
+         */
+        public val Placeholder: UnverifiedArtifactStyle = UnverifiedArtifactStyle(
+            accent = ArgbColor(0xFF6B6B6B.toInt()),
+            captionBackground = ArgbColor(0xFFF2F2F2.toInt()),
+            captionForeground = ArgbColor(0xFF202020.toInt()),
+        )
+    }
+}
