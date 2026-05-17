@@ -1,9 +1,5 @@
-package `is`.walt.passes.ui.internal
+package `is`.walt.passes.ui
 
-import `is`.walt.passes.ui.B3UrlIntent
-import `is`.walt.passes.ui.EmailIntent
-import `is`.walt.passes.ui.PhoneIntent
-import `is`.walt.passes.ui.SourceField
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test

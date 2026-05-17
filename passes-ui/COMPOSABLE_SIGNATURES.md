@@ -108,6 +108,30 @@ public fun PassBack(
 )
 ```
 
+## Back-field link scanner
+
+Public so consumers that render their own back-field layouts (no kernel `Surface`
+card, flat rows on a host-owned gradient, etc.) can route through the canonical
+detector instead of hand-rolling regex. The scanner returns spans whose intents
+carry the *verbatim* substring from the field — no normalization, no scheme
+injection — so a confirmation sheet built from a span shows the user exactly the
+string that will leave the device. The trust contract (bidi-spoofing rejection,
+RFC 3986 URL class, phone digit-count + adjacency hints, email shape) lives
+entirely inside [FieldLinkScanner.scan]; there is no constructor path that
+produces a [LinkSpan] without going through it.
+
+```kotlin
+public object FieldLinkScanner {
+    public fun scan(fieldValue: String, source: SourceField): List<LinkSpan>
+}
+
+public data class LinkSpan(
+    public val start: Int,
+    public val endExclusive: Int,
+    public val intent: SecurityIntent,
+)
+```
+
 ## Barcode
 
 ```kotlin
