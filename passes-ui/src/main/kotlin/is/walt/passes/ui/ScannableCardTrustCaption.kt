@@ -79,14 +79,14 @@ public fun ScannableCardTrustCaption(
 }
 
 /**
- * The exact caption copy. Public-internal so tests can assert the displayed text
- * matches the trust claim verbatim. Wording is the load-bearing part of
+ * The exact caption copy. Wording is the load-bearing part of
  * `SCANNABLE_CARD_THREAT_MODEL.md` C2; a contributor changing this string is making a
- * security-policy edit and the test suite will require them to update the assertion.
+ * security-policy edit and the test suite — which asserts the literal — will require
+ * them to update the assertion.
  *
  * Note on dual-anchor placement: the caption is composed BOTH inside `ScannableCardTile`
  * (so the wallet-list user sees it before tapping) AND inside `ScannableCardScreen` (so
  * a deep-linked or shortcut-launched scan surface does not bypass it). The duplication
  * is deliberate; do NOT refactor it to a single render site.
  */
-internal const val TRUST_CAPTION_TEXT: String = "Created by you"
+private const val TRUST_CAPTION_TEXT: String = "Created by you"

@@ -1,7 +1,6 @@
 package `is`.walt.passes.ui
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -12,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,14 +63,15 @@ public fun ScannableCardScreen(
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            ScannableCardView(card = card)
+            // clearAndSetSemantics drops the barcode's standalone contentDescription
+            // (which is `card.label`) so TalkBack does not announce the label twice —
+            // the title Text above already speaks it.
+            ScannableCardView(
+                card = card,
+                modifier = Modifier.clearAndSetSemantics {},
+            )
         }
 
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(0.dp),
-        ) {
-            ScannableCardTrustCaption()
-        }
+        ScannableCardTrustCaption(modifier = Modifier.fillMaxWidth())
     }
 }

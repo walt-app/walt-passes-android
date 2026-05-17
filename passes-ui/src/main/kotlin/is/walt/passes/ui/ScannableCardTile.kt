@@ -25,6 +25,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -112,7 +113,7 @@ public fun ScannableCardTile(
                         cornerRadiusDp = INNER_CORNER_RADIUS,
                     )
                     .padding(CONTENT_PADDING),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(CONTENT_VERTICAL_SPACING),
             ) {
                 // Barcode preview: small, identification-only. Centered so a 1D
                 // barcode (which renders short and wide) and a QR (square) share the
@@ -121,13 +122,21 @@ public fun ScannableCardTile(
                     modifier = Modifier.fillMaxWidth(),
                     contentAlignment = Alignment.Center,
                 ) {
-                    val (w, h) = card.format.previewSizeDp()
+                    val (w, h) = card.format.previewSize()
                     ScannableCardView(
                         card = card,
                         // requiredSize wins over ScannableCardView's internal
                         // defaultMinSize, so the preview honors the tile-scoped size
                         // even though the full surface would render larger.
-                        modifier = Modifier.requiredSize(width = w.dp, height = h.dp),
+                        //
+                        // clearAndSetSemantics drops the barcode's own contentDescription
+                        // (it carries `card.label` for standalone use) so TalkBack does
+                        // not announce the label twice — once for the barcode image,
+                        // again for the sibling Text below. Mirrors DocumentTile's
+                        // decorative-thumbnail stance.
+                        modifier = Modifier
+                            .requiredSize(width = w, height = h)
+                            .clearAndSetSemantics {},
                     )
                 }
 
@@ -179,13 +188,13 @@ private fun Modifier.dashedBorder(
     )
 }
 
-private fun ScannableFormat.previewSizeDp(): Pair<Int, Int> = when (this) {
-    ScannableFormat.Qr -> 96 to 96
+private fun ScannableFormat.previewSize(): Pair<Dp, Dp> = when (this) {
+    ScannableFormat.Qr -> 96.dp to 96.dp
     ScannableFormat.Code128,
     ScannableFormat.Ean13,
     ScannableFormat.UpcA,
     ScannableFormat.Code39,
-    -> 132 to 40
+    -> 132.dp to 40.dp
 }
 
 private val TILE_WIDTH = 168.dp
@@ -196,3 +205,4 @@ private val DASHED_BORDER_STROKE = 1.5.dp
 private val DASHED_DASH_ON = 6.dp
 private val DASHED_DASH_OFF = 4.dp
 private val CONTENT_PADDING = 10.dp
+private val CONTENT_VERTICAL_SPACING = 8.dp
