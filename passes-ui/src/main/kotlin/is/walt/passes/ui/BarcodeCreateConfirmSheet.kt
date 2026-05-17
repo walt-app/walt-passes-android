@@ -58,6 +58,11 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * hide them. Wrapping in [isolated] is defense in depth against any residual
  * directional context surrounding the sheet chrome; the upstream validator
  * (wpass-lzi.4) already rejects Cf/Cc characters in the payload itself.
+ *
+ * NOTE: this surface ships WITHOUT a `telemetry: UiTelemetryGuard` parameter -
+ * deferred to wpass-rnv. The other security sheets emit show / confirm / dismiss
+ * events, so the create-time gate is invisible to walt-android's dismissal-rate
+ * dashboard until that bead lands.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -136,7 +141,6 @@ private fun BarcodeCreateBody(
                 style = MaterialTheme.typography.bodyLarge,
                 color = emphasis.emphasisForeground.toComposeColor(),
                 fontFamily = if (isCryptoAddress) FontFamily.Monospace else null,
-                softWrap = true,
             )
         }
     }
