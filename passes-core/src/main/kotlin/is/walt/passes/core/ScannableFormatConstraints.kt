@@ -62,10 +62,9 @@ internal object ScannableFormatConstraints {
             ScannableFormat.Code128, ScannableFormat.Code39, ScannableFormat.Qr -> null
         }
 
+    // Length already enforced by the validator via [requiredLength]; structural check assumes
+    // a correctly-sized payload and only verifies the check digit.
     private fun validateEan13(payload: String): PayloadRejection? {
-        if (payload.length != EAN13_LENGTH) {
-            return PayloadRejection.WrongLength(payload.length, EAN13_LENGTH, ScannableFormat.Ean13)
-        }
         // EAN-13: rightmost digit is the check digit. Weights from right (excluding check
         // digit) alternate 1, 3, 1, 3 ...; sum mod 10, then (10 - sum mod 10) mod 10.
         val digits = payload.map { it.digitToInt() }
@@ -74,9 +73,6 @@ internal object ScannableFormatConstraints {
     }
 
     private fun validateUpcA(payload: String): PayloadRejection? {
-        if (payload.length != UPCA_LENGTH) {
-            return PayloadRejection.WrongLength(payload.length, UPCA_LENGTH, ScannableFormat.UpcA)
-        }
         // UPC-A: weights from left (excluding check digit) alternate 3, 1, 3, 1 ...; equivalent
         // to EAN-13 with a leading implicit zero, but expressed directly here for clarity.
         val digits = payload.map { it.digitToInt() }
@@ -111,8 +107,8 @@ internal object ScannableFormatConstraints {
 
     private val CODE39_ALLOWED: Set<Char> =
         buildSet {
-            addAll(('A'..'Z').toSet())
-            addAll(('0'..'9').toSet())
-            addAll(setOf(' ', '-', '.', '$', '/', '+', '%'))
+            addAll('A'..'Z')
+            addAll('0'..'9')
+            addAll(listOf(' ', '-', '.', '$', '/', '+', '%'))
         }
 }

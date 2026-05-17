@@ -33,7 +33,7 @@ public object QrPayloadClassifier {
 
         return when (scheme) {
             "http", "https" -> classifyHttp(scheme, payload)
-            "tel" -> QrPayloadKind.Phone(afterScheme)
+            "tel" -> QrPayloadKind.Phone(afterScheme.substringBefore("?"))
             "sms", "smsto" -> QrPayloadKind.Sms(afterScheme.substringBefore("?"))
             "mailto" -> QrPayloadKind.Mailto(afterScheme.substringBefore("?"))
             "geo" -> QrPayloadKind.Geo(afterScheme)
@@ -62,11 +62,10 @@ public object QrPayloadClassifier {
         }
 
     // WIFI:T:<auth>;S:<ssid>;P:<password>;H:<hidden>;;
-    // SSID and password may be escaped with `\` before `;`, `,`, `:`, `\`, `"`.
-    // v1 implementation: locate `;S:` (or `WIFI:S:`), then read until the next *unescaped*
-    // `;`. TODO(wpass-lzi.5-followup): handle more exotic escape combinations (e.g. an SSID
-    // ending in an escaped `;` immediately followed by a real one). v1 covers the common case;
-    // the password is never surfaced regardless.
+    // SSID and password may be escaped with `\` before `;`, `,`, `:`, `\`, `"`. Field-start
+    // detection walks the body with the same escape state machine [readUntilUnescapedSemicolon]
+    // uses, so an escaped `\;` inside (say) a password value cannot be mistaken for a real
+    // field separator and cause an `S:` substring inside the password to surface as the SSID.
     private fun classifyWifi(body: String): QrPayloadKind {
         // [body] is everything after `WIFI:` (case-insensitive prefix already stripped by
         // the caller). Locate the `S:` field and read until the next *unescaped* `;`.
@@ -79,15 +78,26 @@ public object QrPayloadClassifier {
         body: String,
         key: String,
     ): Int? {
-        // Match either at the very start of body or immediately after a `;`.
+        // Walk the body honoring backslash escapes so `body[i - 1] == ';'` is only treated as
+        // a field boundary when the `;` wasn't itself escaped. Without this, an SSID-key
+        // substring inside an escaped value (e.g. `P:my\;S:secret;S:realnet;;`) would match
+        // and surface the wrong network name in the preview.
         var i = 0
+        var prevWasUnescapedSemicolon = false
         while (i < body.length) {
-            val atStart = i == 0 || body[i - 1] == ';'
+            val atBoundary = i == 0 || prevWasUnescapedSemicolon
             val fits = i + key.length <= body.length
-            if (atStart && fits && body.regionMatches(i, key, 0, key.length, ignoreCase = true)) {
+            if (atBoundary && fits && body.regionMatches(i, key, 0, key.length, ignoreCase = true)) {
                 return i + key.length
             }
-            i++
+            val c = body[i]
+            if (c == '\\' && i + 1 < body.length) {
+                prevWasUnescapedSemicolon = false
+                i += 2
+            } else {
+                prevWasUnescapedSemicolon = c == ';'
+                i++
+            }
         }
         return null
     }

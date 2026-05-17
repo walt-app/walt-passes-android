@@ -111,6 +111,15 @@ class QrPayloadClassifierTest {
     }
 
     @Test
+    fun telUriStripsQueryTail() {
+        // Mirrors the sms/mailto/bitcoin behavior so the preview dialog renders a clean
+        // dialable number rather than `+155?foo`. `tel:` per RFC 3966 uses `;` for params,
+        // not `?`, but consistency with the other "phone-like" arms wins over RFC purity.
+        assertThat(QrPayloadClassifier.classify("tel:+15551234567?foo=bar"))
+            .isEqualTo(QrPayloadKind.Phone("+15551234567"))
+    }
+
+    @Test
     fun smsUriStripsQueryTail() {
         assertThat(QrPayloadClassifier.classify("sms:+15551234567?body=hi"))
             .isEqualTo(QrPayloadKind.Sms("+15551234567"))
@@ -153,6 +162,19 @@ class QrPayloadClassifierTest {
         val kind = QrPayloadClassifier.classify(payload) as QrPayloadKind.Wifi
         assertThat(kind.ssid).isEqualTo("weird;name")
         assertThat(kind.toString()).doesNotContain("secret")
+    }
+
+    @Test
+    fun wifiUriWithFakeSsidKeyInsideEscapedPasswordDoesNotSpoof() {
+        // Field-boundary detection must honor escapes: the `\;` inside the password value
+        // here is NOT a real field separator, so the `S:` substring following it is NOT a
+        // real SSID-field key. The validator must read the real `S:realnet` field, not the
+        // decoy `S:secret` substring sitting inside the password's literal text.
+        val payload = """WIFI:T:WPA;P:my\;S:secret;S:realnet;;"""
+        val kind = QrPayloadClassifier.classify(payload) as QrPayloadKind.Wifi
+        assertThat(kind.ssid).isEqualTo("realnet")
+        // And the password substring still never surfaces, escape parsing aside.
+        assertThat(kind.toString()).doesNotContain("my")
     }
 
     @Test

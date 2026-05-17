@@ -185,13 +185,34 @@ class ScannableCardInputValidatorTest {
 
     @Test
     fun upcAShortLengthRejected() {
-        // 11 digits — below the UPC-A length cap so it passes the TooLong gate and
-        // surfaces the structural WrongLength rejection instead.
         val rejection = expectPayloadRejection("12345678901", ScannableFormat.UpcA)
         assertThat(rejection).isInstanceOf(PayloadRejection.WrongLength::class.java)
         rejection as PayloadRejection.WrongLength
         assertThat(rejection.actual).isEqualTo(11)
         assertThat(rejection.required).isEqualTo(12)
+    }
+
+    @Test
+    fun upcALongLengthRejectedAsWrongLength() {
+        // Fixed-length symbology: a 13-digit input must surface WrongLength (NOT TooLong),
+        // so the consumer has a single arm to render for "wrong digit count" regardless of
+        // whether the user typed too few or too many.
+        val rejection = expectPayloadRejection("1234567890128", ScannableFormat.UpcA)
+        assertThat(rejection).isInstanceOf(PayloadRejection.WrongLength::class.java)
+        rejection as PayloadRejection.WrongLength
+        assertThat(rejection.actual).isEqualTo(13)
+        assertThat(rejection.required).isEqualTo(12)
+        assertThat(rejection.format).isEqualTo(ScannableFormat.UpcA)
+    }
+
+    @Test
+    fun ean13LongLengthRejectedAsWrongLength() {
+        val rejection = expectPayloadRejection("12345678901234", ScannableFormat.Ean13)
+        assertThat(rejection).isInstanceOf(PayloadRejection.WrongLength::class.java)
+        rejection as PayloadRejection.WrongLength
+        assertThat(rejection.actual).isEqualTo(14)
+        assertThat(rejection.required).isEqualTo(13)
+        assertThat(rejection.format).isEqualTo(ScannableFormat.Ean13)
     }
 
     @Test
@@ -240,6 +261,13 @@ class ScannableCardInputValidatorTest {
         assertThat(result).isInstanceOf(ScannableCardCreateResult.Success::class.java)
     }
 
+    @Test
+    fun whitespaceOnlyLabelIsEmpty() {
+        val result = validateInput(payload = "ABC", format = ScannableFormat.Code128, label = "   ")
+        val invalid = result as ScannableCardCreateResult.InvalidLabel
+        assertThat(invalid.reason).isEqualTo(LabelRejection.Empty)
+    }
+
     // ---- trim semantics on success path ----
 
     @Test
@@ -248,6 +276,14 @@ class ScannableCardInputValidatorTest {
         val success = result as ScannableCardCreateResult.Success
         assertThat(success.card.payload).isEqualTo("hello")
         assertThat(success.card.payload).doesNotContain(" ")
+    }
+
+    @Test
+    fun successCardCarriesTrimmedLabelNotRaw() {
+        val result =
+            validateInput(payload = "ABC", format = ScannableFormat.Code128, label = "  My Card  ")
+        val success = result as ScannableCardCreateResult.Success
+        assertThat(success.card.label).isEqualTo("My Card")
     }
 
     @Test

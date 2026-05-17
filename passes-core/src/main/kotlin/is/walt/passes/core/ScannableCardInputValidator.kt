@@ -10,8 +10,9 @@ package `is`.walt.passes.core
  * tests are deterministic. The validator only judges field content; it does not allocate
  * identity or time.
  *
- * Fail-fast: returns the first violation found. Order is label first (cheaper, format-
- * independent), then payload (trim, empty, bidi/control, length, charset, structural).
+ * Fail-fast: returns the first violation found. Label trimmed first (a whitespace-only
+ * label is empty for users), then payload (trim, empty, bidi/control, length, charset,
+ * structural). Both trimmed values land on the resulting [ScannableCard].
  */
 public object ScannableCardInputValidator {
     /** Display-friendly cap. Long enough for any realistic card name, short enough to render. */
@@ -25,7 +26,8 @@ public object ScannableCardInputValidator {
         id: ScannableCardId,
         createdAt: PassInstant,
     ): ScannableCardCreateResult {
-        validateLabel(input.label)?.let { return ScannableCardCreateResult.InvalidLabel(it) }
+        val trimmedLabel = input.label.trim()
+        validateLabel(trimmedLabel)?.let { return ScannableCardCreateResult.InvalidLabel(it) }
 
         val trimmedPayload = input.payload.trim()
         validatePayload(trimmedPayload, input.format)?.let {
@@ -37,7 +39,7 @@ public object ScannableCardInputValidator {
                 id = id,
                 payload = trimmedPayload,
                 format = input.format,
-                label = input.label,
+                label = trimmedLabel,
                 color = input.color,
                 createdAt = createdAt,
             ),
@@ -65,14 +67,25 @@ public object ScannableCardInputValidator {
         format: ScannableFormat,
     ): PayloadRejection? {
         if (payload.isEmpty()) return PayloadRejection.Empty
-        // Bidi/control check before charset so the error tells the user "your input
+        // Bidi/control check before length/charset so the error tells the user "your input
         // contains a hidden character," not "U+0000 is not in the EAN-13 charset."
         for (c in payload) {
             if (c.category == CharCategory.FORMAT) return PayloadRejection.ContainsBidiChar
             if (c.isISOControl()) return PayloadRejection.ContainsControlChar
         }
-        val max = ScannableFormatConstraints.maxPayloadLength(format)
-        if (payload.length > max) return PayloadRejection.TooLong(payload.length, max)
+        // Fixed-length symbologies (EAN-13, UPC-A): exact-length check surfaces WrongLength
+        // for both too-short AND too-long inputs, so the consumer never has to choose between
+        // TooLong and WrongLength for the same logical mistake. Variable-length symbologies
+        // use the soft cap and emit TooLong.
+        val required = ScannableFormatConstraints.requiredLength(format)
+        if (required != null) {
+            if (payload.length != required) {
+                return PayloadRejection.WrongLength(payload.length, required, format)
+            }
+        } else {
+            val max = ScannableFormatConstraints.maxPayloadLength(format)
+            if (payload.length > max) return PayloadRejection.TooLong(payload.length, max)
+        }
         for (c in payload) {
             if (!ScannableFormatConstraints.isAllowedChar(format, c)) {
                 return PayloadRejection.WrongCharset(format, c)
