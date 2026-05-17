@@ -76,18 +76,21 @@ class ScannableCardSurfaceTest {
     }
 
     /**
-     * Covers the two directly-constructible result arms. The remaining three arms wrap
-     * sealed reasons ([PayloadRejection], [LabelRejection], [EncoderFailureReason]) whose
-     * concrete arms land in Children .3 and .4. Compile-time `when` exhaustiveness still
-     * fires at every real call site, so this test only needs to prove the constructible
-     * arms reach their branches.
+     * Every [ScannableCardCreateResult] arm is constructible and reachable via exhaustive
+     * `when`. [InvalidPayload] / [InvalidLabel] use a sentinel reason from their sealed
+     * family (the per-arm coverage of those families lives in [ScannableCardInputValidatorTest]
+     * and the `*ArmsAreAllConstructible` tests in this file); the point here is the create
+     * result's own arm shape.
      */
     @Test
-    fun scannableCardCreateResultConstructibleArmsAreReachableViaWhen() {
+    fun scannableCardCreateResultArmsAreReachableViaWhen() {
         val results: List<ScannableCardCreateResult> =
             listOf(
                 ScannableCardCreateResult.Success(sampleCard()),
+                ScannableCardCreateResult.InvalidPayload(PayloadRejection.Empty),
+                ScannableCardCreateResult.InvalidLabel(LabelRejection.Empty),
                 ScannableCardCreateResult.UnsupportedFormat(ScannableFormat.Code39),
+                ScannableCardCreateResult.EncoderFailure(EncoderFailureReason.PayloadTooDense),
             )
         val branches =
             results.map { result ->
@@ -99,19 +102,32 @@ class ScannableCardSurfaceTest {
                     is ScannableCardCreateResult.EncoderFailure -> "encoder"
                 }
             }
-        assertThat(branches).containsExactly("success", "format").inOrder()
+        assertThat(branches).containsExactly("success", "payload", "label", "format", "encoder").inOrder()
     }
 
     /**
-     * The three sealed-reason families exist as kernel-exported types even though their
-     * arms land later (Child 3 for [EncoderFailureReason], Child 4 for the other two).
-     * Removing any of them breaks this test before it breaks the dependent child's compile.
+     * The three sealed-reason families exist as kernel-exported types. Removing any of
+     * them breaks this test before it breaks the dependent child's compile.
      */
     @Test
     fun rejectionFamiliesAreExported() {
         assertThat(PayloadRejection::class.java.isInterface).isTrue()
         assertThat(LabelRejection::class.java.isInterface).isTrue()
         assertThat(EncoderFailureReason::class.java.isInterface).isTrue()
+    }
+
+    /**
+     * Every [EncoderFailureReason] arm is constructible. Removing an arm breaks
+     * compilation here before it breaks a downstream `when` in the consumer's create flow.
+     */
+    @Test
+    fun encoderFailureReasonArmsAreAllConstructible() {
+        val reasons: List<EncoderFailureReason> =
+            listOf(
+                EncoderFailureReason.WriterRejected(ScannableFormat.Code128, "detail"),
+                EncoderFailureReason.PayloadTooDense,
+            )
+        assertThat(reasons.toSet()).hasSize(reasons.size)
     }
 
     /**

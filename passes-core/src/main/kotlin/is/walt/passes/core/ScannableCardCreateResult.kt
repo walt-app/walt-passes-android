@@ -77,5 +77,32 @@ public sealed interface LabelRejection {
     public object Empty : LabelRejection
 }
 
-/** Why the encoder rejected a structurally valid payload. Arms land in Child 3 (wpass-lzi.3). */
-public sealed interface EncoderFailureReason
+/**
+ * Why the encoder rejected a structurally valid payload — i.e. one that already cleared
+ * [ScannableCardInputValidator]. These arms exist because per-symbology validation cannot
+ * fully predict ZXing's encodability ceiling: a payload of the correct length and charset
+ * can still fail to fit a chosen symbology's density rules (most often Code39 with a
+ * pathological pattern, or QR pushed past its largest version). The arms partition by
+ * recoverability so the consumer UI can suggest a different format vs. surfacing an opaque
+ * "try again" message.
+ */
+public sealed interface EncoderFailureReason {
+    /**
+     * The underlying ZXing writer rejected the payload at encode time. [format] identifies
+     * which writer failed (the consumer may suggest switching to a denser symbology). The
+     * raw ZXing exception message is preserved on [detail] for the consumer's diagnostic
+     * surface; it is not user-facing copy and may be empty when ZXing did not provide one.
+     */
+    public data class WriterRejected(
+        public val format: ScannableFormat,
+        public val detail: String,
+    ) : EncoderFailureReason
+
+    /**
+     * The payload is too dense to encode at the symbology's maximum version (only QR can
+     * surface this — the 1D writers reject density mismatches under [WriterRejected]). Distinct
+     * arm so the consumer UI can specifically suggest shortening the payload rather than
+     * switching format.
+     */
+    public object PayloadTooDense : EncoderFailureReason
+}
