@@ -59,15 +59,18 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * directional context surrounding the sheet chrome; the upstream validator
  * (wpass-lzi.4) already rejects Cf/Cc characters in the payload itself.
  *
- * NOTE: this surface ships WITHOUT a `telemetry: UiTelemetryGuard` parameter -
- * deferred to wpass-rnv. The other security sheets emit show / confirm / dismiss
- * events, so the create-time gate is invisible to walt-android's dismissal-rate
- * dashboard until that bead lands.
+ * Emits [UiTelemetryGuard.onBarcodeCreateGateShown] on first composition for each
+ * non-PlainText payload kind, [onBarcodeCreateGateConfirmed] on confirm tap, and
+ * [onBarcodeCreateGateDismissed] on cancel tap or sheet dismissal. The
+ * [BarcodeCreateKind] dimension is the coarse family of the underlying
+ * [QrPayloadKind] - the user-typed string itself never crosses the boundary,
+ * matching the PII discipline pinned by `PublicApiSurfaceTest`.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 public fun BarcodeCreateConfirmSheet(
     payloadKind: QrPayloadKind,
+    telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 ) {
@@ -76,6 +79,8 @@ public fun BarcodeCreateConfirmSheet(
     val sheetState: SheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val emphasis = LocalPassesSemantics.current.securitySheet
     val cancelFocus = remember { FocusRequester() }
+    val kind = barcodeCreateKindOf(payloadKind)
+    LaunchedEffect(kind) { telemetry.onBarcodeCreateGateShown(kind) }
     // Cancel-default focus: the prominent action wins keyboard / d-pad focus on
     // open so muscle memory pointed at the primary slot lands on Cancel. The
     // LaunchedEffect fires after composition, so the requester is attached by
@@ -84,7 +89,10 @@ public fun BarcodeCreateConfirmSheet(
     LaunchedEffect(payloadKind) { cancelFocus.requestFocus() }
 
     ModalBottomSheet(
-        onDismissRequest = onCancel,
+        onDismissRequest = {
+            telemetry.onBarcodeCreateGateDismissed(kind)
+            onCancel()
+        },
         sheetState = sheetState,
         containerColor = emphasis.sheetBackground.toComposeColor(),
     ) {
@@ -98,11 +106,41 @@ public fun BarcodeCreateConfirmSheet(
             BarcodeCreateActions(
                 emphasis = emphasis,
                 cancelFocus = cancelFocus,
-                onConfirm = onConfirm,
-                onCancel = onCancel,
+                onConfirm = {
+                    telemetry.onBarcodeCreateGateConfirmed(kind)
+                    onConfirm()
+                },
+                onCancel = {
+                    telemetry.onBarcodeCreateGateDismissed(kind)
+                    onCancel()
+                },
             )
         }
     }
+}
+
+/**
+ * Maps a [QrPayloadKind] to its coarse [BarcodeCreateKind] family for telemetry.
+ * [QrPayloadKind.PlainText] is unreachable here - the caller short-circuits before
+ * any telemetry-bearing path - but the `when` enumerates it so adding a new arm in
+ * `passes-core` surfaces as a missing-branch compile error rather than a silent
+ * fallthrough to the wrong family.
+ */
+@Suppress("CyclomaticComplexMethod")
+private fun barcodeCreateKindOf(payloadKind: QrPayloadKind): BarcodeCreateKind = when (payloadKind) {
+    is QrPayloadKind.PlainText -> error("PlainText payloads short-circuit the gate before telemetry fires")
+    is QrPayloadKind.Url -> BarcodeCreateKind.Url
+    is QrPayloadKind.Phone -> BarcodeCreateKind.Phone
+    is QrPayloadKind.Sms -> BarcodeCreateKind.Sms
+    is QrPayloadKind.Mailto -> BarcodeCreateKind.Mailto
+    is QrPayloadKind.Geo -> BarcodeCreateKind.Geo
+    is QrPayloadKind.Wifi -> BarcodeCreateKind.Wifi
+    is QrPayloadKind.Bitcoin -> BarcodeCreateKind.Bitcoin
+    is QrPayloadKind.Ethereum -> BarcodeCreateKind.Ethereum
+    QrPayloadKind.Magnet -> BarcodeCreateKind.Magnet
+    is QrPayloadKind.Market -> BarcodeCreateKind.Market
+    is QrPayloadKind.Intent -> BarcodeCreateKind.Intent
+    is QrPayloadKind.UnknownScheme -> BarcodeCreateKind.UnknownScheme
 }
 
 @Composable
@@ -158,9 +196,7 @@ private fun BarcodeCreateActions(
         horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
     ) {
         // Confirm is the low-emphasis text button - inverted from B3Url so a
-        // stray dismissal lands on Cancel, not on a silent persist. The
-        // divergence is pinned by ComposableSurfaceLockTest's three-param lock
-        // on this composable; resyncing the two surfaces will fail that lock.
+        // stray dismissal lands on Cancel, not on a silent persist.
         TextButton(
             onClick = onConfirm,
             modifier = Modifier.testTag(BarcodeCreateConfirmTestTags.Confirm),

@@ -94,20 +94,25 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
-    fun barcodeCreateConfirmSheetHasExactlyThreeUserVisibleParameters() {
-        // (payloadKind, onConfirm, onCancel). The gate is structurally minimal:
-        // no skipConfirmation flag, no per-arm copy override. The shape will
-        // legitimately grow to 4 when wpass-rnv lands the deliberately-deferred
-        // UiTelemetryGuard wiring; at that point bump this expectation to 4 and
-        // document the new event semantics in COMPOSABLE_SIGNATURES.md. Adding a
-        // fourth parameter for any other reason (a "skipConfirmation" / per-arm
-        // silence flag) would weaken the wpass-lzi.9 trust posture and is what
-        // this lock exists to prevent.
+    fun barcodeCreateConfirmSheetHasExactlyFourUserVisibleParameters() {
+        // (payloadKind, telemetry, onConfirm, onCancel). Adding any further parameter
+        // (a "skipConfirmation" / per-arm silence flag, an override for the kind
+        // dimension) would weaken the wpass-lzi.9 trust posture and is what this
+        // lock exists to prevent.
         assertUserVisibleParamCount(
             "BarcodeCreateConfirmSheetKt",
             "BarcodeCreateConfirmSheet",
-            expected = 3,
+            expected = 4,
         )
+    }
+
+    @Test
+    fun barcodeCreateConfirmSheetAcceptsUiTelemetryGuard() {
+        val method = findComposable("BarcodeCreateConfirmSheetKt", "BarcodeCreateConfirmSheet")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("BarcodeCreateConfirmSheet must declare a UiTelemetryGuard parameter")
+            .that(typeNames)
+            .contains("UiTelemetryGuard")
     }
 
     @Test

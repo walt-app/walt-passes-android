@@ -574,4 +574,13 @@ private class RecordingGuard : UiTelemetryGuard {
     override fun onImportRejected(kind: ParseFailureKind) {
         events += "import-rejected:${kind.name}"
     }
+    override fun onBarcodeCreateGateShown(kind: BarcodeCreateKind) {
+        events += "barcode-shown:${kind.name}"
+    }
+    override fun onBarcodeCreateGateConfirmed(kind: BarcodeCreateKind) {
+        events += "barcode-confirm:${kind.name}"
+    }
+    override fun onBarcodeCreateGateDismissed(kind: BarcodeCreateKind) {
+        events += "barcode-dismiss:${kind.name}"
+    }
 }
