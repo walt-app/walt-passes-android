@@ -54,6 +54,7 @@ private fun PreviewBarcodeCreateConfirm_Url() {
                 host = "example.com",
                 raw = "https://example.com/login",
             ),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -66,6 +67,7 @@ private fun PreviewBarcodeCreateConfirm_Phone() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Phone("+44 7700 900000"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -78,6 +80,7 @@ private fun PreviewBarcodeCreateConfirm_Sms() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Sms("+44 7700 900000"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -90,6 +93,7 @@ private fun PreviewBarcodeCreateConfirm_Mailto() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Mailto("alice@example.com"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -102,6 +106,7 @@ private fun PreviewBarcodeCreateConfirm_Geo() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Geo("51.5074,-0.1278"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -114,6 +119,7 @@ private fun PreviewBarcodeCreateConfirm_Wifi() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Wifi(ssid = "MyNetwork"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -126,6 +132,7 @@ private fun PreviewBarcodeCreateConfirm_WifiUnnamed() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Wifi(ssid = null),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -138,6 +145,7 @@ private fun PreviewBarcodeCreateConfirm_Bitcoin() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Bitcoin("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -150,6 +158,7 @@ private fun PreviewBarcodeCreateConfirm_Ethereum() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Ethereum("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -162,6 +171,7 @@ private fun PreviewBarcodeCreateConfirm_Magnet() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Magnet,
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -174,6 +184,7 @@ private fun PreviewBarcodeCreateConfirm_Market() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Market("details?id=com.example.app"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -186,6 +197,7 @@ private fun PreviewBarcodeCreateConfirm_Intent() {
     PreviewHost {
         BarcodeCreateConfirmSheet(
             payloadKind = QrPayloadKind.Intent("intent://example#Intent;scheme=https;end"),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )
@@ -201,6 +213,7 @@ private fun PreviewBarcodeCreateConfirm_Unknown() {
                 scheme = "myapp",
                 raw = "myapp://action?id=1",
             ),
+            telemetry = NoopUiTelemetryGuard,
             onConfirm = {},
             onCancel = {},
         )

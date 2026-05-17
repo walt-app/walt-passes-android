@@ -206,16 +206,17 @@ sheet AND calls `onConfirm`; dismissal closes WITHOUT firing `onConfirm`.
  * gate unconditional; [requiresCreateConfirmation] lets callers branch when they
  * want to skip the composable entirely.
  *
- * NOTE: this surface ships WITHOUT a `telemetry: UiTelemetryGuard` parameter -
- * deliberate deferral, tracked under wpass-rnv. The other security sheets emit
- * `onSecuritySheetShown` / `Confirmed` / `Dismissed`; the create-time gate is
- * invisible to that dashboard until that bead lands. ComposableSurfaceLockTest
- * pins the three-param shape so re-adding a guard is a deliberate edit, not a
- * silent drift.
+ * Fires `telemetry.onBarcodeCreateGateShown` on first composition (per non-PlainText
+ * payload kind), `onBarcodeCreateGateConfirmed` on confirm tap, and
+ * `onBarcodeCreateGateDismissed` on cancel tap or any sheet dismissal. The kind
+ * dimension is the coarse [BarcodeCreateKind] family of the underlying payload; the
+ * user-typed string never crosses the boundary, matching the PII discipline pinned
+ * by `PublicApiSurfaceTest`.
  */
 @Composable
 public fun BarcodeCreateConfirmSheet(
     payloadKind: QrPayloadKind,
+    telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onCancel: () -> Unit,
 )

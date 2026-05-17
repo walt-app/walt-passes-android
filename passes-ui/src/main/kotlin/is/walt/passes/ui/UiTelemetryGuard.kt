@@ -97,6 +97,34 @@ public interface UiTelemetryGuard {
      * a duplicate-with-narrower-shape would only invite drift.
      */
     public fun onImportRejected(kind: ParseFailureKind)
+
+    /**
+     * The create-time QR URI-scheme confirmation gate ([BarcodeCreateConfirmSheet]) was
+     * shown to the user. Fires only on actual composition; the [QrPayloadKind.PlainText]
+     * short-circuit never produces this event.
+     *
+     * Modeled as a sibling method family rather than a fourth arm on
+     * [onSecuritySheetShown] because the existing arms take a [PassType], which is
+     * PKPASS-specific and has no `ScannableCard` member. The create gate guards an
+     * unverified, user-typed artifact; conflating it with verified-pass back-field
+     * intent gates would muddy both the trust UX and the dashboards that consume
+     * these events.
+     */
+    public fun onBarcodeCreateGateShown(kind: BarcodeCreateKind)
+
+    /**
+     * The user confirmed the create-time gate. The consumer's persist call to
+     * `BarcodeCardRepository.upsert` is the next thing constructed after this event.
+     */
+    public fun onBarcodeCreateGateConfirmed(kind: BarcodeCreateKind)
+
+    /**
+     * The user dismissed the create-time gate without confirming - either by tapping
+     * Cancel (the focus-default action) or by dismissing the sheet. A sustained rise,
+     * especially scoped to [BarcodeCreateKind.Intent] or [BarcodeCreateKind.UnknownScheme],
+     * is a useful UX or social-engineering signal.
+     */
+    public fun onBarcodeCreateGateDismissed(kind: BarcodeCreateKind)
 }
 
 /**
@@ -120,6 +148,29 @@ public enum class SecurityIntentKind {
     Url,
     Phone,
     Email,
+}
+
+/**
+ * Coarse family of the QR payload classified by [QrPayloadKind] at the moment the
+ * create-time gate ([BarcodeCreateConfirmSheet]) is shown. Mirrors the source
+ * sealed-interface arms but flattens to enum-only at the telemetry boundary so the
+ * user-typed payload string (host, address, raw URI, SSID) never crosses into the
+ * host. [QrPayloadKind.PlainText] has no representative here: the gate short-circuits
+ * for plain text and no event fires.
+ */
+public enum class BarcodeCreateKind {
+    Url,
+    Phone,
+    Sms,
+    Mailto,
+    Geo,
+    Wifi,
+    Bitcoin,
+    Ethereum,
+    Magnet,
+    Market,
+    Intent,
+    UnknownScheme,
 }
 
 /**
@@ -150,4 +201,7 @@ public object NoopUiTelemetryGuard : UiTelemetryGuard {
     override fun onImportConfirmed(type: PassType, signatureBand: SignatureBand): Unit = Unit
     override fun onImportDismissed(type: PassType, signatureBand: SignatureBand): Unit = Unit
     override fun onImportRejected(kind: ParseFailureKind): Unit = Unit
+    override fun onBarcodeCreateGateShown(kind: BarcodeCreateKind): Unit = Unit
+    override fun onBarcodeCreateGateConfirmed(kind: BarcodeCreateKind): Unit = Unit
+    override fun onBarcodeCreateGateDismissed(kind: BarcodeCreateKind): Unit = Unit
 }

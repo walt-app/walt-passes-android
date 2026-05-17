@@ -206,6 +206,18 @@ class PublicApiSurfaceTest {
             override fun onImportRejected(kind: ParseFailureKind) {
                 recorded += "import-rejected:${kind.name}"
             }
+
+            override fun onBarcodeCreateGateShown(kind: BarcodeCreateKind) {
+                recorded += "barcode-shown:${kind.name}"
+            }
+
+            override fun onBarcodeCreateGateConfirmed(kind: BarcodeCreateKind) {
+                recorded += "barcode-confirm:${kind.name}"
+            }
+
+            override fun onBarcodeCreateGateDismissed(kind: BarcodeCreateKind) {
+                recorded += "barcode-dismiss:${kind.name}"
+            }
         }
         guard.onPassRendered(PassType.BoardingPass, SignatureBand.AppleVerified)
         guard.onPassBackOpened(PassType.EventTicket)
@@ -217,6 +229,9 @@ class PublicApiSurfaceTest {
         guard.onImportConfirmed(PassType.Generic, SignatureBand.SelfSigned)
         guard.onImportDismissed(PassType.BoardingPass, SignatureBand.Untrusted)
         guard.onImportRejected(ParseFailureKind.Tampered)
+        guard.onBarcodeCreateGateShown(BarcodeCreateKind.Url)
+        guard.onBarcodeCreateGateConfirmed(BarcodeCreateKind.Wifi)
+        guard.onBarcodeCreateGateDismissed(BarcodeCreateKind.Intent)
 
         assertThat(recorded).containsExactly(
             "rendered:BoardingPass:AppleVerified",
@@ -229,6 +244,9 @@ class PublicApiSurfaceTest {
             "import-confirm:Generic:SelfSigned",
             "import-dismiss:BoardingPass:Untrusted",
             "import-rejected:Tampered",
+            "barcode-shown:Url",
+            "barcode-confirm:Wifi",
+            "barcode-dismiss:Intent",
         ).inOrder()
     }
 
@@ -245,6 +263,30 @@ class PublicApiSurfaceTest {
         guard.onImportConfirmed(PassType.BoardingPass, SignatureBand.AppleVerified)
         guard.onImportDismissed(PassType.BoardingPass, SignatureBand.Incomplete)
         guard.onImportRejected(ParseFailureKind.Malformed)
+        guard.onBarcodeCreateGateShown(BarcodeCreateKind.Url)
+        guard.onBarcodeCreateGateConfirmed(BarcodeCreateKind.Url)
+        guard.onBarcodeCreateGateDismissed(BarcodeCreateKind.Url)
+    }
+
+    @Test
+    fun barcodeCreateKindCoversNonPlainTextArmsOfQrPayloadKind() {
+        // PlainText is intentionally omitted: BarcodeCreateConfirmSheet short-circuits
+        // before any telemetry fires for it. The remaining 12 arms mirror QrPayloadKind
+        // 1:1 - adding a new arm in passes-core should force a new arm here.
+        assertThat(BarcodeCreateKind.entries.map { it.name }).containsExactly(
+            "Url",
+            "Phone",
+            "Sms",
+            "Mailto",
+            "Geo",
+            "Wifi",
+            "Bitcoin",
+            "Ethereum",
+            "Magnet",
+            "Market",
+            "Intent",
+            "UnknownScheme",
+        ).inOrder()
     }
 
     @Test

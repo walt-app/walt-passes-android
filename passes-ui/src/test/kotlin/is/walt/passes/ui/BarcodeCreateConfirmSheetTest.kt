@@ -10,6 +10,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.ParseFailureKind
+import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.QrPayloadKind
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
@@ -56,6 +58,7 @@ class BarcodeCreateConfirmSheetTest {
                         host = "example.com",
                         raw = "https://example.com/login",
                     ),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -73,6 +76,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Url(scheme = "http", host = null, raw = "http://"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -87,6 +91,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Phone("+44 7700 900000"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -102,6 +107,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Sms("+44 7700 900000"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -117,6 +123,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Mailto("alice@example.com"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -132,6 +139,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Geo("51.5074,-0.1278"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -149,6 +157,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Wifi(ssid = "MyNetwork"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -166,6 +175,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Wifi(ssid = null),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -187,6 +197,7 @@ class BarcodeCreateConfirmSheetTest {
                     payloadKind = QrPayloadKind.Bitcoin(
                         "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
                     ),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -208,6 +219,7 @@ class BarcodeCreateConfirmSheetTest {
                     payloadKind = QrPayloadKind.Ethereum(
                         "0x71C7656EC7ab88b098defB751B7401B5f6d8976F",
                     ),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -227,6 +239,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Magnet,
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -243,6 +256,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Market("details?id=com.example.app"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -262,6 +276,7 @@ class BarcodeCreateConfirmSheetTest {
                     payloadKind = QrPayloadKind.Intent(
                         "intent://example#Intent;scheme=https;end",
                     ),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -285,6 +300,7 @@ class BarcodeCreateConfirmSheetTest {
                         scheme = "myapp",
                         raw = "myapp://action?id=1",
                     ),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -303,6 +319,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.PlainText,
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -337,6 +354,7 @@ class BarcodeCreateConfirmSheetTest {
                     payloadKind = QrPayloadKind.Bitcoin(
                         "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
                     ),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = {},
                     onCancel = {},
                 )
@@ -361,6 +379,7 @@ class BarcodeCreateConfirmSheetTest {
                     payloadKind = QrPayloadKind.Bitcoin(
                         "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
                     ),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = { confirmed++ },
                     onCancel = { cancelled++ },
                 )
@@ -379,6 +398,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Phone("+44 7700 900000"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = { confirmed++ },
                     onCancel = { cancelled++ },
                 )
@@ -398,6 +418,7 @@ class BarcodeCreateConfirmSheetTest {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
                     payloadKind = QrPayloadKind.Mailto("alice@example.com"),
+                    telemetry = NoopUiTelemetryGuard,
                     onConfirm = { confirmed++ },
                     onCancel = { cancelled++ },
                 )
@@ -409,9 +430,121 @@ class BarcodeCreateConfirmSheetTest {
         assertThat(cancelled).isEqualTo(1)
     }
 
+    @Test
+    fun openingTheSheetFiresShownExactlyOnceWithMappedKind() {
+        val recorder = RecordingGuard()
+        composeRule.setContent {
+            ThemedHost {
+                BarcodeCreateConfirmSheet(
+                    payloadKind = QrPayloadKind.Bitcoin(
+                        "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
+                    ),
+                    telemetry = recorder,
+                    onConfirm = {},
+                    onCancel = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        assertThat(recorder.events).containsExactly("shown:Bitcoin")
+    }
+
+    @Test
+    fun plainTextNeverFiresShown() {
+        // The gate short-circuits for PlainText; no telemetry event should escape.
+        val recorder = RecordingGuard()
+        composeRule.setContent {
+            ThemedHost {
+                BarcodeCreateConfirmSheet(
+                    payloadKind = QrPayloadKind.PlainText,
+                    telemetry = recorder,
+                    onConfirm = {},
+                    onCancel = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        assertThat(recorder.events).isEmpty()
+    }
+
+    @Test
+    fun confirmTapFiresConfirmedEventBeforeCallback() {
+        val recorder = RecordingGuard()
+        var confirmEventIndexAtCallback = -1
+        composeRule.setContent {
+            ThemedHost {
+                BarcodeCreateConfirmSheet(
+                    payloadKind = QrPayloadKind.Url(
+                        scheme = "https",
+                        host = "example.com",
+                        raw = "https://example.com",
+                    ),
+                    telemetry = recorder,
+                    onConfirm = { confirmEventIndexAtCallback = recorder.events.size - 1 },
+                    onCancel = {},
+                )
+            }
+        }
+        composeRule.onNodeWithTag(BarcodeCreateConfirmTestTags.Confirm).performClick()
+        composeRule.waitForIdle()
+        assertThat(recorder.events).containsExactly(
+            "shown:Url",
+            "confirm:Url",
+        ).inOrder()
+        // The confirm event must precede the host's persist callback so the
+        // dashboard captures the user's choice even if the persist throws.
+        assertThat(confirmEventIndexAtCallback).isEqualTo(1)
+    }
+
+    @Test
+    fun cancelTapFiresDismissedEventBeforeCallback() {
+        val recorder = RecordingGuard()
+        var cancelEventIndexAtCallback = -1
+        composeRule.setContent {
+            ThemedHost {
+                BarcodeCreateConfirmSheet(
+                    payloadKind = QrPayloadKind.Mailto("alice@example.com"),
+                    telemetry = recorder,
+                    onConfirm = {},
+                    onCancel = { cancelEventIndexAtCallback = recorder.events.size - 1 },
+                )
+            }
+        }
+        composeRule.onNodeWithTag(BarcodeCreateConfirmTestTags.Cancel).performClick()
+        composeRule.waitForIdle()
+        assertThat(recorder.events).containsExactly(
+            "shown:Mailto",
+            "dismiss:Mailto",
+        ).inOrder()
+        assertThat(cancelEventIndexAtCallback).isEqualTo(1)
+    }
+
     @Composable
     private fun ThemedHost(content: @Composable () -> Unit) {
         MaterialTheme { PassesTheme(semantics = semantics, content = content) }
+    }
+
+    private class RecordingGuard : UiTelemetryGuard {
+        val events: MutableList<String> = mutableListOf()
+        override fun onPassRendered(type: PassType, signatureBand: SignatureBand): Unit = Unit
+        override fun onPassBackOpened(type: PassType): Unit = Unit
+        override fun onSecuritySheetShown(intentKind: SecurityIntentKind, type: PassType): Unit = Unit
+        override fun onSecuritySheetConfirmed(intentKind: SecurityIntentKind, type: PassType): Unit = Unit
+        override fun onSecuritySheetDismissed(intentKind: SecurityIntentKind, type: PassType): Unit = Unit
+        override fun onImageDecodeRejected(reason: ImageDecodeRejection): Unit = Unit
+        override fun onImportConfirmShown(type: PassType, signatureBand: SignatureBand): Unit = Unit
+        override fun onImportConfirmed(type: PassType, signatureBand: SignatureBand): Unit = Unit
+        override fun onImportDismissed(type: PassType, signatureBand: SignatureBand): Unit = Unit
+        override fun onImportRejected(kind: ParseFailureKind): Unit = Unit
+        override fun onBarcodeCreateGateShown(kind: BarcodeCreateKind) {
+            events += "shown:${kind.name}"
+        }
+        override fun onBarcodeCreateGateConfirmed(kind: BarcodeCreateKind) {
+            events += "confirm:${kind.name}"
+        }
+        override fun onBarcodeCreateGateDismissed(kind: BarcodeCreateKind) {
+            events += "dismiss:${kind.name}"
+        }
     }
 
     private val semantics = PassesSemantics(
