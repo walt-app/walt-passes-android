@@ -97,6 +97,36 @@ internal object ScannableFormatConstraints {
         return (10 - sum % 10) % 10
     }
 
+    /**
+     * UTF-8 byte ceiling for a **byte-mode** QR payload at the encoder's pinned ECC level
+     * (M) and the largest QR version (40). Sourced from the QR spec's capacity tables.
+     * Used by the encoder for a proactive PayloadTooDense check that does not depend on
+     * matching ZXing's English exception text. ECC-M was chosen at the encoder; if that
+     * pin changes, this constant must change in lockstep.
+     *
+     * **Mode-scoped.** QR's numeric and alphanumeric modes have larger ceilings (~5,596
+     * digits, ~3,391 alphanumeric chars at v40-M). The encoder gates this byte-mode
+     * ceiling behind a charset check ([isQrAlphanumericChar]); payloads that fit a denser
+     * mode bypass the proactive check and fall through to ZXing's mode selection.
+     */
+    internal const val QR_BYTE_CEILING_ECC_M_BYTE_MODE: Int = 2_331
+
+    /**
+     * QR alphanumeric mode's character set (per ISO/IEC 18004): digits, uppercase A-Z, and
+     * the punctuation set `$ % * + - . / :` plus space. A payload composed entirely of
+     * these characters can be encoded in alphanumeric (or numeric, for all-digit input)
+     * mode, where capacity is much larger than byte mode. The encoder uses this membership
+     * test to decide whether the byte-mode pre-check is even applicable.
+     */
+    internal fun isQrAlphanumericChar(char: Char): Boolean = char in QR_ALPHANUMERIC
+
+    private val QR_ALPHANUMERIC: Set<Char> =
+        buildSet {
+            addAll('0'..'9')
+            addAll('A'..'Z')
+            addAll(listOf(' ', '$', '%', '*', '+', '-', '.', '/', ':'))
+        }
+
     private const val CODE128_MAX = 80
     private const val CODE39_MAX = 80
     private const val EAN13_LENGTH = 13

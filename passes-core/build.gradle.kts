@@ -8,6 +8,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.bouncycastle.bcprov)
     implementation(libs.bouncycastle.bcpkix)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)
