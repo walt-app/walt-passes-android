@@ -1,5 +1,6 @@
 package `is`.walt.passes.storage
 
+import `is`.walt.passes.core.EncoderFailureReason
 import `is`.walt.passes.core.LabelRejection
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.PayloadRejection
@@ -29,6 +30,9 @@ class PublicApiSurfaceTest {
         assertThat(branch).isEqualTo("success:7")
     }
 
+    // CyclomaticComplexMethod: scales 1:1 with the StorageError + nested RecordId +
+    // ScannableCardRejectionReason arms by design; complexity is the test's job here.
+    @Suppress("CyclomaticComplexMethod")
     @Test
     fun storageErrorArmsAreReachableViaWhen() {
         val errors: List<StorageError> = listOf(
@@ -63,6 +67,10 @@ class PublicApiSurfaceTest {
                         "card-rejected:label:${r.reason::class.simpleName}"
                     is ScannableCardRejectionReason.InvalidPayload ->
                         "card-rejected:payload:${r.reason::class.simpleName}"
+                    is ScannableCardRejectionReason.UnsupportedFormat ->
+                        "card-rejected:fmt:${r.format.name}"
+                    is ScannableCardRejectionReason.EncoderFailure ->
+                        "card-rejected:enc:${r.reason::class.simpleName}"
                 }
             }
         }
@@ -421,13 +429,16 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun scannableCardRejectedKindCoversTheTwoStructuralArms() {
-        // Two arms only — the kernel validator's richer rejection reasons carry user
-        // input (offending characters, lengths, check-digit detail), and routing them
-        // through telemetry would defeat the no-PII-in-telemetry contract.
+    fun scannableCardRejectedKindCoversAllFourArms() {
+        // The first two arms are what the validator produces today; the latter two
+        // carry the kernel's UnsupportedFormat / EncoderFailure result arms through
+        // the typed channel so they cannot collapse into Unknown(Other) when the
+        // validator changes.
         assertThat(ScannableCardRejectedKind.entries.map { it.name }).containsExactly(
             "LabelInvalid",
             "PayloadInvalid",
+            "FormatUnsupported",
+            "EncoderFailed",
         ).inOrder()
     }
 
@@ -436,14 +447,23 @@ class PublicApiSurfaceTest {
         val reasons: List<ScannableCardRejectionReason> = listOf(
             ScannableCardRejectionReason.InvalidLabel(LabelRejection.Empty),
             ScannableCardRejectionReason.InvalidPayload(PayloadRejection.Empty),
+            ScannableCardRejectionReason.UnsupportedFormat(ScannableFormat.Qr),
+            ScannableCardRejectionReason.EncoderFailure(EncoderFailureReason.PayloadTooDense),
         )
         val labels = reasons.map { reason ->
             when (reason) {
                 is ScannableCardRejectionReason.InvalidLabel -> "label:${reason.reason::class.simpleName}"
                 is ScannableCardRejectionReason.InvalidPayload -> "payload:${reason.reason::class.simpleName}"
+                is ScannableCardRejectionReason.UnsupportedFormat -> "fmt:${reason.format.name}"
+                is ScannableCardRejectionReason.EncoderFailure -> "enc:${reason.reason::class.simpleName}"
             }
         }
-        assertThat(labels).containsExactly("label:Empty", "payload:Empty").inOrder()
+        assertThat(labels).containsExactly(
+            "label:Empty",
+            "payload:Empty",
+            "fmt:Qr",
+            "enc:PayloadTooDense",
+        ).inOrder()
     }
 
     @Test

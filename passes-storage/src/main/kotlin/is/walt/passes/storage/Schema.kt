@@ -35,17 +35,12 @@ public object Schema {
     }
 
     /**
-     * Statements that introduce the v2 document tables. Referenced from both [DDL] (for
-     * fresh installs) and [MIGRATIONS]`[1]` (for v1 -> v2 upgrades) so the two paths can
-     * never drift. A `SchemaParityTest` asserts that a fresh-install DB and a
-     * v1-then-migrated DB land at the same `sqlite_master` shape.
-     */
-    /**
      * Statements that introduce the v3 scannable-cards table. Referenced from both [DDL]
      * (for fresh installs) and [MIGRATIONS]`[2]` (for v2 -> v3 upgrades) so the two paths
-     * cannot drift. `scannable_cards` lives in the same SQLCipher database as the existing
-     * tables, so [BackupRulesContract.REQUIRED_EXCLUDES] already covers it; no new entry is
-     * required there.
+     * cannot drift. The fresh-vs-migrated parity guard in `SchemaMigrationTest` covers
+     * both v1 -> v2 and v2 -> v3 by walking every hop. `scannable_cards` lives in the
+     * same SQLCipher database as the existing tables, so
+     * [BackupRulesContract.REQUIRED_EXCLUDES] already covers it.
      */
     private val V3_SCANNABLE_CARD_TABLES: List<String> = listOf(
         """
@@ -62,6 +57,11 @@ public object Schema {
             "ON scannable_cards(created_at_epoch_ms)",
     )
 
+    /**
+     * Statements that introduce the v2 document tables. Referenced from both [DDL] (for
+     * fresh installs) and [MIGRATIONS]`[1]` (for v1 -> v2 upgrades) so the two paths
+     * cannot drift.
+     */
     private val V2_DOCUMENT_TABLES: List<String> = listOf(
         """
         CREATE TABLE IF NOT EXISTS documents (

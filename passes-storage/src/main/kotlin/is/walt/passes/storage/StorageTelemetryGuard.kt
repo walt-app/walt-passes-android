@@ -117,6 +117,8 @@ public interface StorageTelemetryGuard {
 public enum class ScannableCardRejectedKind {
     LabelInvalid,
     PayloadInvalid,
+    FormatUnsupported,
+    EncoderFailed,
 }
 
 /**

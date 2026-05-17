@@ -157,15 +157,12 @@ public class SqlCipherPassRepository internal constructor(
     override suspend fun createScannableCard(
         input: ScannableCardCreateInput,
     ): StorageResult<ScannableCardRecordId> = runIo {
-        val now = clock()
-        // The kernel validator does not use the id for validation (it only embeds it on
-        // the resulting Success arm); pass a placeholder. Storage mints the real id
-        // post-insert, and the subsequent listAll() rehydrates the StateFlow with rows
-        // whose ScannableCardId is the stringified row id.
+        // Validator does not use the id for validation; storage mints the real one
+        // post-insert and listAll() rehydrates the StateFlow with the stringified row id.
         val validation = ScannableCardInputValidator.validate(
             input = input,
             id = ScannableCardId(""),
-            createdAt = PassInstant(now),
+            createdAt = PassInstant(clock()),
         )
         val approved = when (validation) {
             is ScannableCardCreateResult.Success -> validation.card
@@ -179,17 +176,22 @@ public class SqlCipherPassRepository internal constructor(
                     ScannableCardRejectionReason.InvalidPayload(validation.reason),
                     telemetryKind = ScannableCardRejectedKind.PayloadInvalid,
                 )
-            is ScannableCardCreateResult.UnsupportedFormat,
+            is ScannableCardCreateResult.UnsupportedFormat ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.UnsupportedFormat(validation.format),
+                    telemetryKind = ScannableCardRejectedKind.FormatUnsupported,
+                )
             is ScannableCardCreateResult.EncoderFailure ->
-                // The pure validator never produces these arms (encoding is a separate
-                // step that runs at render time, not at create time). The branch exists
-                // only so this when stays exhaustive against the kernel's full result
-                // family — adding a new arm in passes-core forces a deliberate decision
-                // here rather than a silent fallthrough.
-                return@runIo failure(StorageError.Unknown(UnknownStorageFailureKind.Other))
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.EncoderFailure(validation.reason),
+                    telemetryKind = ScannableCardRejectedKind.EncoderFailed,
+                )
         }
 
         val outcome = writeMutex.withLock {
+            // O(N) per insert: listAll() re-runs the validator on every row. Acceptable
+            // because wallets hold O(10s) of cards; revisit if profiles flag it.
+            val now = clock()
             val o = scannableCardStore.insert(
                 ScannableCardInsertRequest(
                     payload = approved.payload,
@@ -292,10 +294,7 @@ public class SqlCipherPassRepository internal constructor(
 
     /**
      * Single emission point for a scannable-card validator rejection. Same discipline
-     * as [rejectDocument]: emits `onScannableCardRejected(kind)` and returns the typed
-     * [StorageError.ScannableCardRejected] arm without going through [failure]. A
-     * validator rejection is not a generic storage failure, so
-     * [StorageTelemetryGuard.onStorageFailure] does NOT also fire.
+     * as [rejectDocument]: skip [failure] so `onStorageFailure` does not double-fire.
      */
     private fun <T> rejectScannableCard(
         reason: ScannableCardRejectionReason,

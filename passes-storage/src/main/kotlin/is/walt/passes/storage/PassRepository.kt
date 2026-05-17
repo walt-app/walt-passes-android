@@ -117,18 +117,12 @@ public interface PassRepository {
     public suspend fun deleteDocument(id: DocumentRecordId): StorageResult<Unit>
 
     /**
-     * Mints a [ScannableCard] from raw [input], persists it, and returns the assigned
-     * [ScannableCardRecordId]. The kernel validator
-     * (`ScannableCardInputValidator.validate`) is the single choke point that decides
-     * whether the input passes: a validation rejection bubbles up as
-     * [StorageError.ScannableCardRejected] with the typed kernel reason preserved, never
-     * as a generic infra failure. The row never reaches disk in that case.
-     *
-     * Storage owns the id and timestamp: the [ScannableCardId][`is`.walt.passes.core.ScannableCardId]
-     * the consumer observes on the materialized [ScannableCard] is the stringified row
-     * id, and `createdAt` is taken from the repository's injected clock at insert time.
-     * The kernel does not mint these (see KDoc on `ScannableCardId`); centralizing here
-     * keeps multiple consumer call sites from inventing their own id schemes.
+     * Mints a [ScannableCard] from raw [input] and persists it. Storage owns the id and
+     * `createdAt` timestamp; the consumer-visible [`ScannableCardId`][`is`.walt.passes.core.ScannableCardId]
+     * is the stringified row id. The kernel's `ScannableCardInputValidator` is the
+     * single insert-time choke point: a validation rejection bubbles up as
+     * [StorageError.ScannableCardRejected] with the typed reason preserved, never as a
+     * generic infra failure, and the row never reaches disk.
      */
     public suspend fun createScannableCard(
         input: ScannableCardCreateInput,

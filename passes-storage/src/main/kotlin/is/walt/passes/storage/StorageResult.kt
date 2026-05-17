@@ -1,7 +1,9 @@
 package `is`.walt.passes.storage
 
+import `is`.walt.passes.core.EncoderFailureReason
 import `is`.walt.passes.core.LabelRejection
 import `is`.walt.passes.core.PayloadRejection
+import `is`.walt.passes.core.ScannableFormat
 
 /**
  * The result type for every [PassRepository] call. Mirrors the `Result<T> over exceptions`
@@ -96,16 +98,21 @@ public sealed interface StorageError {
  * routing telemetry through enums rather than free-form strings.
  */
 /**
- * Why a [PassRepository.createScannableCard] call was refused by the kernel validator.
- * Mirrors the two structural arms `ScannableCardInputValidator` can surface; the
- * encoder-failure and unsupported-format arms of `ScannableCardCreateResult` are NOT
- * surfaced here because the validator on its own never produces them (encoding happens
- * downstream at render time).
+ * Why a [PassRepository.createScannableCard] call was refused. The first two arms
+ * mirror what `ScannableCardInputValidator` produces today (structural payload and
+ * label checks). The latter two cover the kernel result family's remaining arms; the
+ * validator does not produce them in the current build, but typing them here keeps
+ * the defensive path loud rather than collapsing them into [StorageError.Unknown] on
+ * the day the kernel does start surfacing one.
  */
 public sealed interface ScannableCardRejectionReason {
     public data class InvalidLabel(public val reason: LabelRejection) : ScannableCardRejectionReason
 
     public data class InvalidPayload(public val reason: PayloadRejection) : ScannableCardRejectionReason
+
+    public data class UnsupportedFormat(public val format: ScannableFormat) : ScannableCardRejectionReason
+
+    public data class EncoderFailure(public val reason: EncoderFailureReason) : ScannableCardRejectionReason
 }
 
 public enum class UnknownStorageFailureKind {
