@@ -13,6 +13,7 @@ import `is`.walt.passes.core.EncodeResult
 import `is`.walt.passes.core.EncoderFailureReason
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.ScannableFormatConstraints
+import java.util.concurrent.CancellationException
 import com.google.zxing.BarcodeFormat as ZxingFormat
 
 /**
@@ -44,13 +45,18 @@ internal object ZxingBarcodeEncoder {
         payload: String,
         format: ScannableFormat,
     ): EncodeResult {
-        // Proactive PayloadTooDense check for QR: ZXing's WriterException("Data too big") is
-        // the only signal the writer gives, and that English string can move under us on any
-        // minor version. Doing the byte-length check here keeps the consumer's "shorten the
-        // payload" hint working even if ZXing's message wording drifts. UTF-8 because QR's
-        // byte-mode capacity is in bytes, not chars (a payload of "é" × 1500 is 3000 bytes).
-        if (format == ScannableFormat.Qr &&
-            payload.toByteArray(Charsets.UTF_8).size > ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M
+        // Proactive PayloadTooDense check for QR. Gated by the alphanumeric-mode membership
+        // test: a payload that fits QR's numeric or alphanumeric mode has a much larger
+        // capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs
+        // 2,331 bytes), and ZXing's QRCodeWriter auto-selects the densest fitting mode.
+        // Pre-rejecting such payloads against the byte-mode ceiling would over-reject;
+        // instead, for anything outside the alphanumeric set the encoding must use byte
+        // mode and the byte-count check applies. UTF-8 because byte-mode capacity is in
+        // bytes (a payload of "é" × 1500 is 3000 bytes). The "Data too big" message match
+        // in translateFailure stays as belt-and-suspenders for dense alphanumeric/numeric
+        // payloads that still overflow at v40.
+        if (format == ScannableFormat.Qr && payload.any { !ScannableFormatConstraints.isQrAlphanumericChar(it) } &&
+            payload.toByteArray(Charsets.UTF_8).size > ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M_BYTE_MODE
         ) {
             return EncodeResult.Failure(EncoderFailureReason.PayloadTooDense)
         }
@@ -59,10 +65,17 @@ internal object ZxingBarcodeEncoder {
         // raise on some edge inputs — and funnels it into EncodeResult.Failure to honor the
         // kernel's no-throw contract. Matches the pattern in SignatureVerifier (the other
         // place the kernel wraps third-party code that escapes its declared exception set).
+        // CancellationException is re-thrown so that coroutine cancellation propagates if a
+        // future consumer ever wraps this in withTimeout { ... }; runCatching would
+        // otherwise absorb it indistinguishably from a WriterException. Uses the JDK type
+        // (Kotlin's CancellationException extends it) so passes-core stays coroutines-free.
         return runCatching { writeMatrix(payload, format) }
             .fold(
                 onSuccess = { EncodeResult.Success(it) },
-                onFailure = { EncodeResult.Failure(translateFailure(format, it)) },
+                onFailure = {
+                    if (it is CancellationException) throw it
+                    EncodeResult.Failure(translateFailure(format, it))
+                },
             )
     }
 
@@ -91,7 +104,7 @@ internal object ZxingBarcodeEncoder {
         // Belt-and-suspenders: the proactive byte-length check above handles the common QR
         // overflow path; this string match catches the same condition when ZXing surfaces it
         // for a payload that slipped under the byte ceiling (e.g. some mixed-mode inputs).
-        // The match is intentionally lossy — if ZXing reword the message on a future bump,
+        // The match is intentionally lossy — if ZXing rewords the message on a future bump,
         // the encoder still surfaces WriterRejected and the consumer still gets a usable
         // error path, just without the PayloadTooDense-specific UI hint.
         val message = cause.message.orEmpty()

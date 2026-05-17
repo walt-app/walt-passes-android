@@ -113,13 +113,30 @@ class BarcodeEncoderTest {
 
     @Test
     fun proactiveQrByteCeilingHandlesNonAsciiByteCountCorrectly() {
-        // Char count of 1,200 sits below QR_BYTE_CEILING_ECC_M (2,331) — but each "é" is
-        // two UTF-8 bytes, so the byte count is 2,400 and the proactive guard must fire.
-        // Pins the load-bearing detail that the byte-length check is on UTF-8 bytes, not
-        // chars; a regression to String.length would let this slip through to ZXing.
+        // Char count of 1,200 sits below QR_BYTE_CEILING_ECC_M_BYTE_MODE (2,331) — but each
+        // "é" is two UTF-8 bytes, so the byte count is 2,400 and the proactive guard must
+        // fire. Pins the load-bearing detail that the byte-length check is on UTF-8 bytes,
+        // not chars; a regression to String.length would let this slip through to ZXing.
+        // "é" is outside the QR alphanumeric mode set, so the proactive byte-mode check is
+        // reachable (pure-alphanumeric payloads of the same byte count fall through to
+        // ZXing instead — see [denseNumericQrPayloadEncodesViaNumericMode]).
         val payload = "é".repeat(1_200)
         val result = BarcodeEncoder.encode(payload, ScannableFormat.Qr)
         assertThat((result as EncodeResult.Failure).reason).isEqualTo(EncoderFailureReason.PayloadTooDense)
+    }
+
+    @Test
+    fun denseNumericQrPayloadEncodesViaNumericMode() {
+        // Pure-digit payload of 3,000 chars: above QR_BYTE_CEILING_ECC_M_BYTE_MODE (2,331)
+        // and above QR v40-M alphanumeric capacity (~3,391 chars — close but under), but
+        // well under v40-M numeric capacity (~5,596 digits). ZXing's QRCodeWriter
+        // auto-selects numeric mode and encodes successfully. Pins that the proactive
+        // byte-mode check is gated by the alphanumeric-set membership test — a regression
+        // that re-introduces an unconditional byte-count pre-check would over-reject this
+        // input as PayloadTooDense even though ZXing can encode it.
+        val payload = "1".repeat(3_000)
+        val result = BarcodeEncoder.encode(payload, ScannableFormat.Qr)
+        assertThat(result).isInstanceOf(EncodeResult.Success::class.java)
     }
 
     // ---- BarcodeMatrix sanity ----
