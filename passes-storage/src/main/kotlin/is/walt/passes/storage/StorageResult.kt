@@ -93,11 +93,6 @@ public sealed interface StorageError {
 }
 
 /**
- * Stable telemetry-friendly enumeration of the open-ended failure space. New arms here
- * are an API addition; new strings are not. Mirrors the `passes-core` discipline of
- * routing telemetry through enums rather than free-form strings.
- */
-/**
  * Why a [PassRepository.createScannableCard] call was refused. The first two arms
  * mirror what `ScannableCardInputValidator` produces today (structural payload and
  * label checks). The latter two cover the kernel result family's remaining arms; the
@@ -115,6 +110,11 @@ public sealed interface ScannableCardRejectionReason {
     public data class EncoderFailure(public val reason: EncoderFailureReason) : ScannableCardRejectionReason
 }
 
+/**
+ * Stable telemetry-friendly enumeration of the open-ended failure space. New arms here
+ * are an API addition; new strings are not. Mirrors the `passes-core` discipline of
+ * routing telemetry through enums rather than free-form strings.
+ */
 public enum class UnknownStorageFailureKind {
     DiskFull,
     PermissionDenied,
