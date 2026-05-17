@@ -6,9 +6,9 @@ package `is`.walt.passes.core
  * type [ScannableCardCreateInput] has NOT been checked against length caps, charset rules,
  * or bidi/control-character hygiene yet, and anything of type [ScannableCard] has.
  *
- * Construction is deliberately permissive — the validator (Child 4) is the choke point. A
- * data class accepts whatever the consumer hands it; rejection lives one layer up in
- * [ScannableCardCreateResult.InvalidPayload] / [ScannableCardCreateResult.InvalidLabel].
+ * Construction is deliberately permissive — the validator (Child 4) is the choke point.
+ * `color = null` means "use the consumer-side default tint," not "no tint" — there is no
+ * untinted render path; the consumer always applies a fallback.
  */
 public data class ScannableCardCreateInput(
     public val payload: String,

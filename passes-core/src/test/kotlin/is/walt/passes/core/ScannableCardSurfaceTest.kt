@@ -5,23 +5,10 @@ import org.junit.Test
 
 /**
  * Locks the public API surface of the [ScannableCard] artifact class. Companion to
- * [PublicApiSurfaceTest] (which locks the PKPASS surface) — kept in a separate file so the
- * two artifact classes stay textually distinct, mirroring the deliberate type-level
- * separation enforced by [ScannableCard] not extending [Pass].
- *
- * The test responsibilities:
- *
- *  1. Drift detection — every arm of [ScannableCardCreateResult], every value of
- *     [ScannableFormat], and every required parameter of [ScannableCard] is exercised, so
- *     removing one breaks compilation here before it breaks a downstream consumer.
- *  2. Trust separation lock — [ScannableCard] must NOT implement any interface in common
- *     with [Pass]. Asserting this at the type level keeps a future refactor from
- *     accidentally re-unifying the two via a shared supertype.
- *
- * Encoder / validator behavior tests land with Children .3 and .4 respectively. The
- * [PayloadRejection] and [LabelRejection] hierarchies are intentionally empty here; this
- * test stands up minimal fakes so the `InvalidPayload` / `InvalidLabel` arms can be
- * exhaustively matched before Child 4 populates the real reasons.
+ * [PublicApiSurfaceTest] (which locks the PKPASS surface). Two load-bearing responsibilities:
+ * drift detection on every arm of [ScannableCardCreateResult] / value of [ScannableFormat] /
+ * required parameter of [ScannableCard], and the trust-separation lock (no shared supertype
+ * with [Pass]). Encoder and validator behavior live in Children .3 and .4.
  */
 class ScannableCardSurfaceTest {
     @Test
@@ -89,11 +76,11 @@ class ScannableCardSurfaceTest {
     }
 
     /**
-     * Covers the three directly-constructible result arms. The remaining two arms wrap
-     * sealed-interface reasons ([PayloadRejection], [LabelRejection]) whose concrete arms
-     * land in Child 4; once they exist, that bead extends this exhaustiveness check. The
-     * Kotlin compiler enforces exhaustiveness at every real `when` site regardless, so a
-     * missing arm fails the build at the call site even before this test runs.
+     * Covers the two directly-constructible result arms. The remaining three arms wrap
+     * sealed reasons ([PayloadRejection], [LabelRejection], [EncoderFailureReason]) whose
+     * concrete arms land in Children .3 and .4. Compile-time `when` exhaustiveness still
+     * fires at every real call site, so this test only needs to prove the constructible
+     * arms reach their branches.
      */
     @Test
     fun scannableCardCreateResultConstructibleArmsAreReachableViaWhen() {
@@ -101,7 +88,6 @@ class ScannableCardSurfaceTest {
             listOf(
                 ScannableCardCreateResult.Success(sampleCard()),
                 ScannableCardCreateResult.UnsupportedFormat(ScannableFormat.Code39),
-                ScannableCardCreateResult.EncoderFailure(reason = "density"),
             )
         val branches =
             results.map { result ->
@@ -113,22 +99,19 @@ class ScannableCardSurfaceTest {
                     is ScannableCardCreateResult.EncoderFailure -> "encoder"
                 }
             }
-        assertThat(branches).containsExactly("success", "format", "encoder").inOrder()
+        assertThat(branches).containsExactly("success", "format").inOrder()
     }
 
     /**
-     * [PayloadRejection] and [LabelRejection] exist as kernel-exported types even though
-     * their arms are pending Child 4. Removing either type breaks this test before it
-     * breaks Child 4's compile. Sealedness itself is enforced at compile time by the
-     * Kotlin compiler — cross-module subclasses fail to compile, so an explicit runtime
-     * sealedness check would be redundant.
+     * The three sealed-reason families exist as kernel-exported types even though their
+     * arms land later (Child 3 for [EncoderFailureReason], Child 4 for the other two).
+     * Removing any of them breaks this test before it breaks the dependent child's compile.
      */
     @Test
     fun rejectionFamiliesAreExported() {
-        val payload: Class<PayloadRejection> = PayloadRejection::class.java
-        val label: Class<LabelRejection> = LabelRejection::class.java
-        assertThat(payload.isInterface).isTrue()
-        assertThat(label.isInterface).isTrue()
+        assertThat(PayloadRejection::class.java.isInterface).isTrue()
+        assertThat(LabelRejection::class.java.isInterface).isTrue()
+        assertThat(EncoderFailureReason::class.java.isInterface).isTrue()
     }
 
     /**
@@ -159,6 +142,8 @@ class ScannableCardSurfaceTest {
         assertThat(ScannableColor(0x11223344)).isEqualTo(ScannableColor(0x11223344))
     }
 
+    // Walks superclasses and their declared interfaces. Skips interface-of-interface ancestors
+    // because neither artifact class has any; if that changes, extend this helper.
     private fun ancestorsOf(cls: Class<*>): Set<Class<*>> {
         val out = mutableSetOf<Class<*>>()
         var current: Class<*>? = cls.superclass
