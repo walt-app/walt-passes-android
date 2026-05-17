@@ -1,0 +1,224 @@
+package `is`.walt.passes.ui
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import androidx.test.ext.junit.runners.AndroidJUnit4
+import `is`.walt.passes.core.PassInstant
+import `is`.walt.passes.core.ScannableCard
+import `is`.walt.passes.core.ScannableCardCreateInput
+import `is`.walt.passes.core.ScannableCardCreateResult
+import `is`.walt.passes.core.ScannableCardId
+import `is`.walt.passes.core.ScannableCardInputValidator
+import `is`.walt.passes.core.ScannableColor
+import `is`.walt.passes.core.ScannableFormat
+import `is`.walt.passes.ui.theme.ArgbColor
+import `is`.walt.passes.ui.theme.CategoryAccentColors
+import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
+import `is`.walt.passes.ui.theme.PassesSemantics
+import `is`.walt.passes.ui.theme.PassesTheme
+import `is`.walt.passes.ui.theme.SecuritySheetStyle
+import `is`.walt.passes.ui.theme.SignatureBadgeColors
+import `is`.walt.passes.ui.theme.UnverifiedArtifactStyle
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.annotation.Config
+
+/**
+ * Robolectric-backed Compose smoke tests for the `ScannableCard` trust surfaces. The
+ * behavioral contract under test maps 1:1 to the threat-model controls in
+ * `docs/SCANNABLE_CARD_THREAT_MODEL.md`:
+ *
+ *  - **C2 (non-suppressible "Created by you" caption)**: every tile renders the verbatim
+ *    caption regardless of tile-modifier-scoped size; the full-screen surface renders it
+ *    docked at the bottom; theming the placeholder semantics does not remove it.
+ *  - **C2 (≥2 visual distinguishers)**: indirectly asserted via the surface lock tests in
+ *    `ComposableSurfaceLockTest` (param shape locks out a hide-caption flag) and the no-
+ *    overload assertion. Pixel-level coverage of the dashed border + leading band + icon
+ *    triple is the implementation bead's emulator-backed instrumentation work.
+ *
+ * Caption text is asserted by literal because the wording is the load-bearing trust
+ * claim; renaming it requires updating this test, which forces a security-policy
+ * conversation rather than a silent UX edit.
+ */
+@RunWith(AndroidJUnit4::class)
+@Config(sdk = [34])
+class ScannableCardTrustSurfaceTest {
+
+    @get:Rule
+    val composeRule = createComposeRule()
+
+    private val semantics = PassesSemantics(
+        signatureBadge = SignatureBadgeColors(
+            unsignedBackground = ArgbColor(0xFFFFE0E0.toInt()),
+            unsignedForeground = ArgbColor(0xFF101010.toInt()),
+            selfSignedBackground = ArgbColor(0xFFFFF0E0.toInt()),
+            selfSignedForeground = ArgbColor(0xFF101010.toInt()),
+            appleVerifiedBackground = ArgbColor(0xFFE0FFE0.toInt()),
+            appleVerifiedForeground = ArgbColor(0xFF101010.toInt()),
+            certChainIncompleteBackground = ArgbColor(0xFFFFFFE0.toInt()),
+            certChainIncompleteForeground = ArgbColor(0xFF101010.toInt()),
+        ),
+        expiredBadge = ExpiredBadgeStyle(
+            pillBackground = ArgbColor(0xFF202020.toInt()),
+            pillForeground = ArgbColor(0xFFFFFFFF.toInt()),
+            scrimAlpha = 96,
+        ),
+        securitySheet = SecuritySheetStyle(
+            sheetBackground = ArgbColor(0xFFFFFFFF.toInt()),
+            emphasisBackground = ArgbColor(0xFFEFEFEF.toInt()),
+            emphasisForeground = ArgbColor(0xFF000000.toInt()),
+            bodyForeground = ArgbColor(0xFF202020.toInt()),
+            confirmContainer = ArgbColor(0xFF202020.toInt()),
+            confirmForeground = ArgbColor(0xFFFFFFFF.toInt()),
+            cancelForeground = ArgbColor(0xFF202020.toInt()),
+        ),
+        categoryAccent = CategoryAccentColors(
+            boardingPass = ArgbColor(0xFF1D4ED8.toInt()),
+            eventTicket = ArgbColor(0xFF7C2D92.toInt()),
+            coupon = ArgbColor(0xFF555555.toInt()),
+            storeCard = ArgbColor(0xFF555555.toInt()),
+            generic = ArgbColor(0xFF555555.toInt()),
+        ),
+        unverifiedArtifact = UnverifiedArtifactStyle(
+            accent = ArgbColor(0xFF8A4A2E.toInt()),
+            captionBackground = ArgbColor(0xFFFFF0E0.toInt()),
+            captionForeground = ArgbColor(0xFF301010.toInt()),
+        ),
+    )
+
+    @Test
+    fun trustCaptionTextIsLiteralCreatedByYou() {
+        composeRule.setContent {
+            ThemedHost { ScannableCardTrustCaption() }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun tileRendersTrustCaptionByLiteralWording() {
+        composeRule.setContent {
+            ThemedHost { ScannableCardTile(card = qrFixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun tileRendersTrustCaptionAtConstrainedSmallSize() {
+        // Constrain the tile modifier to a deliberately tight box so the caption layout
+        // has to survive a smaller-than-default slot. Acceptance criterion: caption must
+        // remain visible at every tile size (no truncation, no clipping out of view).
+        composeRule.setContent {
+            ThemedHost {
+                Box(modifier = Modifier.size(160.dp, 220.dp)) {
+                    ScannableCardTile(card = qrFixture(), onClick = {})
+                }
+            }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun tileRendersTrustCaptionForOneDimensionalBarcodeFormat() {
+        // The previewSize path for 1D barcodes is a different code branch from QR; both
+        // must compose with the caption visible.
+        composeRule.setContent {
+            ThemedHost { ScannableCardTile(card = code128Fixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun tilePropagatesClickToOnClickCallback() {
+        var clicks = 0
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardTile(card = qrFixture(), onClick = { clicks++ })
+            }
+        }
+        composeRule.onNodeWithText("Created by you").performClick()
+        composeRule.waitForIdle()
+        // Caption is part of the tile's clickable surface; tapping anywhere navigates.
+        assert(clicks == 1) { "expected one click propagation, got $clicks" }
+    }
+
+    @Test
+    fun fullScreenRendersTrustCaptionDockedAtBottom() {
+        composeRule.setContent {
+            ThemedHost { ScannableCardScreen(card = qrFixture()) }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun fullScreenRendersUserSuppliedLabel() {
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(card = qrFixture(label = "Library card"))
+            }
+        }
+        // The label is wrapped in FSI/PDI, so look up by the isolated form. Mirrors how
+        // the security-sheet tests assert isolated-form display of user-supplied strings.
+        composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun placeholderUnverifiedArtifactStyleStillRendersCaption() {
+        // PassesSemantics ships UnverifiedArtifactStyle.Placeholder so the surfaces
+        // compose under a default-constructed semantics (tests / previews). Lock that
+        // a host who forgets to override still gets the trust caption — degraded
+        // styling is acceptable, missing caption is not.
+        val defaulted = semantics.copy(
+            unverifiedArtifact = UnverifiedArtifactStyle.Placeholder,
+        )
+        composeRule.setContent {
+            PassesTheme(semantics = defaulted) {
+                MaterialTheme { ScannableCardTile(card = qrFixture(), onClick = {}) }
+            }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Composable
+    private fun ThemedHost(content: @Composable () -> Unit) {
+        MaterialTheme { PassesTheme(semantics = semantics, content = content) }
+    }
+
+    private fun qrFixture(label: String = "Membership"): ScannableCard = card(
+        format = ScannableFormat.Qr,
+        payload = "WALT-MEMBER-12345",
+        label = label,
+    )
+
+    private fun code128Fixture(): ScannableCard = card(
+        format = ScannableFormat.Code128,
+        payload = "ABCDE12345",
+        label = "Gym",
+    )
+
+    private fun card(
+        format: ScannableFormat,
+        payload: String,
+        label: String,
+    ): ScannableCard {
+        val result = ScannableCardInputValidator.validate(
+            input = ScannableCardCreateInput(
+                payload = payload,
+                format = format,
+                label = label,
+                color = ScannableColor(0xFF334455.toInt()),
+            ),
+            id = ScannableCardId("test"),
+            createdAt = PassInstant(0L),
+        )
+        return (result as ScannableCardCreateResult.Success).card
+    }
+}

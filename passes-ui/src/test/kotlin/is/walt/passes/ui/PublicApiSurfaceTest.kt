@@ -13,6 +13,7 @@ import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
 import `is`.walt.passes.ui.theme.PassesSemantics
 import `is`.walt.passes.ui.theme.SecuritySheetStyle
 import `is`.walt.passes.ui.theme.SignatureBadgeColors
+import `is`.walt.passes.ui.theme.UnverifiedArtifactStyle
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import java.io.File
@@ -247,7 +248,7 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun passesSemanticsDataClassExposesAllFourSlotFamilies() {
+    fun passesSemanticsDataClassExposesAllSlotFamilies() {
         val argb = ArgbColor(0xFF000000.toInt())
         val semantics = PassesSemantics(
             signatureBadge = SignatureBadgeColors(
@@ -281,6 +282,11 @@ class PublicApiSurfaceTest {
                 storeCard = argb,
                 generic = argb,
             ),
+            unverifiedArtifact = UnverifiedArtifactStyle(
+                accent = argb,
+                captionBackground = argb,
+                captionForeground = argb,
+            ),
         )
         // Reading every nested field forces them to remain in the public-API shape;
         // a rename or removal breaks the test. Document tokens (caption / tile / lane
@@ -290,6 +296,25 @@ class PublicApiSurfaceTest {
         assertThat(semantics.expiredBadge.scrimAlpha).isEqualTo(96)
         assertThat(semantics.securitySheet.confirmContainer).isEqualTo(argb)
         assertThat(semantics.categoryAccent.boardingPass).isEqualTo(argb)
+        assertThat(semantics.unverifiedArtifact.accent).isEqualTo(argb)
+        // captionIconTint defaults to captionForeground when not explicitly supplied —
+        // a consumer that does not opt into a separate accent gets a consistent
+        // monochrome caption. Locking the default here keeps that contract testable.
+        assertThat(semantics.unverifiedArtifact.captionIconTint)
+            .isEqualTo(semantics.unverifiedArtifact.captionForeground)
+    }
+
+    @Test
+    fun unverifiedArtifactStylePlaceholderIsAvailableForTestsAndPreviews() {
+        val placeholder = UnverifiedArtifactStyle.Placeholder
+        // The placeholder is a neutral grayscale set, NOT a brand value — its sole
+        // purpose is to make `PassesSemantics()` default-constructible. Hosts must
+        // override. The test merely asserts the constant exists and parses; concrete
+        // values are not part of the contract.
+        assertThat(placeholder.accent).isNotNull()
+        assertThat(placeholder.captionBackground).isNotNull()
+        assertThat(placeholder.captionForeground).isNotNull()
+        assertThat(placeholder.captionIconTint).isEqualTo(placeholder.captionForeground)
     }
 
     /**

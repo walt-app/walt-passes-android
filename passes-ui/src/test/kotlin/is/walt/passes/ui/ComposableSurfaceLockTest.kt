@@ -119,6 +119,55 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
+    fun scannableCardTrustCaptionHasExactlyOneUserVisibleParameter() {
+        // (modifier) — C2 in SCANNABLE_CARD_THREAT_MODEL.md: no `enabled`, no theme
+        // suppression flag, no overload that hides the caption. The "Created by you"
+        // caption is structurally always-on, mirroring DocumentTrustCaption.
+        assertUserVisibleParamCount(
+            "ScannableCardTrustCaptionKt",
+            "ScannableCardTrustCaption",
+            expected = 1,
+        )
+    }
+
+    @Test
+    fun scannableCardTileHasExactlyThreeUserVisibleParameters() {
+        // (card, onClick, modifier). No share/export, no overflow menu, no
+        // showCaption flag — drift here is a trust-claim regression (SCANNABLE_CARD_
+        // THREAT_MODEL.md C2: caption non-suppressibility).
+        assertUserVisibleParamCount("ScannableCardTileKt", "ScannableCardTile", expected = 3)
+    }
+
+    @Test
+    fun scannableCardScreenHasExactlyTwoUserVisibleParameters() {
+        // (card, modifier). The trust caption is composed inside the surface; no
+        // parameter omits it.
+        assertUserVisibleParamCount(
+            "ScannableCardScreenKt",
+            "ScannableCardScreen",
+            expected = 2,
+        )
+    }
+
+    @Test
+    fun scannableCardSurfacesHaveNoOverloads() {
+        // The caption non-suppressibility rule extends to overloads: a future
+        // contributor cannot quietly add `ScannableCardTile(..., showCaption: Boolean)`
+        // as a sibling with the same name.
+        listOf(
+            "ScannableCardTrustCaptionKt" to "ScannableCardTrustCaption",
+            "ScannableCardTileKt" to "ScannableCardTile",
+            "ScannableCardScreenKt" to "ScannableCardScreen",
+        ).forEach { (file, name) ->
+            val klass = Class.forName("is.walt.passes.ui.$file")
+            val matches = klass.methods.filter { it.name == name || it.name.startsWith("$name-") }
+            assertWithMessage("$name should have exactly one declared overload")
+                .that(matches.size)
+                .isEqualTo(1)
+        }
+    }
+
+    @Test
     fun passImportRejectionSheetAcceptsParseFailureKindAndUiTelemetryGuard() {
         val method = findComposable("PassImportRejectionKt", "PassImportRejectionSheet")
         val typeNames = method.parameterTypes.map { it.simpleName }
