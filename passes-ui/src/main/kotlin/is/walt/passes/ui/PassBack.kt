@@ -25,8 +25,6 @@ import `is`.walt.passes.core.PassField
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.lookupOrSelf
 import `is`.walt.passes.core.resolveLocalizedStrings
-import `is`.walt.passes.ui.internal.FieldLinkScanner
-import `is`.walt.passes.ui.internal.LinkSpan
 import `is`.walt.passes.ui.internal.LocalLocalizedStrings
 
 /**

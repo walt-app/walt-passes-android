@@ -1,10 +1,4 @@
-package `is`.walt.passes.ui.internal
-
-import `is`.walt.passes.ui.B3UrlIntent
-import `is`.walt.passes.ui.EmailIntent
-import `is`.walt.passes.ui.PhoneIntent
-import `is`.walt.passes.ui.SecurityIntent
-import `is`.walt.passes.ui.SourceField
+package `is`.walt.passes.ui
 
 /**
  * Detects URLs, phone numbers, and email addresses in pass back-field values. Returns
@@ -43,8 +37,16 @@ import `is`.walt.passes.ui.SourceField
  * codepoint. This is redundant for phone and email under the current regexes but
  * locks the property so a future regex relaxation does not silently re-open a
  * spoofing path.
+ *
+ * Public so consumers that render their own back-field layouts (e.g. walt-android's
+ * flat-row PKPASS detail screen) can invoke the canonical scanner instead of
+ * hand-rolling regex. [LinkSpan]'s constructor is `internal`, so the only way a
+ * consumer obtains a span is through [scan] — every span they see has therefore
+ * passed the bidi-spoofing rejection, the URL/phone/email shape checks, and the
+ * containment rules below. `copy(...)` on a scanner-produced span still works for
+ * styling needs.
  */
-internal object FieldLinkScanner {
+public object FieldLinkScanner {
 
     // Permissive on the boundary chars (whitespace + brackets + quotes), then the
     // post-filter (`containsRenderingHazard`) rejects matches containing Cf/Cc
@@ -64,7 +66,7 @@ internal object FieldLinkScanner {
     private val phoneRegex =
         Regex("""(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)""")
 
-    fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
+    public fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
         // Field-level rejection: if ANY part of this field contains a Unicode
         // formatting (Cf) or control (Cc) codepoint, surface NO tappable links from
         // it. Even a clean URL adjacent to a hostile one becomes non-tappable; the
@@ -177,8 +179,21 @@ internal object FieldLinkScanner {
     private val PHONE_PREFIX_HINTS = setOf('+', '(')
 }
 
-internal data class LinkSpan(
-    val start: Int,
-    val endExclusive: Int,
-    val intent: SecurityIntent,
+/**
+ * One detected link in a back-field value. [start] and [endExclusive] are UTF-16
+ * char offsets (the units Kotlin's `Regex`, `String.substring`, and
+ * `AnnotatedString` all use) into the field string the consumer passed to
+ * [FieldLinkScanner.scan]; the consumer should use them to style and route taps
+ * over that range. [intent] carries the verbatim substring as its target — no
+ * normalization, no scheme injection — so a confirmation sheet built from it
+ * shows the user exactly what will leave the device.
+ *
+ * The constructor is `internal`: consumers can only obtain a `LinkSpan` from
+ * [FieldLinkScanner.scan], which guarantees the intent target survived the
+ * scanner's validation rules.
+ */
+public data class LinkSpan internal constructor(
+    public val start: Int,
+    public val endExclusive: Int,
+    public val intent: SecurityIntent,
 )
