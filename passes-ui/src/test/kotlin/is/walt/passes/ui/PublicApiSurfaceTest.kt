@@ -6,6 +6,7 @@ import `is`.walt.passes.core.PassColors
 import `is`.walt.passes.core.PassFields
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
 import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
@@ -374,6 +375,25 @@ class PublicApiSurfaceTest {
             break
         }
         return found
+    }
+
+    @Test
+    fun scannableFormatArmsAreReachableViaWhen() {
+        // ScannableCardView.minRenderSizeDp() carries a per-symbology min-size table.
+        // Adding a new arm to ScannableFormat in passes-core would silently fall through
+        // the existing 1D branch without this exhaustive when forcing a UI-side decision.
+        val sizes = ScannableFormat.entries.map { format ->
+            when (format) {
+                ScannableFormat.Qr -> "qr"
+                ScannableFormat.Code128 -> "code128"
+                ScannableFormat.Ean13 -> "ean13"
+                ScannableFormat.UpcA -> "upca"
+                ScannableFormat.Code39 -> "code39"
+            }
+        }
+        assertThat(sizes.toSet()).containsExactlyElementsIn(
+            ScannableFormat.entries.map { it.name.lowercase() },
+        )
     }
 
     private fun passFixture(

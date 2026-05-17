@@ -1,5 +1,10 @@
 package `is`.walt.passes.storage
 
+import `is`.walt.passes.core.EncoderFailureReason
+import `is`.walt.passes.core.LabelRejection
+import `is`.walt.passes.core.PayloadRejection
+import `is`.walt.passes.core.ScannableFormat
+
 /**
  * The result type for every [PassRepository] call. Mirrors the `Result<T> over exceptions`
  * convention from CLAUDE.md and gives the consumer a typed partition of the failure space:
@@ -60,6 +65,16 @@ public sealed interface StorageError {
     ) : StorageError
 
     /**
+     * A scannable-card insert was rejected by the kernel validator
+     * (`ScannableCardInputValidator`). Carries the typed kernel rejection so the
+     * consumer's error UI can localize a specific message without re-running
+     * validation. The row never reaches disk.
+     */
+    public data class ScannableCardRejected(
+        public val reason: ScannableCardRejectionReason,
+    ) : StorageError
+
+    /**
      * The schema version on disk is newer than this build of `passes-storage` understands.
      * This happens when a user downgrades the wallet app. The DB is read-only-protected
      * until a forward-compatible build runs again.
@@ -75,6 +90,24 @@ public sealed interface StorageError {
         public val kind: UnknownStorageFailureKind,
         public val cause: Throwable? = null,
     ) : StorageError
+}
+
+/**
+ * Why a [PassRepository.createScannableCard] call was refused. The first two arms
+ * mirror what `ScannableCardInputValidator` produces today (structural payload and
+ * label checks). The latter two cover the kernel result family's remaining arms; the
+ * validator does not produce them in the current build, but typing them here keeps
+ * the defensive path loud rather than collapsing them into [StorageError.Unknown] on
+ * the day the kernel does start surfacing one.
+ */
+public sealed interface ScannableCardRejectionReason {
+    public data class InvalidLabel(public val reason: LabelRejection) : ScannableCardRejectionReason
+
+    public data class InvalidPayload(public val reason: PayloadRejection) : ScannableCardRejectionReason
+
+    public data class UnsupportedFormat(public val format: ScannableFormat) : ScannableCardRejectionReason
+
+    public data class EncoderFailure(public val reason: EncoderFailureReason) : ScannableCardRejectionReason
 }
 
 /**

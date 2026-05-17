@@ -43,6 +43,18 @@ class SchemaMigrationTest {
         }
     }
 
+    /**
+     * Applies the v2 schema (v1 + the v1 -> v2 hop). A v2 -> v3 test stands on top of
+     * this and asserts that the result equals the full v3 schema once the second hop
+     * lands.
+     */
+    private fun applyV2Ddl(conn: Connection) {
+        applyV1Ddl(conn)
+        conn.createStatement().use { stmt ->
+            for (sql in Schema.MIGRATIONS.getValue(1)) stmt.execute(sql)
+        }
+    }
+
     @Test
     fun migrationFromV1IntroducesDocumentsAndDocumentThumbnailsTables() {
         openMemoryDb().use { conn ->
@@ -151,12 +163,14 @@ class SchemaMigrationTest {
     }
 
     @Test
-    fun freshInstallAndV1ToV2MigrationLandAtTheSameSchema() {
-        // DDL drift guard: Schema.DDL (fresh install) and the v1 -> v2 migration must
-        // produce the same `sqlite_master` rows for tables and indexes. A future
-        // refactor that touches one path and misses the other would silently produce
-        // divergent shapes between fresh installs and migrated installs; this test
-        // surfaces the divergence at JVM-test time.
+    fun freshInstallAndFullMigrationChainLandAtTheSameSchema() {
+        // DDL drift guard: Schema.DDL (fresh install) and the full v1 -> current
+        // migration chain must produce the same `sqlite_master` rows for tables and
+        // indexes. A future refactor that touches one path and misses the other would
+        // silently produce divergent shapes between fresh installs and migrated
+        // installs; this test surfaces the divergence at JVM-test time. Generalized
+        // over all hops so a future Schema.VERSION bump does not need a new parity
+        // test entry.
         val freshShape = openMemoryDb().use { conn ->
             conn.createStatement().use { stmt ->
                 for (sql in Schema.DDL) stmt.execute(sql)
@@ -165,12 +179,18 @@ class SchemaMigrationTest {
         }
         val migratedShape = openMemoryDb().use { conn ->
             applyV1Ddl(conn)
-            for (sql in Schema.MIGRATIONS.getValue(1)) {
-                conn.createStatement().use { it.execute(sql) }
-            }
+            applyFullMigrationChain(conn)
             schemaShape(conn)
         }
         assertThat(migratedShape).isEqualTo(freshShape)
+    }
+
+    private fun applyFullMigrationChain(conn: Connection) {
+        for (from in 1 until Schema.VERSION) {
+            for (sql in Schema.MIGRATIONS.getValue(from)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+        }
     }
 
     private fun schemaShape(conn: Connection): Set<String> {
@@ -194,6 +214,106 @@ class SchemaMigrationTest {
             }
         }
         return out
+    }
+
+    @Test
+    fun migrationFromV2IntroducesScannableCardsTable() {
+        openMemoryDb().use { conn ->
+            applyV2Ddl(conn)
+            for (sql in Schema.MIGRATIONS.getValue(2)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            val tables = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("SELECT name FROM sqlite_master WHERE type='table'")
+                while (rs.next()) tables.add(rs.getString(1))
+            }
+            assertThat(tables).contains(Schema.Tables.SCANNABLE_CARDS)
+        }
+    }
+
+    @Test
+    fun migrationFromV2AddsTheScannableCardsCreatedAtIndex() {
+        openMemoryDb().use { conn ->
+            applyV2Ddl(conn)
+            for (sql in Schema.MIGRATIONS.getValue(2)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            val indexes = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'",
+                )
+                while (rs.next()) indexes.add(rs.getString(1))
+            }
+            assertThat(indexes).contains("idx_scannable_cards_created_at")
+        }
+    }
+
+    @Test
+    fun scannableCardsTableAfterMigrationHasTheExpectedColumns() {
+        openMemoryDb().use { conn ->
+            applyV2Ddl(conn)
+            for (sql in Schema.MIGRATIONS.getValue(2)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            val columns = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA table_info(${Schema.Tables.SCANNABLE_CARDS})")
+                while (rs.next()) columns.add(rs.getString("name"))
+            }
+            assertThat(columns).containsExactly(
+                "id",
+                "payload",
+                "format",
+                "label",
+                "color_argb",
+                "created_at_epoch_ms",
+            )
+        }
+    }
+
+    @Test
+    fun preexistingV2DataSurvivesMigrationToV3() {
+        openMemoryDb().use { conn ->
+            applyV2Ddl(conn)
+
+            // Pre-migration: a v2 pass row and a v2 document row.
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASSES}" +
+                    "(id, type, serial_number, organization_name, description, voided, " +
+                    "signature_status_kind, pass_json, created_at_epoch_ms, updated_at_epoch_ms) " +
+                    "VALUES (1, 'BoardingPass', 'S1', 'AcmeAir', 'desc', 0, 'AppleVerified', " +
+                    "x'00', 1, 1)",
+            ).use { it.executeUpdate() }
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.DOCUMENTS}" +
+                    "(id, display_label, pdf_bytes, byte_count, page_count, imported_at_epoch_ms) " +
+                    "VALUES (1, 'doc.pdf', x'00', 1, 1, 1)",
+            ).use { it.executeUpdate() }
+
+            for (sql in Schema.MIGRATIONS.getValue(2)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            conn.createStatement().use { stmt ->
+                assertThat(
+                    stmt.executeQuery("SELECT COUNT(*) FROM ${Schema.Tables.PASSES}")
+                        .also { it.next() }.getInt(1),
+                ).isEqualTo(1)
+                assertThat(
+                    stmt.executeQuery("SELECT COUNT(*) FROM ${Schema.Tables.DOCUMENTS}")
+                        .also { it.next() }.getInt(1),
+                ).isEqualTo(1)
+                assertThat(
+                    stmt.executeQuery("SELECT COUNT(*) FROM ${Schema.Tables.SCANNABLE_CARDS}")
+                        .also { it.next() }.getInt(1),
+                ).isEqualTo(0)
+            }
+        }
     }
 
     @Test

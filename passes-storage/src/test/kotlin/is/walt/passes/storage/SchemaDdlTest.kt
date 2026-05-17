@@ -29,7 +29,7 @@ class SchemaDdlTest {
     }
 
     @Test
-    fun ddlExecutesCleanlyAndCreatesTheSixDocumentedTables() {
+    fun ddlExecutesCleanlyAndCreatesTheSevenDocumentedTables() {
         applyDdl().use { conn ->
             val tables = mutableSetOf<String>()
             conn.createStatement().use { stmt ->
@@ -43,12 +43,13 @@ class SchemaDdlTest {
                 Schema.Tables.PASS_LOCALES,
                 Schema.Tables.DOCUMENTS,
                 Schema.Tables.DOCUMENT_THUMBNAILS,
+                Schema.Tables.SCANNABLE_CARDS,
             )
         }
     }
 
     @Test
-    fun ddlCreatesTheFourDocumentedIndexes() {
+    fun ddlCreatesTheFiveDocumentedIndexes() {
         applyDdl().use { conn ->
             val indexes = mutableSetOf<String>()
             conn.createStatement().use { stmt ->
@@ -62,6 +63,26 @@ class SchemaDdlTest {
                 "idx_passes_expiration",
                 "idx_passes_identity",
                 "idx_documents_imported_at",
+                "idx_scannable_cards_created_at",
+            )
+        }
+    }
+
+    @Test
+    fun scannableCardsTableHasTheExpectedColumns() {
+        applyDdl().use { conn ->
+            val columns = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA table_info(${Schema.Tables.SCANNABLE_CARDS})")
+                while (rs.next()) columns.add(rs.getString("name"))
+            }
+            assertThat(columns).containsExactly(
+                "id",
+                "payload",
+                "format",
+                "label",
+                "color_argb",
+                "created_at_epoch_ms",
             )
         }
     }

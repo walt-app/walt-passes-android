@@ -1,6 +1,10 @@
 package `is`.walt.passes.storage
 
+import `is`.walt.passes.core.EncoderFailureReason
+import `is`.walt.passes.core.LabelRejection
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.core.PayloadRejection
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatus
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
@@ -26,6 +30,9 @@ class PublicApiSurfaceTest {
         assertThat(branch).isEqualTo("success:7")
     }
 
+    // CyclomaticComplexMethod: scales 1:1 with the StorageError + nested RecordId +
+    // ScannableCardRejectionReason arms by design; complexity is the test's job here.
+    @Suppress("CyclomaticComplexMethod")
     @Test
     fun storageErrorArmsAreReachableViaWhen() {
         val errors: List<StorageError> = listOf(
@@ -34,9 +41,13 @@ class PublicApiSurfaceTest {
             StorageError.DatabaseLocked,
             StorageError.IntegrityViolation(PassRecordId(1L)),
             StorageError.IntegrityViolation(DocumentRecordId(2L)),
+            StorageError.IntegrityViolation(ScannableCardRecordId(3L)),
             StorageError.Unsupported(onDiskSchemaVersion = 99),
             StorageError.Unknown(UnknownStorageFailureKind.DiskFull),
             StorageError.DocumentRejected(DocumentStorageRejectedKind.OversizedAtStorage),
+            StorageError.ScannableCardRejected(
+                ScannableCardRejectionReason.InvalidLabel(LabelRejection.Empty),
+            ),
         )
         val labels = errors.map { error ->
             when (error) {
@@ -46,10 +57,21 @@ class PublicApiSurfaceTest {
                 is StorageError.IntegrityViolation -> when (val id = error.recordId) {
                     is PassRecordId -> "integrity-pass:${id.value}"
                     is DocumentRecordId -> "integrity-doc:${id.value}"
+                    is ScannableCardRecordId -> "integrity-card:${id.value}"
                 }
                 is StorageError.Unsupported -> "unsupported:${error.onDiskSchemaVersion}"
                 is StorageError.Unknown -> "unknown:${error.kind.name}"
                 is StorageError.DocumentRejected -> "doc-rejected:${error.kind.name}"
+                is StorageError.ScannableCardRejected -> when (val r = error.reason) {
+                    is ScannableCardRejectionReason.InvalidLabel ->
+                        "card-rejected:label:${r.reason::class.simpleName}"
+                    is ScannableCardRejectionReason.InvalidPayload ->
+                        "card-rejected:payload:${r.reason::class.simpleName}"
+                    is ScannableCardRejectionReason.UnsupportedFormat ->
+                        "card-rejected:fmt:${r.format.name}"
+                    is ScannableCardRejectionReason.EncoderFailure ->
+                        "card-rejected:enc:${r.reason::class.simpleName}"
+                }
             }
         }
         assertThat(labels).containsExactly(
@@ -58,9 +80,11 @@ class PublicApiSurfaceTest {
             "db-locked",
             "integrity-pass:1",
             "integrity-doc:2",
+            "integrity-card:3",
             "unsupported:99",
             "unknown:DiskFull",
             "doc-rejected:OversizedAtStorage",
+            "card-rejected:label:Empty",
         ).inOrder()
     }
 
@@ -124,6 +148,9 @@ class PublicApiSurfaceTest {
             StorageError.Unsupported(0),
             StorageError.Unknown(UnknownStorageFailureKind.Other),
             StorageError.DocumentRejected(DocumentStorageRejectedKind.OversizedAtStorage),
+            StorageError.ScannableCardRejected(
+                ScannableCardRejectionReason.InvalidPayload(PayloadRejection.Empty),
+            ),
         )
         val kinds = errors.map { error ->
             when (error) {
@@ -134,6 +161,7 @@ class PublicApiSurfaceTest {
                 is StorageError.Unsupported -> StorageFailureKind.Unsupported
                 is StorageError.Unknown -> StorageFailureKind.Unknown
                 is StorageError.DocumentRejected -> StorageFailureKind.DocumentRejected
+                is StorageError.ScannableCardRejected -> StorageFailureKind.ScannableCardRejected
             }
         }
         assertThat(kinds.toSet()).containsExactlyElementsIn(StorageFailureKind.entries)
@@ -141,32 +169,39 @@ class PublicApiSurfaceTest {
 
     @Test
     fun recordIdSealedArmsAreExhaustive() {
-        // Pinning the sealed surface: adding a third RecordId variant requires updating
+        // Pinning the sealed surface: adding a RecordId variant requires updating
         // every consumer that pattern-matches on it (StorageError.IntegrityViolation
         // routing in tests, telemetry projections, etc.).
-        val ids: List<RecordId> = listOf(PassRecordId(1L), DocumentRecordId(2L))
+        val ids: List<RecordId> = listOf(
+            PassRecordId(1L),
+            DocumentRecordId(2L),
+            ScannableCardRecordId(3L),
+        )
         val labels = ids.map { id ->
             when (id) {
                 is PassRecordId -> "pass:${id.value}"
                 is DocumentRecordId -> "doc:${id.value}"
+                is ScannableCardRecordId -> "card:${id.value}"
             }
         }
-        assertThat(labels).containsExactly("pass:1", "doc:2").inOrder()
+        assertThat(labels).containsExactly("pass:1", "doc:2", "card:3").inOrder()
     }
 
     @Test
-    fun schemaDeclaresSixTablesAndIsAtVersionTwo() {
-        assertThat(Schema.VERSION).isEqualTo(2)
+    fun schemaDeclaresSevenTablesAndIsAtVersionThree() {
+        assertThat(Schema.VERSION).isEqualTo(3)
         assertThat(Schema.Tables.SCHEMA_META).isEqualTo("schema_meta")
         assertThat(Schema.Tables.PASSES).isEqualTo("passes")
         assertThat(Schema.Tables.PASS_IMAGES).isEqualTo("pass_images")
         assertThat(Schema.Tables.PASS_LOCALES).isEqualTo("pass_locales")
         assertThat(Schema.Tables.DOCUMENTS).isEqualTo("documents")
         assertThat(Schema.Tables.DOCUMENT_THUMBNAILS).isEqualTo("document_thumbnails")
+        assertThat(Schema.Tables.SCANNABLE_CARDS).isEqualTo("scannable_cards")
         // schema_meta + passes + 3 pass-side indexes + pass_images + pass_locales
-        // + documents + 1 document index + document_thumbnails = 10 statements.
-        assertThat(Schema.DDL).hasSize(10)
-        assertThat(Schema.MIGRATIONS.keys).containsExactly(1)
+        // + documents + 1 document index + document_thumbnails
+        // + scannable_cards + 1 scannable-card index = 12 statements.
+        assertThat(Schema.DDL).hasSize(12)
+        assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2)
     }
 
     @Test
@@ -353,6 +388,18 @@ class PublicApiSurfaceTest {
             override fun onDocumentDeleted(event: DocumentDeletedEvent) {
                 recorded += "doc-deleted:${event.byteCount}"
             }
+
+            override fun onScannableCardCreated(format: ScannableFormat) {
+                recorded += "card-created:${format.name}"
+            }
+
+            override fun onScannableCardDeleted(format: ScannableFormat) {
+                recorded += "card-deleted:${format.name}"
+            }
+
+            override fun onScannableCardRejected(kind: ScannableCardRejectedKind) {
+                recorded += "card-rejected:${kind.name}"
+            }
         }
         guard.onKeyProviderInitialized(KeyBacking.StrongBox)
         guard.onPassUpserted(PassType.BoardingPass, SignatureStatusKind.AppleVerified, false)
@@ -362,6 +409,9 @@ class PublicApiSurfaceTest {
         guard.onDocumentImported(DocumentImportedEvent(byteCount = 1024L, pageCount = 3))
         guard.onDocumentRejected(DocumentStorageRejectedKind.OversizedAtStorage)
         guard.onDocumentDeleted(DocumentDeletedEvent(byteCount = 2048L))
+        guard.onScannableCardCreated(ScannableFormat.Qr)
+        guard.onScannableCardDeleted(ScannableFormat.Code128)
+        guard.onScannableCardRejected(ScannableCardRejectedKind.PayloadInvalid)
 
         assertThat(recorded).containsExactly(
             "init:StrongBox",
@@ -372,6 +422,47 @@ class PublicApiSurfaceTest {
             "doc-imported:1024:3",
             "doc-rejected:OversizedAtStorage",
             "doc-deleted:2048",
+            "card-created:Qr",
+            "card-deleted:Code128",
+            "card-rejected:PayloadInvalid",
+        ).inOrder()
+    }
+
+    @Test
+    fun scannableCardRejectedKindCoversAllFourArms() {
+        // The first two arms are what the validator produces today; the latter two
+        // carry the kernel's UnsupportedFormat / EncoderFailure result arms through
+        // the typed channel so they cannot collapse into Unknown(Other) when the
+        // validator changes.
+        assertThat(ScannableCardRejectedKind.entries.map { it.name }).containsExactly(
+            "LabelInvalid",
+            "PayloadInvalid",
+            "FormatUnsupported",
+            "EncoderFailed",
+        ).inOrder()
+    }
+
+    @Test
+    fun scannableCardRejectionReasonArmsAreReachableViaWhen() {
+        val reasons: List<ScannableCardRejectionReason> = listOf(
+            ScannableCardRejectionReason.InvalidLabel(LabelRejection.Empty),
+            ScannableCardRejectionReason.InvalidPayload(PayloadRejection.Empty),
+            ScannableCardRejectionReason.UnsupportedFormat(ScannableFormat.Qr),
+            ScannableCardRejectionReason.EncoderFailure(EncoderFailureReason.PayloadTooDense),
+        )
+        val labels = reasons.map { reason ->
+            when (reason) {
+                is ScannableCardRejectionReason.InvalidLabel -> "label:${reason.reason::class.simpleName}"
+                is ScannableCardRejectionReason.InvalidPayload -> "payload:${reason.reason::class.simpleName}"
+                is ScannableCardRejectionReason.UnsupportedFormat -> "fmt:${reason.format.name}"
+                is ScannableCardRejectionReason.EncoderFailure -> "enc:${reason.reason::class.simpleName}"
+            }
+        }
+        assertThat(labels).containsExactly(
+            "label:Empty",
+            "payload:Empty",
+            "fmt:Qr",
+            "enc:PayloadTooDense",
         ).inOrder()
     }
 

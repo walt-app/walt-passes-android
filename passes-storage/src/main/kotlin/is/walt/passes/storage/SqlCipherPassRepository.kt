@@ -2,14 +2,23 @@ package `is`.walt.passes.storage
 
 import android.content.Context
 import `is`.walt.passes.core.Pass
+import `is`.walt.passes.core.PassInstant
+import `is`.walt.passes.core.ScannableCard
+import `is`.walt.passes.core.ScannableCardCreateInput
+import `is`.walt.passes.core.ScannableCardCreateResult
+import `is`.walt.passes.core.ScannableCardId
+import `is`.walt.passes.core.ScannableCardInputValidator
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.core.toKind
 import `is`.walt.passes.storage.internal.DocumentInsertRequest
 import `is`.walt.passes.storage.internal.DocumentStore
 import `is`.walt.passes.storage.internal.PassStore
+import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
+import `is`.walt.passes.storage.internal.ScannableCardStore
 import `is`.walt.passes.storage.internal.SqlCipherDatabaseFactory
 import `is`.walt.passes.storage.internal.SqlCipherDocumentStore
 import `is`.walt.passes.storage.internal.SqlCipherPassStore
+import `is`.walt.passes.storage.internal.SqlCipherScannableCardStore
 import `is`.walt.passes.storage.internal.toFailureKind
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -28,9 +37,19 @@ import java.util.concurrent.atomic.AtomicBoolean
  * live here so they can be exercised against an in-memory fake [PassStore]. The constructor
  * is internal; [create] is the only construction path.
  */
+// LongParameterList: the constructor carries one store per persistence tier (pass,
+// document, scannable-card) plus the cross-cutting telemetry / dispatcher / clock /
+// key-backing seams; collapsing them into a holder type would obscure the fan-out the
+// `create()` factory has to wire up.
+// TooManyFunctions: scales linearly with the number of tier-specific surface methods on
+// PassRepository; the class is one coherent SQLCipher entry point per the repo contract
+// (see PassRepository KDoc), and splitting it would scatter the shared write-mutex and
+// closed-flag invariants.
+@Suppress("LongParameterList", "TooManyFunctions")
 public class SqlCipherPassRepository internal constructor(
     private val store: PassStore,
     private val documentStore: DocumentStore,
+    private val scannableCardStore: ScannableCardStore,
     private val telemetryGuard: StorageTelemetryGuard,
     private val ioDispatcher: CoroutineDispatcher,
     private val clock: () -> Long,
@@ -45,6 +64,9 @@ public class SqlCipherPassRepository internal constructor(
 
     private val _documents: MutableStateFlow<List<DocumentRow>> =
         MutableStateFlow(documentStore.listRows())
+
+    private val _scannableCards: MutableStateFlow<List<ScannableCard>> =
+        MutableStateFlow(scannableCardStore.listAll())
 
     init {
         telemetryGuard.onKeyProviderInitialized(keyBacking)
@@ -132,6 +154,84 @@ public class SqlCipherPassRepository internal constructor(
 
     override fun observeDocuments(): Flow<List<DocumentRow>> = _documents.asStateFlow()
 
+    override suspend fun createScannableCard(
+        input: ScannableCardCreateInput,
+    ): StorageResult<ScannableCardRecordId> = runIo {
+        // Validator does not use the id for validation; storage mints the real one
+        // post-insert and listAll() rehydrates the StateFlow with the stringified row id.
+        val validation = ScannableCardInputValidator.validate(
+            input = input,
+            id = ScannableCardId(""),
+            createdAt = PassInstant(clock()),
+        )
+        val approved = when (validation) {
+            is ScannableCardCreateResult.Success -> validation.card
+            is ScannableCardCreateResult.InvalidLabel ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.InvalidLabel(validation.reason),
+                    telemetryKind = ScannableCardRejectedKind.LabelInvalid,
+                )
+            is ScannableCardCreateResult.InvalidPayload ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.InvalidPayload(validation.reason),
+                    telemetryKind = ScannableCardRejectedKind.PayloadInvalid,
+                )
+            is ScannableCardCreateResult.UnsupportedFormat ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.UnsupportedFormat(validation.format),
+                    telemetryKind = ScannableCardRejectedKind.FormatUnsupported,
+                )
+            is ScannableCardCreateResult.EncoderFailure ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.EncoderFailure(validation.reason),
+                    telemetryKind = ScannableCardRejectedKind.EncoderFailed,
+                )
+        }
+
+        val outcome = writeMutex.withLock {
+            // O(N) per insert: listAll() re-runs the validator on every row. Acceptable
+            // because wallets hold O(10s) of cards; revisit if profiles flag it.
+            val now = clock()
+            val o = scannableCardStore.insert(
+                ScannableCardInsertRequest(
+                    payload = approved.payload,
+                    format = approved.format,
+                    label = approved.label,
+                    colorArgb = approved.color?.argb,
+                    nowEpochMs = now,
+                ),
+            )
+            _scannableCards.value = scannableCardStore.listAll()
+            o
+        }
+        telemetryGuard.onScannableCardCreated(approved.format)
+        StorageResult.Success(outcome.id)
+    }
+
+    override suspend fun loadScannableCard(
+        id: ScannableCardRecordId,
+    ): StorageResult<ScannableCard> = runIo {
+        val card = scannableCardStore.loadById(id)
+            ?: return@runIo failure(StorageError.IntegrityViolation(id))
+        StorageResult.Success(card)
+    }
+
+    override suspend fun deleteScannableCard(
+        id: ScannableCardRecordId,
+    ): StorageResult<Unit> = runIo {
+        val deleted = writeMutex.withLock {
+            val outcome = scannableCardStore.delete(id) ?: return@withLock null
+            _scannableCards.value = _scannableCards.value.filterNot { it.id.value == id.value.toString() }
+            outcome
+        } ?: return@runIo failure(StorageError.IntegrityViolation(id))
+
+        telemetryGuard.onScannableCardDeleted(deleted.format)
+        StorageResult.Success(Unit)
+    }
+
+    override fun observeScannableCards(): Flow<List<ScannableCard>> =
+        _scannableCards.asStateFlow()
+
     override suspend fun loadDocumentBytes(id: DocumentRecordId): StorageResult<ByteArray> = runIo {
         val bytes = documentStore.loadBytes(id)
             ?: return@runIo failure(StorageError.IntegrityViolation(id))
@@ -157,6 +257,7 @@ public class SqlCipherPassRepository internal constructor(
 
     override fun close() {
         if (closed.compareAndSet(false, true)) {
+            scannableCardStore.close()
             documentStore.close()
             store.close()
         }
@@ -189,6 +290,18 @@ public class SqlCipherPassRepository internal constructor(
     private fun <T> rejectDocument(kind: DocumentStorageRejectedKind): StorageResult<T> {
         telemetryGuard.onDocumentRejected(kind)
         return StorageResult.Failure(StorageError.DocumentRejected(kind))
+    }
+
+    /**
+     * Single emission point for a scannable-card validator rejection. Same discipline
+     * as [rejectDocument]: skip [failure] so `onStorageFailure` does not double-fire.
+     */
+    private fun <T> rejectScannableCard(
+        reason: ScannableCardRejectionReason,
+        telemetryKind: ScannableCardRejectedKind,
+    ): StorageResult<T> {
+        telemetryGuard.onScannableCardRejected(telemetryKind)
+        return StorageResult.Failure(StorageError.ScannableCardRejected(reason))
     }
 
     /**
@@ -272,9 +385,11 @@ public class SqlCipherPassRepository internal constructor(
             }
             val store = SqlCipherPassStore(opened.db, opened.keyHandle, telemetryGuard)
             val documentStore = SqlCipherDocumentStore(opened.db)
+            val scannableCardStore = SqlCipherScannableCardStore(opened.db, telemetryGuard)
             val repo = SqlCipherPassRepository(
                 store = store,
                 documentStore = documentStore,
+                scannableCardStore = scannableCardStore,
                 telemetryGuard = telemetryGuard,
                 ioDispatcher = ioDispatcher,
                 clock = clock,

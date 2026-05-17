@@ -16,6 +16,8 @@ import `is`.walt.passes.core.PassFields
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.core.ScannableCard
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.storage.internal.DeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentDeleteOutcome
@@ -23,6 +25,10 @@ import `is`.walt.passes.storage.internal.DocumentInsertOutcome
 import `is`.walt.passes.storage.internal.DocumentInsertRequest
 import `is`.walt.passes.storage.internal.DocumentStore
 import `is`.walt.passes.storage.internal.PassStore
+import `is`.walt.passes.storage.internal.ScannableCardDeleteOutcome
+import `is`.walt.passes.storage.internal.ScannableCardInsertOutcome
+import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
+import `is`.walt.passes.storage.internal.ScannableCardStore
 import `is`.walt.passes.storage.internal.UpsertOutcome
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -59,6 +65,7 @@ class PassRepositoryContractTest {
         val repo = SqlCipherPassRepository(
             store = store,
             documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_000L },
@@ -75,6 +82,7 @@ class PassRepositoryContractTest {
         val repo = SqlCipherPassRepository(
             store = store,
             documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_000L },
@@ -99,6 +107,7 @@ class PassRepositoryContractTest {
         val repo = SqlCipherPassRepository(
             store = store,
             documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_000L },
@@ -125,6 +134,7 @@ class PassRepositoryContractTest {
         val repo = SqlCipherPassRepository(
             store = store,
             documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1L },
@@ -148,6 +158,7 @@ class PassRepositoryContractTest {
         val repo = SqlCipherPassRepository(
             store = store,
             documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1L },
@@ -292,6 +303,15 @@ class PassRepositoryContractTest {
         override fun onDocumentDeleted(event: DocumentDeletedEvent) {
             events += "doc-deleted:${event.byteCount}"
         }
+        override fun onScannableCardCreated(format: ScannableFormat) {
+            events += "card-created:${format.name}"
+        }
+        override fun onScannableCardDeleted(format: ScannableFormat) {
+            events += "card-deleted:${format.name}"
+        }
+        override fun onScannableCardRejected(kind: ScannableCardRejectedKind) {
+            events += "card-rejected:${kind.name}"
+        }
     }
 
     /**
@@ -308,6 +328,19 @@ class PassRepositoryContractTest {
         override fun loadThumbnail(id: DocumentRecordId): ByteArray? = null
         override fun delete(id: DocumentRecordId): DocumentDeleteOutcome? = null
         override fun close() { closeCount++ }
+    }
+
+    /**
+     * Scannable-card sibling of [NoOpDocumentStore]. Pass-side contract tests do not
+     * exercise scannable-card paths; reaching in here is an error.
+     */
+    private object NoOpScannableCardStore : ScannableCardStore {
+        override fun listAll(): List<ScannableCard> = emptyList()
+        override fun loadById(id: ScannableCardRecordId): ScannableCard? = null
+        override fun insert(request: ScannableCardInsertRequest): ScannableCardInsertOutcome =
+            error("unused in pass-side tests")
+        override fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome? = null
+        override fun close() = Unit
     }
 
     private companion object {
