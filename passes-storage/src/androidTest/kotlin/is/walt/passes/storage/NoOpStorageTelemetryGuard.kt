@@ -1,6 +1,7 @@
 package `is`.walt.passes.storage
 
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.core.ScannableFormat
 
 /**
  * Telemetry sink for instrumentation tests. The on-device tests verify storage behavior,
@@ -23,4 +24,7 @@ internal object NoOpStorageTelemetryGuard : StorageTelemetryGuard {
     override fun onDocumentImported(event: DocumentImportedEvent) = Unit
     override fun onDocumentRejected(kind: DocumentStorageRejectedKind) = Unit
     override fun onDocumentDeleted(event: DocumentDeletedEvent) = Unit
+    override fun onScannableCardCreated(format: ScannableFormat) = Unit
+    override fun onScannableCardDeleted(format: ScannableFormat) = Unit
+    override fun onScannableCardRejected(kind: ScannableCardRejectedKind) = Unit
 }

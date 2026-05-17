@@ -14,7 +14,7 @@ package `is`.walt.passes.storage
 public object Schema {
     public const val DATABASE_NAME: String = "walt_passes.db"
 
-    public const val VERSION: Int = 2
+    public const val VERSION: Int = 3
 
     public object Tables {
         public const val SCHEMA_META: String = "schema_meta"
@@ -23,6 +23,7 @@ public object Schema {
         public const val PASS_LOCALES: String = "pass_locales"
         public const val DOCUMENTS: String = "documents"
         public const val DOCUMENT_THUMBNAILS: String = "document_thumbnails"
+        public const val SCANNABLE_CARDS: String = "scannable_cards"
     }
 
     public object MetaKeys {
@@ -39,6 +40,28 @@ public object Schema {
      * never drift. A `SchemaParityTest` asserts that a fresh-install DB and a
      * v1-then-migrated DB land at the same `sqlite_master` shape.
      */
+    /**
+     * Statements that introduce the v3 scannable-cards table. Referenced from both [DDL]
+     * (for fresh installs) and [MIGRATIONS]`[2]` (for v2 -> v3 upgrades) so the two paths
+     * cannot drift. `scannable_cards` lives in the same SQLCipher database as the existing
+     * tables, so [BackupRulesContract.REQUIRED_EXCLUDES] already covers it; no new entry is
+     * required there.
+     */
+    private val V3_SCANNABLE_CARD_TABLES: List<String> = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS scannable_cards (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            payload             TEXT    NOT NULL,
+            format              TEXT    NOT NULL,
+            label               TEXT    NOT NULL,
+            color_argb          INTEGER,
+            created_at_epoch_ms INTEGER NOT NULL
+        )
+        """.trimIndent(),
+        "CREATE INDEX IF NOT EXISTS idx_scannable_cards_created_at " +
+            "ON scannable_cards(created_at_epoch_ms)",
+    )
+
     private val V2_DOCUMENT_TABLES: List<String> = listOf(
         """
         CREATE TABLE IF NOT EXISTS documents (
@@ -109,7 +132,7 @@ public object Schema {
             PRIMARY KEY (pass_id, locale_tag)
         )
         """.trimIndent(),
-    ) + V2_DOCUMENT_TABLES
+    ) + V2_DOCUMENT_TABLES + V3_SCANNABLE_CARD_TABLES
 
     /**
      * Schema migrations, keyed by `fromVersion`. Forward-only per ADR 0002. Each entry's
@@ -123,5 +146,6 @@ public object Schema {
      */
     public val MIGRATIONS: Map<Int, List<String>> = mapOf(
         1 to V2_DOCUMENT_TABLES,
+        2 to V3_SCANNABLE_CARD_TABLES,
     )
 }

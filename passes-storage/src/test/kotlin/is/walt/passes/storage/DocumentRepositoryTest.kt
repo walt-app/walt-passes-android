@@ -3,6 +3,8 @@ package `is`.walt.passes.storage
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.Pass
+import `is`.walt.passes.core.ScannableCard
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.storage.internal.DeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentDeleteOutcome
@@ -10,6 +12,10 @@ import `is`.walt.passes.storage.internal.DocumentInsertOutcome
 import `is`.walt.passes.storage.internal.DocumentInsertRequest
 import `is`.walt.passes.storage.internal.DocumentStore
 import `is`.walt.passes.storage.internal.PassStore
+import `is`.walt.passes.storage.internal.ScannableCardDeleteOutcome
+import `is`.walt.passes.storage.internal.ScannableCardInsertOutcome
+import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
+import `is`.walt.passes.storage.internal.ScannableCardStore
 import `is`.walt.passes.storage.internal.UpsertOutcome
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -264,6 +270,7 @@ class DocumentRepositoryTest {
         SqlCipherPassRepository(
             store = NoOpPassStore,
             documentStore = docs,
+            scannableCardStore = NoOpScannableCardStore,
             telemetryGuard = telemetry,
             ioDispatcher = UnconfinedTestDispatcher(),
             clock = { 1_000L },
@@ -327,6 +334,18 @@ class DocumentRepositoryTest {
     /**
      * Pass-side store stub: the document tests do not exercise pass-side code paths.
      */
+    /**
+     * Scannable-card store stub: the document tests do not exercise scannable-card paths.
+     */
+    private object NoOpScannableCardStore : ScannableCardStore {
+        override fun listAll(): List<ScannableCard> = emptyList()
+        override fun loadById(id: ScannableCardRecordId): ScannableCard? = null
+        override fun insert(request: ScannableCardInsertRequest): ScannableCardInsertOutcome =
+            error("unused in document tests")
+        override fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome? = null
+        override fun close() = Unit
+    }
+
     private object NoOpPassStore : PassStore {
         override fun listSummaries(): List<PassSummary> = emptyList()
         override fun loadById(id: PassRecordId): StoredPass? = null
@@ -370,5 +389,8 @@ class DocumentRepositoryTest {
         override fun onDocumentDeleted(event: DocumentDeletedEvent) {
             events += "doc-deleted:${event.byteCount}"
         }
+        override fun onScannableCardCreated(format: ScannableFormat) = Unit
+        override fun onScannableCardDeleted(format: ScannableFormat) = Unit
+        override fun onScannableCardRejected(kind: ScannableCardRejectedKind) = Unit
     }
 }

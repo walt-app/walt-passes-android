@@ -1,5 +1,8 @@
 package `is`.walt.passes.storage
 
+import `is`.walt.passes.core.LabelRejection
+import `is`.walt.passes.core.PayloadRejection
+
 /**
  * The result type for every [PassRepository] call. Mirrors the `Result<T> over exceptions`
  * convention from CLAUDE.md and gives the consumer a typed partition of the failure space:
@@ -60,6 +63,16 @@ public sealed interface StorageError {
     ) : StorageError
 
     /**
+     * A scannable-card insert was rejected by the kernel validator
+     * (`ScannableCardInputValidator`). Carries the typed kernel rejection so the
+     * consumer's error UI can localize a specific message without re-running
+     * validation. The row never reaches disk.
+     */
+    public data class ScannableCardRejected(
+        public val reason: ScannableCardRejectionReason,
+    ) : StorageError
+
+    /**
      * The schema version on disk is newer than this build of `passes-storage` understands.
      * This happens when a user downgrades the wallet app. The DB is read-only-protected
      * until a forward-compatible build runs again.
@@ -82,6 +95,19 @@ public sealed interface StorageError {
  * are an API addition; new strings are not. Mirrors the `passes-core` discipline of
  * routing telemetry through enums rather than free-form strings.
  */
+/**
+ * Why a [PassRepository.createScannableCard] call was refused by the kernel validator.
+ * Mirrors the two structural arms `ScannableCardInputValidator` can surface; the
+ * encoder-failure and unsupported-format arms of `ScannableCardCreateResult` are NOT
+ * surfaced here because the validator on its own never produces them (encoding happens
+ * downstream at render time).
+ */
+public sealed interface ScannableCardRejectionReason {
+    public data class InvalidLabel(public val reason: LabelRejection) : ScannableCardRejectionReason
+
+    public data class InvalidPayload(public val reason: PayloadRejection) : ScannableCardRejectionReason
+}
+
 public enum class UnknownStorageFailureKind {
     DiskFull,
     PermissionDenied,

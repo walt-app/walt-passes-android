@@ -3,6 +3,8 @@ package `is`.walt.passes.storage
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.core.ScannableCard
+import `is`.walt.passes.core.ScannableCardCreateInput
 import `is`.walt.passes.core.SignatureStatus
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
@@ -115,6 +117,50 @@ public interface PassRepository {
     public suspend fun deleteDocument(id: DocumentRecordId): StorageResult<Unit>
 
     /**
+     * Mints a [ScannableCard] from raw [input], persists it, and returns the assigned
+     * [ScannableCardRecordId]. The kernel validator
+     * (`ScannableCardInputValidator.validate`) is the single choke point that decides
+     * whether the input passes: a validation rejection bubbles up as
+     * [StorageError.ScannableCardRejected] with the typed kernel reason preserved, never
+     * as a generic infra failure. The row never reaches disk in that case.
+     *
+     * Storage owns the id and timestamp: the [ScannableCardId][`is`.walt.passes.core.ScannableCardId]
+     * the consumer observes on the materialized [ScannableCard] is the stringified row
+     * id, and `createdAt` is taken from the repository's injected clock at insert time.
+     * The kernel does not mint these (see KDoc on `ScannableCardId`); centralizing here
+     * keeps multiple consumer call sites from inventing their own id schemes.
+     */
+    public suspend fun createScannableCard(
+        input: ScannableCardCreateInput,
+    ): StorageResult<ScannableCardRecordId>
+
+    /**
+     * Loads a stored [ScannableCard] by row id. Returns [StorageError.IntegrityViolation]
+     * if no row matches.
+     */
+    public suspend fun loadScannableCard(
+        id: ScannableCardRecordId,
+    ): StorageResult<ScannableCard>
+
+    /**
+     * Irreversible delete (ADR 0002 D6). Mirrors [delete] for passes: removes the row
+     * in one transaction, updates the [observeScannableCards] flow, then emits
+     * `onScannableCardDeleted`. No undo, no soft-delete, no VACUUM.
+     */
+    public suspend fun deleteScannableCard(
+        id: ScannableCardRecordId,
+    ): StorageResult<Unit>
+
+    /**
+     * Cold flow of [ScannableCard] rows sorted by `created_at_epoch_ms` descending.
+     * Emits the current snapshot on collect and re-emits on insert / delete. Unlike the
+     * pass and document lanes, the full card materializes here — there are no large
+     * blob columns to defer, and the consumer's tile renderer needs the payload to
+     * re-encode the barcode at render time.
+     */
+    public fun observeScannableCards(): Flow<List<ScannableCard>>
+
+    /**
      * Releases the underlying database connection. Idempotent: calling [close] more than
      * once is a no-op, and method calls after [close] return [StorageError.DatabaseLocked]
      * rather than throwing. Intended for consumer paths where the repository's lifetime is
@@ -184,3 +230,12 @@ public value class PassRecordId(public override val value: Long) : RecordId
  */
 @JvmInline
 public value class DocumentRecordId(public override val value: Long) : RecordId
+
+/**
+ * Auto-incremented primary-key surrogate for a row in the `scannable_cards` table.
+ * Distinct from [`is`.walt.passes.core.ScannableCardId] (which is the kernel's opaque
+ * string identifier exposed on [ScannableCard]) so that a row id cannot be silently
+ * substituted for any other [RecordId] arm at compile time.
+ */
+@JvmInline
+public value class ScannableCardRecordId(public override val value: Long) : RecordId

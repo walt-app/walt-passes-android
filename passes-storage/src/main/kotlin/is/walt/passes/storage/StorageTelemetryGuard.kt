@@ -1,6 +1,7 @@
 package `is`.walt.passes.storage
 
 import `is`.walt.passes.core.PassType
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatusKind as CoreSignatureStatusKind
 
 /**
@@ -20,6 +21,10 @@ public typealias SignatureStatusKind = CoreSignatureStatusKind
  * shape of these methods, not by documentation. Reviewers MUST treat any future addition
  * of a free-form parameter as a security-policy change.
  */
+// ComplexInterface: the surface intentionally carries every storage-side telemetry
+// event in one place — that cohesion is the trust claim. Splitting would fragment the
+// no-PII-in-telemetry guarantee across multiple bindings.
+@Suppress("ComplexInterface")
 public interface StorageTelemetryGuard {
     /**
      * Emitted once per database open after the key provider is initialized. Reports the
@@ -79,6 +84,39 @@ public interface StorageTelemetryGuard {
      * document StateFlow is updated. Carries the byte count of the deleted PDF only.
      */
     public fun onDocumentDeleted(event: DocumentDeletedEvent)
+
+    /**
+     * A user-generated scannable card row was inserted. Carries the format only — the
+     * payload, label, and color are user-typed free-form and are intentionally NOT part
+     * of the event. The same no-PII discipline as `onPassUpserted` applies.
+     */
+    public fun onScannableCardCreated(format: ScannableFormat)
+
+    /**
+     * A scannable card row was deleted. Emitted after the transaction commits and after
+     * the observe flow is updated. Carries the format only.
+     */
+    public fun onScannableCardDeleted(format: ScannableFormat)
+
+    /**
+     * A scannable-card insert was refused by the kernel validator. Emitted before any
+     * row is created. The structural [kind] is what flows through telemetry; the
+     * underlying kernel rejection reason is preserved on the typed
+     * [StorageError.ScannableCardRejected] for the consumer's error UI but is NOT
+     * carried here (it would re-link telemetry to user input — bidi-marker offsets,
+     * offending characters, etc.).
+     */
+    public fun onScannableCardRejected(kind: ScannableCardRejectedKind)
+}
+
+/**
+ * Why a scannable-card insert was refused, projected to a stable telemetry vocabulary.
+ * Two arms only — the kernel's richer rejection reasons (offending char, length, check
+ * digit, etc.) carry information derived from user input and stay off telemetry.
+ */
+public enum class ScannableCardRejectedKind {
+    LabelInvalid,
+    PayloadInvalid,
 }
 
 /**
@@ -126,6 +164,7 @@ public enum class StorageFailureKind {
     Unsupported,
     Unknown,
     DocumentRejected,
+    ScannableCardRejected,
 }
 
 public enum class MigrationFailureKind {
