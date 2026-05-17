@@ -196,9 +196,7 @@ private fun BarcodeCreateActions(
         horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
     ) {
         // Confirm is the low-emphasis text button - inverted from B3Url so a
-        // stray dismissal lands on Cancel, not on a silent persist. The
-        // divergence is pinned by ComposableSurfaceLockTest's three-param lock
-        // on this composable; resyncing the two surfaces will fail that lock.
+        // stray dismissal lands on Cancel, not on a silent persist.
         TextButton(
             onClick = onConfirm,
             modifier = Modifier.testTag(BarcodeCreateConfirmTestTags.Confirm),
