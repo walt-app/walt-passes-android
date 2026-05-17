@@ -16,6 +16,8 @@ class BarcodeEncoderTest {
 
     @Test
     fun code128EncodesProducingNonTrivialMatrix() {
+        // Fixture stays inside the printable-ASCII range the validator enforces for Code128
+        // (ScannableFormatConstraints.PRINTABLE_ASCII_MIN..MAX, i.e. 0x20..0x7E).
         val result = BarcodeEncoder.encode("ABC123 xyz", ScannableFormat.Code128)
         val matrix = (result as EncodeResult.Success).matrix
         assertThat(matrix.width).isGreaterThan(0)
@@ -28,6 +30,7 @@ class BarcodeEncoderTest {
         val result = BarcodeEncoder.encode("HELLO-123", ScannableFormat.Code39)
         val matrix = (result as EncodeResult.Success).matrix
         assertThat(matrix.width).isGreaterThan(0)
+        assertThat(matrix.height).isGreaterThan(0)
         assertThat(anyModuleSet(matrix)).isTrue()
     }
 
@@ -93,12 +96,30 @@ class BarcodeEncoderTest {
     // ---- no-throw contract ----
 
     @Test
-    fun emptyPayloadDoesNotThrow() {
-        // Validator rejects empty upstream, but the encoder must still translate to a Failure.
+    fun emptyPayloadFailsWithFormatAttribution() {
+        // Validator rejects empty upstream, but the encoder must still translate to Failure
+        // and the failure must carry the format that was attempted, so a consumer triaging
+        // an "empty input" bug across multiple format-picker positions can attribute it.
+        // Locks no-throw AND per-format dispatch correctness in one test. Asserts on
+        // WriterRejected.format specifically; PayloadTooDense is not a plausible arm for an
+        // empty input (zero bytes can never exceed any ceiling).
         for (format in ScannableFormat.entries) {
             val result = BarcodeEncoder.encode("", format)
-            assertThat(result).isInstanceOf(EncodeResult.Failure::class.java)
+            val reason = (result as EncodeResult.Failure).reason
+            assertThat(reason).isInstanceOf(EncoderFailureReason.WriterRejected::class.java)
+            assertThat((reason as EncoderFailureReason.WriterRejected).format).isEqualTo(format)
         }
+    }
+
+    @Test
+    fun proactiveQrByteCeilingHandlesNonAsciiByteCountCorrectly() {
+        // Char count of 1,200 sits below QR_BYTE_CEILING_ECC_M (2,331) — but each "é" is
+        // two UTF-8 bytes, so the byte count is 2,400 and the proactive guard must fire.
+        // Pins the load-bearing detail that the byte-length check is on UTF-8 bytes, not
+        // chars; a regression to String.length would let this slip through to ZXing.
+        val payload = "é".repeat(1_200)
+        val result = BarcodeEncoder.encode(payload, ScannableFormat.Qr)
+        assertThat((result as EncodeResult.Failure).reason).isEqualTo(EncoderFailureReason.PayloadTooDense)
     }
 
     // ---- BarcodeMatrix sanity ----

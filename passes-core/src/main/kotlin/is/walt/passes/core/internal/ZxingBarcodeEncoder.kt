@@ -1,7 +1,6 @@
 package `is`.walt.passes.core.internal
 
 import com.google.zxing.EncodeHintType
-import com.google.zxing.WriterException
 import com.google.zxing.common.BitMatrix
 import com.google.zxing.oned.Code128Writer
 import com.google.zxing.oned.Code39Writer
@@ -13,6 +12,7 @@ import `is`.walt.passes.core.BarcodeMatrix
 import `is`.walt.passes.core.EncodeResult
 import `is`.walt.passes.core.EncoderFailureReason
 import `is`.walt.passes.core.ScannableFormat
+import `is`.walt.passes.core.ScannableFormatConstraints
 import com.google.zxing.BarcodeFormat as ZxingFormat
 
 /**
@@ -43,17 +43,28 @@ internal object ZxingBarcodeEncoder {
     fun encode(
         payload: String,
         format: ScannableFormat,
-    ): EncodeResult =
-        try {
-            EncodeResult.Success(writeMatrix(payload, format))
-        } catch (e: WriterException) {
-            EncodeResult.Failure(translateFailure(format, e))
-        } catch (e: IllegalArgumentException) {
-            // ZXing's writers occasionally throw IAE rather than WriterException for
-            // structurally bad input (e.g. UPC-A writer on a non-numeric string). Treat
-            // the same as a writer-side rejection.
-            EncodeResult.Failure(translateFailure(format, e))
+    ): EncodeResult {
+        // Proactive PayloadTooDense check for QR: ZXing's WriterException("Data too big") is
+        // the only signal the writer gives, and that English string can move under us on any
+        // minor version. Doing the byte-length check here keeps the consumer's "shorten the
+        // payload" hint working even if ZXing's message wording drifts. UTF-8 because QR's
+        // byte-mode capacity is in bytes, not chars (a payload of "é" × 1500 is 3000 bytes).
+        if (format == ScannableFormat.Qr &&
+            payload.toByteArray(Charsets.UTF_8).size > ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M
+        ) {
+            return EncodeResult.Failure(EncoderFailureReason.PayloadTooDense)
         }
+        // runCatching absorbs anything ZXing throws — including the plain
+        // NullPointerException / ArrayIndexOutOfBoundsException its hand-rolled writers do
+        // raise on some edge inputs — and funnels it into EncodeResult.Failure to honor the
+        // kernel's no-throw contract. Matches the pattern in SignatureVerifier (the other
+        // place the kernel wraps third-party code that escapes its declared exception set).
+        return runCatching { writeMatrix(payload, format) }
+            .fold(
+                onSuccess = { EncodeResult.Success(it) },
+                onFailure = { EncodeResult.Failure(translateFailure(format, it)) },
+            )
+    }
 
     private fun writeMatrix(
         payload: String,
@@ -77,9 +88,12 @@ internal object ZxingBarcodeEncoder {
         format: ScannableFormat,
         cause: Throwable,
     ): EncoderFailureReason {
-        // QR-only: ZXing signals "no version fits this payload" via a WriterException whose
-        // message contains "Data too big". Lift that into the dedicated PayloadTooDense arm
-        // so the consumer UI can suggest shortening instead of switching format.
+        // Belt-and-suspenders: the proactive byte-length check above handles the common QR
+        // overflow path; this string match catches the same condition when ZXing surfaces it
+        // for a payload that slipped under the byte ceiling (e.g. some mixed-mode inputs).
+        // The match is intentionally lossy — if ZXing reword the message on a future bump,
+        // the encoder still surfaces WriterRejected and the consumer still gets a usable
+        // error path, just without the PayloadTooDense-specific UI hint.
         val message = cause.message.orEmpty()
         if (format == ScannableFormat.Qr && DATA_TOO_BIG_MESSAGE in message) {
             return EncoderFailureReason.PayloadTooDense

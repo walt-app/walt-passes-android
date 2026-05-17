@@ -92,6 +92,11 @@ public sealed interface EncoderFailureReason {
      * which writer failed (the consumer may suggest switching to a denser symbology). The
      * raw ZXing exception message is preserved on [detail] for the consumer's diagnostic
      * surface; it is not user-facing copy and may be empty when ZXing did not provide one.
+     *
+     * **Do not propagate [detail] to telemetry verbatim.** It is the only third-party
+     * string that crosses the kernel boundary on this surface, and ZXing has historically
+     * embedded input-derived substrings in its messages. Consumers that ship the field
+     * outside the device should hash or bucket it first.
      */
     public data class WriterRejected(
         public val format: ScannableFormat,

@@ -97,6 +97,15 @@ internal object ScannableFormatConstraints {
         return (10 - sum % 10) % 10
     }
 
+    /**
+     * UTF-8 byte ceiling for a QR payload at the encoder's pinned ECC level (M) and the
+     * largest QR version (40, byte mode). Sourced from the QR spec's capacity tables. Used
+     * by the encoder for a proactive PayloadTooDense check that does not depend on
+     * matching ZXing's English exception text. ECC-M was chosen at the encoder; if that
+     * pin changes, this constant must change in lockstep.
+     */
+    internal const val QR_BYTE_CEILING_ECC_M: Int = 2_331
+
     private const val CODE128_MAX = 80
     private const val CODE39_MAX = 80
     private const val EAN13_LENGTH = 13

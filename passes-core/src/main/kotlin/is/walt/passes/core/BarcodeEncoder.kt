@@ -15,10 +15,12 @@ import `is`.walt.passes.core.internal.ZxingBarcodeEncoder
  * are therefore narrow — anything not caused by ZXing's encodability rules is the validator's
  * problem.
  *
- * **No-throw contract.** Any [Throwable] from the underlying ZXing writer is captured and
- * translated into an [EncodeResult.Failure] arm; the caller observes the outcome via
- * exhaustive `when` and never via `try/catch`. This matches the kernel-wide pattern set by
- * [ParseResult] and [ScannableCardCreateResult].
+ * **No-throw contract.** Every [Throwable] from the underlying ZXing writer — including
+ * the unchecked `NullPointerException` / `ArrayIndexOutOfBoundsException` cases its
+ * hand-rolled writers raise on some edge inputs — is captured and translated into an
+ * [EncodeResult.Failure] arm. The caller observes outcomes via exhaustive `when` and
+ * never via `try/catch`. Matches the kernel-wide pattern set by [ParseResult] and
+ * [ScannableCardCreateResult].
  *
  * **API stability.** ZXing's `BitMatrix` is deliberately not visible on this surface — the
  * matrix is wrapped in the kernel's own [BarcodeMatrix] so the encoder is replaceable
