@@ -94,6 +94,19 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
+    fun barcodeCreateConfirmSheetHasExactlyThreeUserVisibleParameters() {
+        // (payloadKind, onConfirm, onCancel). The gate is structurally minimal —
+        // no skipConfirmation flag, no per-arm copy override, no telemetry knob.
+        // Adding a fourth parameter would invite a way to silence the create-time
+        // URI preview warning (wpass-lzi.9 trust posture).
+        assertUserVisibleParamCount(
+            "BarcodeCreateConfirmSheetKt",
+            "BarcodeCreateConfirmSheet",
+            expected = 3,
+        )
+    }
+
+    @Test
     fun passImportConfirmHasExactlySevenUserVisibleParameters() {
         // (pass, signatureStatus, telemetry, onConfirm, onDismiss, modifier, locale).
         // No `enabled`, no `skipConfirmation`, no `showTrustCaption` — drift here is a
