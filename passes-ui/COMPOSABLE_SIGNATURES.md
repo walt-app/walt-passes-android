@@ -190,6 +190,53 @@ The sheets fire `telemetry.onSecuritySheetShown` on first composition,
 `telemetry.onSecuritySheetDismissed` on any other dismissal. Confirming closes the
 sheet AND calls `onConfirm`; dismissal closes WITHOUT firing `onConfirm`.
 
+## Create-time URI confirmation gate (QR only)
+
+```kotlin
+/**
+ * Create-time URI-scheme confirmation gate for a QR `ScannableCard`. Shown by the
+ * consumer's create flow between input validation and persistence whenever the
+ * classified [QrPayloadKind] would auto-act on a future scanner phone. Cancel is
+ * the focused, filled action; Confirm is the lower-emphasis text button - inverted
+ * from B3UrlConfirmSheet by design. Payload renders verbatim, wrapped in FSI/PDI
+ * via `isolated()`; crypto addresses (Bitcoin / Ethereum) render in full with
+ * monospace + wrap so create-time transcription review can see every character.
+ *
+ * [QrPayloadKind.PlainText] short-circuits to no output, so callers can keep the
+ * gate unconditional; [requiresCreateConfirmation] lets callers branch when they
+ * want to skip the composable entirely.
+ *
+ * NOTE: this surface ships WITHOUT a `telemetry: UiTelemetryGuard` parameter -
+ * deliberate deferral, tracked under wpass-rnv. The other security sheets emit
+ * `onSecuritySheetShown` / `Confirmed` / `Dismissed`; the create-time gate is
+ * invisible to that dashboard until that bead lands. ComposableSurfaceLockTest
+ * pins the three-param shape so re-adding a guard is a deliberate edit, not a
+ * silent drift.
+ */
+@Composable
+public fun BarcodeCreateConfirmSheet(
+    payloadKind: QrPayloadKind,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+)
+
+/**
+ * Returns `false` only for [QrPayloadKind.PlainText]. Consumer create flows
+ * branch on this to persist a plain-text QR directly without invoking the gate.
+ */
+public fun QrPayloadKind.requiresCreateConfirmation(): Boolean
+
+/**
+ * Test tags for the two action buttons on `BarcodeCreateConfirmSheet`. Exposed
+ * so per-arm focus and click assertions can target the buttons structurally
+ * rather than by their localized labels.
+ */
+public object BarcodeCreateConfirmTestTags {
+    public const val Cancel: String
+    public const val Confirm: String
+}
+```
+
 ## Expired badge
 
 ```kotlin
@@ -250,3 +297,7 @@ security-policy edit, not a refactor:
    higher caps.
 5. The security confirmation sheets do not accept a "skip confirmation" parameter.
    The host's outbound `Intent` fires only on user confirm.
+6. `BarcodeCreateConfirmSheet` does not accept a `skipConfirmation`, per-arm
+   silence flag, or "auto-confirm safe arms" toggle. PlainText is the only arm
+   that short-circuits the gate, and that branch lives in the composable, not
+   in a caller-visible parameter.

@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Per-arm copy for BarcodeCreateConfirmSheet. The wording is the trust-claim load-bearing
+  surface: the user reads it to decide whether the payload they typed should be persisted.
+  Wrapping each arm in a string resource (rather than hardcoding) prepares the strings for
+  localization (GitHub #65 / wpass-pk5) without changing call sites.
+
+  tools:locale="en" pins the source locale so downstream consumers (walt-android) do not
+  surface MissingTranslation lint warnings on non-en build variants while wpass-pk5 is
+  still pending. Remove this once translated values/ resource sets exist.
+-->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:locale="en">
+    <string name="barcode_create_confirm_title">Confirm what this QR will do</string>
+    <string name="barcode_create_confirm_confirm">Add card</string>
+    <string name="barcode_create_confirm_cancel">Cancel</string>
+
+    <string name="barcode_create_confirm_url">When scanned, this QR will open a website:</string>
+    <string name="barcode_create_confirm_phone">When scanned, this QR will dial:</string>
+    <string name="barcode_create_confirm_sms">When scanned, this QR will text:</string>
+    <string name="barcode_create_confirm_mailto">When scanned, this QR will email:</string>
+    <string name="barcode_create_confirm_geo">When scanned, this QR will show a location on a map:</string>
+    <string name="barcode_create_confirm_wifi">When scanned, this QR will offer to join Wi-Fi network:</string>
+    <string name="barcode_create_confirm_wifi_unnamed">When scanned, this QR will offer to join a Wi-Fi network.</string>
+    <string name="barcode_create_confirm_bitcoin">When scanned, this QR will prepare a Bitcoin payment to:</string>
+    <string name="barcode_create_confirm_ethereum">When scanned, this QR will prepare an Ethereum payment to:</string>
+    <string name="barcode_create_confirm_magnet">When scanned, this QR will start a torrent download.</string>
+    <string name="barcode_create_confirm_market">When scanned, this QR will open a Play Store listing:</string>
+    <string name="barcode_create_confirm_intent">When scanned, this QR can trigger an app action. This is uncommon for loyalty cards. Continue?</string>
+    <string name="barcode_create_confirm_unknown">When scanned, this QR uses a scheme Walt doesn\'t recognize. If you didn\'t expect this, cancel.</string>
+</resources>
