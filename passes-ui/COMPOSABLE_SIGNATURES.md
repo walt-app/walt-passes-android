@@ -117,15 +117,19 @@ carry the *verbatim* substring from the field — no normalization, no scheme
 injection — so a confirmation sheet built from a span shows the user exactly the
 string that will leave the device. The trust contract (bidi-spoofing rejection,
 RFC 3986 URL class, phone digit-count + adjacency hints, email shape) lives
-entirely inside [FieldLinkScanner.scan]; there is no constructor path that
-produces a [LinkSpan] without going through it.
+entirely inside [FieldLinkScanner.scan], and `LinkSpan`'s constructor is
+`internal`, so every span a consumer holds has been through that validation.
+`copy(...)` on a scanner-produced span still works for styling needs.
+
+`start` / `endExclusive` are UTF-16 char offsets into the field string passed to
+`scan` — the same units `Regex`, `String.substring`, and `AnnotatedString` use.
 
 ```kotlin
 public object FieldLinkScanner {
     public fun scan(fieldValue: String, source: SourceField): List<LinkSpan>
 }
 
-public data class LinkSpan(
+public data class LinkSpan internal constructor(
     public val start: Int,
     public val endExclusive: Int,
     public val intent: SecurityIntent,
