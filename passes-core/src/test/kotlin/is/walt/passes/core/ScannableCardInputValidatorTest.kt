@@ -225,18 +225,18 @@ class ScannableCardInputValidatorTest {
 
     @Test
     fun labelTooLongRejected() {
-        val long = "L".repeat(101)
+        val long = "L".repeat(65)
         val result = validateInput(payload = "ABC", format = ScannableFormat.Code128, label = long)
         val invalid = result as ScannableCardCreateResult.InvalidLabel
         assertThat(invalid.reason).isInstanceOf(LabelRejection.TooLong::class.java)
         val reason = invalid.reason as LabelRejection.TooLong
-        assertThat(reason.actual).isEqualTo(101)
-        assertThat(reason.max).isEqualTo(100)
+        assertThat(reason.actual).isEqualTo(65)
+        assertThat(reason.max).isEqualTo(64)
     }
 
     @Test
     fun labelExactlyAtCapAccepted() {
-        val result = validateInput(payload = "ABC", format = ScannableFormat.Code128, label = "L".repeat(100))
+        val result = validateInput(payload = "ABC", format = ScannableFormat.Code128, label = "L".repeat(64))
         assertThat(result).isInstanceOf(ScannableCardCreateResult.Success::class.java)
     }
 

@@ -15,7 +15,7 @@ package `is`.walt.passes.core
  */
 public object ScannableCardInputValidator {
     /** Display-friendly cap. Long enough for any realistic card name, short enough to render. */
-    public const val MAX_LABEL_LENGTH: Int = 100
+    public const val MAX_LABEL_LENGTH: Int = 64
 
     // ReturnCount: fail-fast pipeline. Each early return surfaces a distinct rejection
     // family so the caller's `when` branches read 1:1 with validator stages.
