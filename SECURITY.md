@@ -16,6 +16,8 @@ Helpful things to include:
 walt-passes-android is the open-source pass-handling kernel that ships inside the [Walt](https://walt.is) Android wallet. The most useful reports target one of:
 
 - The PKPASS parser (`passes-core`): ZIP, JSON, image, signature, manifest verification, `.strings` parsing, locale handling.
+- The PDF document import surface (`passes-pdf-core`, `passes-pdf`): see `docs/PDF_THREAT_MODEL.md`.
+- The ScannableCard generator (user-typed barcode / QR cards): see `docs/SCANNABLE_CARD_THREAT_MODEL.md`.
 - Pass data storage (`passes-storage`): encryption-at-rest, key management, deletion, backup exclusion.
 - Security-relevant UI flows (`passes-ui`): URL confirmation sheet, HTML subset renderer, bounded image rendering.
 
