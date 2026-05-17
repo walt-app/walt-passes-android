@@ -27,6 +27,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.QrPayloadKind
 import `is`.walt.passes.ui.core.isolated
@@ -38,10 +39,11 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * Create-time URI-scheme confirmation gate for a QR `ScannableCard`. Mirrors the
  * verbatim-rendering / FSI-PDI isolation / trust-styling-token posture of the
  * back-field [B3UrlConfirmSheet], but inverts the button prominence: Cancel is the
- * focused, filled action; Confirm is the lower-emphasis text button. The dialog
- * runs between input validation and persistence so a payload classified by
- * [QrPayloadKind] as auto-acting on a future scanner phone cannot land in the
- * wallet without an explicit confirm tap.
+ * focused, filled action; Confirm is the lower-emphasis text button. That divergence
+ * is pinned by `ComposableSurfaceLockTest`; a future neighbor refactor that resyncs
+ * the two will trip the lock. The dialog runs between input validation and
+ * persistence so a payload classified by [QrPayloadKind] as auto-acting on a future
+ * scanner phone cannot land in the wallet without an explicit confirm tap.
  *
  * Triggered ONLY for the QR symbology - linear formats do not auto-act when
  * scanned and skip this gate at the caller. [QrPayloadKind.PlainText] also skips:
@@ -50,7 +52,10 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *
  * The trust claim that this gate enforces is "the user saw, in their own typed
  * form, what a scanner phone would do" - the verbatim payload is the load-bearing
- * surface. Wrapping it in [isolated] is defense in depth against any residual
+ * surface. Crypto addresses are rendered in full (monospace + wrap) rather than
+ * masked: at create time the user is verifying their own transcription, and base58
+ * / hex typos accumulate in the middle of the string - exactly where a mask would
+ * hide them. Wrapping in [isolated] is defense in depth against any residual
  * directional context surrounding the sheet chrome; the upstream validator
  * (wpass-lzi.4) already rejects Cf/Cc characters in the payload itself.
  */
@@ -67,8 +72,11 @@ public fun BarcodeCreateConfirmSheet(
     val emphasis = LocalPassesSemantics.current.securitySheet
     val cancelFocus = remember { FocusRequester() }
     // Cancel-default focus: the prominent action wins keyboard / d-pad focus on
-    // open so muscle memory pointed at the primary slot lands on Cancel.
-    LaunchedEffect(payloadKind) { runCatching { cancelFocus.requestFocus() } }
+    // open so muscle memory pointed at the primary slot lands on Cancel. The
+    // LaunchedEffect fires after composition, so the requester is attached by
+    // the time requestFocus() runs; a throw here is a real regression worth
+    // surfacing, not swallowing.
+    LaunchedEffect(payloadKind) { cancelFocus.requestFocus() }
 
     ModalBottomSheet(
         onDismissRequest = onCancel,
@@ -110,6 +118,10 @@ private fun BarcodeCreateBody(
         color = emphasis.bodyForeground.toComposeColor(),
     )
     if (verbatim != null) {
+        // Crypto addresses get monospace + wrap so every character is
+        // distinguishable for create-time transcription review.
+        val isCryptoAddress = payloadKind is QrPayloadKind.Bitcoin ||
+            payloadKind is QrPayloadKind.Ethereum
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -123,6 +135,8 @@ private fun BarcodeCreateBody(
                 text = isolated(verbatim),
                 style = MaterialTheme.typography.bodyLarge,
                 color = emphasis.emphasisForeground.toComposeColor(),
+                fontFamily = if (isCryptoAddress) FontFamily.Monospace else null,
+                softWrap = true,
             )
         }
     }
@@ -140,7 +154,9 @@ private fun BarcodeCreateActions(
         horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
     ) {
         // Confirm is the low-emphasis text button - inverted from B3Url so a
-        // stray dismissal lands on Cancel, not on a silent persist.
+        // stray dismissal lands on Cancel, not on a silent persist. The
+        // divergence is pinned by ComposableSurfaceLockTest's three-param lock
+        // on this composable; resyncing the two surfaces will fail that lock.
         TextButton(
             onClick = onConfirm,
             modifier = Modifier.testTag(BarcodeCreateConfirmTestTags.Confirm),
@@ -184,13 +200,6 @@ public object BarcodeCreateConfirmTestTags {
 }
 
 /**
- * Crypto-address mask: first 6 and last 6 characters, ellipsis in the middle. Below
- * the 14-character threshold the address fits without truncation.
- */
-internal fun maskAddress(address: String): String =
-    if (address.length <= 14) address else "${address.take(6)}...${address.takeLast(6)}"
-
-/**
  * Per-arm dispatcher for the warning sentence shown above the verbatim payload.
  * Cyclomatic complexity is load-bearing: every [QrPayloadKind] arm enumerated in
  * one place forces adding a new arm in `passes-core` to surface here as a missing-
@@ -205,7 +214,9 @@ private fun barcodeCreateMessage(kind: QrPayloadKind): String = when (kind) {
     is QrPayloadKind.Sms -> stringResource(R.string.barcode_create_confirm_sms)
     is QrPayloadKind.Mailto -> stringResource(R.string.barcode_create_confirm_mailto)
     is QrPayloadKind.Geo -> stringResource(R.string.barcode_create_confirm_geo)
-    is QrPayloadKind.Wifi -> wifiMessage(kind.ssid)
+    is QrPayloadKind.Wifi ->
+        if (kind.ssid != null) stringResource(R.string.barcode_create_confirm_wifi)
+        else stringResource(R.string.barcode_create_confirm_wifi_unnamed)
     is QrPayloadKind.Bitcoin -> stringResource(R.string.barcode_create_confirm_bitcoin)
     is QrPayloadKind.Ethereum -> stringResource(R.string.barcode_create_confirm_ethereum)
     QrPayloadKind.Magnet -> stringResource(R.string.barcode_create_confirm_magnet)
@@ -213,11 +224,6 @@ private fun barcodeCreateMessage(kind: QrPayloadKind): String = when (kind) {
     is QrPayloadKind.Intent -> stringResource(R.string.barcode_create_confirm_intent)
     is QrPayloadKind.UnknownScheme -> stringResource(R.string.barcode_create_confirm_unknown)
 }
-
-@Composable
-private fun wifiMessage(ssid: String?): String =
-    if (ssid != null) stringResource(R.string.barcode_create_confirm_wifi)
-    else stringResource(R.string.barcode_create_confirm_wifi_unnamed)
 
 /**
  * Per-arm dispatcher for the verbatim payload string rendered in the emphasis
@@ -232,8 +238,8 @@ internal fun verbatimForKind(kind: QrPayloadKind): String? = when (kind) {
     is QrPayloadKind.Mailto -> kind.address
     is QrPayloadKind.Geo -> kind.coords
     is QrPayloadKind.Wifi -> kind.ssid
-    is QrPayloadKind.Bitcoin -> maskAddress(kind.address)
-    is QrPayloadKind.Ethereum -> maskAddress(kind.address)
+    is QrPayloadKind.Bitcoin -> kind.address
+    is QrPayloadKind.Ethereum -> kind.address
     QrPayloadKind.Magnet -> null
     is QrPayloadKind.Market -> kind.productId
     is QrPayloadKind.Intent -> kind.raw

@@ -5,10 +5,12 @@
   Wrapping each arm in a string resource (rather than hardcoding) prepares the strings for
   localization (GitHub #65 / wpass-pk5) without changing call sites.
 
-  Lint suppressions: this module does not declare app-level translatable defaults yet;
-  every string here is en-only until the localization bead lands.
+  tools:locale="en" pins the source locale so downstream consumers (walt-android) do not
+  surface MissingTranslation lint warnings on non-en build variants while wpass-pk5 is
+  still pending. Remove this once translated values/ resource sets exist.
 -->
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:locale="en">
     <string name="barcode_create_confirm_title">Confirm what this QR will do</string>
     <string name="barcode_create_confirm_confirm">Add card</string>
     <string name="barcode_create_confirm_cancel">Cancel</string>

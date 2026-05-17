@@ -177,7 +177,10 @@ class BarcodeCreateConfirmSheetTest {
     }
 
     @Test
-    fun bitcoinArmShowsWarningAndMasksLongAddress() {
+    fun bitcoinArmShowsWarningAndFullAddressVerbatim() {
+        // At create time the user is verifying their own typing. A masked middle
+        // would hide exactly where base58 transcription errors accumulate, so the
+        // full address renders in the emphasis panel.
         composeRule.setContent {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
@@ -192,12 +195,13 @@ class BarcodeCreateConfirmSheetTest {
         composeRule.onNodeWithText(
             "When scanned, this QR will prepare a Bitcoin payment to:",
         ).assertIsDisplayed()
-        // First 6 + ... + last 6 of the source address. Wrapped in FSI/PDI.
-        composeRule.onNodeWithText("⁨1A1zP1...DivfNa⁩").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "⁨1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa⁩",
+        ).assertIsDisplayed()
     }
 
     @Test
-    fun ethereumArmShowsWarningAndMasksLongAddress() {
+    fun ethereumArmShowsWarningAndFullAddressVerbatim() {
         composeRule.setContent {
             ThemedHost {
                 BarcodeCreateConfirmSheet(
@@ -212,7 +216,9 @@ class BarcodeCreateConfirmSheetTest {
         composeRule.onNodeWithText(
             "When scanned, this QR will prepare an Ethereum payment to:",
         ).assertIsDisplayed()
-        composeRule.onNodeWithText("⁨0x71C7...d8976F⁩").assertIsDisplayed()
+        composeRule.onNodeWithText(
+            "⁨0x71C7656EC7ab88b098defB751B7401B5f6d8976F⁩",
+        ).assertIsDisplayed()
     }
 
     @Test
@@ -303,20 +309,6 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText("Confirm what this QR will do").assertDoesNotExist()
-    }
-
-    @Test
-    fun maskAddressLeavesShortAddressesUntouched() {
-        assertThat(maskAddress("short")).isEqualTo("short")
-        assertThat(maskAddress("14characters!!")).isEqualTo("14characters!!")
-    }
-
-    @Test
-    fun maskAddressShowsFirstAndLastSixWithEllipsis() {
-        assertThat(maskAddress("1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"))
-            .isEqualTo("1A1zP1...DivfNa")
-        assertThat(maskAddress("0x71C7656EC7ab88b098defB751B7401B5f6d8976F"))
-            .isEqualTo("0x71C7...d8976F")
     }
 
     @Test
