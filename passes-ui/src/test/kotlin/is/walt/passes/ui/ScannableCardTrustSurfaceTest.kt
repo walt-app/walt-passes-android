@@ -263,6 +263,46 @@ class ScannableCardTrustSurfaceTest {
             .assertExists()
     }
 
+    @Test
+    fun rowTileRendersLeadingSlot() {
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardRowTile(
+                    card = qrFixture(),
+                    onClick = {},
+                    leadingSlot = {
+                        androidx.compose.material3.Text(text = "GLYPH")
+                    },
+                )
+            }
+        }
+        composeRule.onNodeWithText("GLYPH").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowTileLeadingSlotWithoutContentDescriptionDoesNotPolluteMergedSemantics() {
+        // The slot lives inside the row's mergeDescendants block. The kernel-built
+        // contentDescription on the merged node replaces (not appends to) descendant
+        // contributions, so a slot composable whose icons set contentDescription = null
+        // must leave the merged description exactly equal to the kernel-built string.
+        // Pinning this protects the wpass-2a2 surface claim that `leadingSlot` is a
+        // visual hook, not a trust signal.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardRowTile(
+                    card = qrFixture(label = "Library card"),
+                    onClick = {},
+                    leadingSlot = {
+                        Box(modifier = Modifier.size(24.dp))
+                    },
+                )
+            }
+        }
+        composeRule
+            .onNodeWithContentDescription("⁨Library card⁩, QR, barcode card")
+            .assertExists()
+    }
+
     @Composable
     private fun ThemedHost(content: @Composable () -> Unit) {
         MaterialTheme { PassesTheme(semantics = semantics, content = content) }
