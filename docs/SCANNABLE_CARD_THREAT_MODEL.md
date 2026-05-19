@@ -55,6 +55,37 @@ The tile is also visually distinct from a verified-PKPASS tile by at least two
 of: border treatment, leading icon, color band, typography weight — picked for
 redundancy so theming a single dimension flat cannot collapse the distinction.
 
+**C1 / C2 — consumer-side concession (wallet-row register).** The kernel
+exposes a sibling composable `ScannableCardRowTile` (wpass-pnb; consumer epic
+wlt-6ub) for hosts that interleave scannable cards with passes / PDFs in a
+single homogeneous wallet list rather than in their own carousel lane. The row
+intentionally drops the carousel tile's four-distinguisher contract: there is
+no dashed outline, no smaller corner radius vs a `PassFront`-style tile, and no
+in-row "Created by you" caption. The concession is permitted strictly when, and
+only when, all three of the following hold:
+
+1. The row owns no signature dot or other verified-pass affordance. Pinned at
+   the kernel surface by `ComposableSurfaceLockTest.scannableCardRowTileHas
+   ExactlyThreeUserVisibleParameters` (count: 3 — `card`, `onClick`, `modifier`;
+   no `showSignatureBadge`, no `leadingIcon`) and at the consumer (walt-android)
+   by `WalletListTest`'s "no scannable-card row owns a signature dot" invariant.
+2. The row owns no coloured leading strip styled to read as a verified-pass
+   band. The kernel surface uses the `unverifiedArtifact.accent` token (the
+   same neutral token the carousel tile's leading strip uses), NOT the user's
+   `card.color`. Routing user-chosen colour through this strip at list scale
+   would re-create the trust-conflation risk row 1 names.
+3. The detail surface (`ScannableCardScreen`) retains the bottom-docked
+   non-suppressible `ScannableCardTrustCaption`. The trust caption shifts from
+   list-row to detail-surface only; a user who taps a row to *use* the artifact
+   still sees "Created by you" before the scan target renders.
+
+The trade is bounded. `ScannableCardTile` and its four-distinguisher contract
+remain the kernel's recommended surface for hosts that present scannable cards
+in their own lane; `ScannableCardRowTile` is the alternative for the
+homogeneous-list register and nothing else. A future consumer wanting a wallet
+list that also drops the detail-surface caption is amending this row, not
+filing a refactor.
+
 **C3. Input hygiene at the create boundary.** `passes-core` validates
 `ScannableCardCreateInput` for: per-format length caps (Code128 ~80 chars,
 EAN-13 / UPC-A fixed-length with checksum, QR per-version cap with a
@@ -108,6 +139,15 @@ existing PKPASS pipeline.
 C2 (non-suppressible "Created by you" caption with ≥2 visual distinguishing
 elements). The two combine: the user sees a different-shaped tile in a
 different-titled lane with a different caption.
+
+A bounded consumer-side concession permits a homogeneous wallet-row register
+(`ScannableCardRowTile`) when the row carries no signature dot, no
+verified-band-styled leading strip, and the detail surface retains the
+non-suppressible trust caption. Full conditions and rationale are recorded in
+the C1 / C2 concession subsection above. The trust caption shifts from
+list-row to detail-surface only; the artifact-class distinction at list scale
+is then carried by the absence of pass-only chrome (signature dot, verified
+band) rather than by the carousel tile's four redundant distinguishers.
 
 **Status.** Mitigated structurally. This is the load-bearing concern of the
 entire epic; every downstream child must trace back to this row.
@@ -356,8 +396,12 @@ threat row above.
 - **No payload-bytes telemetry.** The `ScannableCardTelemetryGuard` may
   surface format counts and create/delete event counts; payload contents and
   payload length distributions are PII and never leave the device.
-- **No bypass of the "Created by you" caption** through theming, layout, or
-  consumer-supplied composables. C2 forbids it.
+- **No bypass of the "Created by you" caption on the detail surface**
+  (`ScannableCardScreen`), through theming, layout, or consumer-supplied
+  composables. The list-row register (`ScannableCardRowTile`) shifts the
+  caption from list-row to detail surface under the bounded C1 / C2
+  concession above; the detail surface itself remains non-suppressible. C2
+  forbids any further bypass.
 
 ## How each control is tested
 
@@ -369,7 +413,7 @@ can trace back here.
 | Control | Pinned by                                  |
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
-| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot) |
+| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration), dependency-graph assertion in build      |

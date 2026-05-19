@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
@@ -185,6 +186,81 @@ class ScannableCardTrustSurfaceTest {
             }
         }
         composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowTileDoesNotRenderTrustCaption() {
+        // The wallet-row register intentionally drops the carousel tile's "Created by
+        // you" caption per the SCANNABLE_CARD_THREAT_MODEL.md C1 / C2 concession. The
+        // detail surface (asserted separately by fullScreenRendersTrustCaptionDockedAtBottom)
+        // is where the trust caption surfaces for this register; missing it on the row
+        // is the load-bearing difference between the two siblings.
+        composeRule.setContent {
+            ThemedHost { ScannableCardRowTile(card = qrFixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("Created by you").assertDoesNotExist()
+    }
+
+    @Test
+    fun rowTileRendersIsolatedLabel() {
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardRowTile(card = qrFixture(label = "Library card"), onClick = {})
+            }
+        }
+        // FSI / PDI defense-in-depth on user-controlled label, same as ScannableCardTile.
+        composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowTileRendersFormatSubtitle() {
+        composeRule.setContent {
+            ThemedHost { ScannableCardRowTile(card = code128Fixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("Code 128").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowTilePropagatesClickToOnClickCallback() {
+        var clicks = 0
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardRowTile(card = qrFixture(), onClick = { clicks++ })
+            }
+        }
+        composeRule.onNodeWithText("⁨Membership⁩").performClick()
+        composeRule.waitForIdle()
+        assert(clicks == 1) { "expected one click propagation, got $clicks" }
+    }
+
+    @Test
+    fun rowTileSemanticsExposeFormatToken() {
+        // The merged-descendants node sets contentDescription explicitly, which replaces
+        // (not appends to) descendant Text contributions for accessibility services. The
+        // format-as-subtitle is one of the two signals compensating for the dropped
+        // carousel-tile chrome under the C1 / C2 wallet-row concession; a TalkBack user
+        // who only hears "{label}, barcode card" loses half of that. The contentDescription
+        // must inline the format token so the AT-level distinction matches the visual one.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardRowTile(card = qrFixture(label = "Library card"), onClick = {})
+            }
+        }
+        composeRule
+            .onNodeWithContentDescription("⁨Library card⁩, QR, barcode card")
+            .assertExists()
+    }
+
+    @Test
+    fun rowTileSemanticsExposeFormatTokenForOneDimensionalFormat() {
+        // The QR path and the 1D path render different subtitle strings; both must reach
+        // the merged contentDescription so neither barcode family is silently AT-blind.
+        composeRule.setContent {
+            ThemedHost { ScannableCardRowTile(card = code128Fixture(), onClick = {}) }
+        }
+        composeRule
+            .onNodeWithContentDescription("⁨Gym⁩, Code 128, barcode card")
+            .assertExists()
     }
 
     @Composable
