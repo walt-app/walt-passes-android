@@ -67,20 +67,19 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *   kernel validator already rejects Cf / Cc codepoints at the create boundary (C3);
  *   isolating again ensures a future relaxation of the validator cannot silently weaken
  *   this surface.
- * - The merged [contentDescription] reads as "{label}, barcode card" so screen-reader
- *   users hear the artifact-class distinction the list-row chrome drops.
+ * - The merged [contentDescription] inlines the format token so a TalkBack user hears
+ *   "{label}, {format}, barcode card". Setting [contentDescription] on a
+ *   `mergeDescendants` node replaces (not appends to) descendant `Text` contributions, so
+ *   the format-as-subtitle visible to sighted users would otherwise be silent to AT. The
+ *   `rowTileSemanticsExposeFormatToken` smoke test pins that this stays the case.
  * - No signature affordance is composed inside the row. The absence is structural; the
  *   surface-lock test (`scannableCardRowTileHasExactlyThreeUserVisibleParameters`) pins
  *   the parameter shape so a future contributor cannot add `showSignatureBadge` without
  *   amending the threat-model concession.
  *
- * ## Out of scope
- *
- * - No long-press / overflow callback. Lifecycle actions (rename, delete) are consumer
- *   responsibilities, same posture as [ScannableCardTile].
- * - No share / export affordance.
- * - No alternative size profile. The row's height floor is fixed so it co-aligns with
- *   sibling wallet rows in the consumer's list at the same DP.
+ * Lifecycle gestures (long-press, overflow, share) and alternative size profiles are
+ * consumer responsibilities, same posture as [ScannableCardTile]; the kernel surface
+ * stays minimal so the surface-lock test pins a tight shape.
  */
 @Composable
 public fun ScannableCardRowTile(
@@ -90,6 +89,7 @@ public fun ScannableCardRowTile(
 ) {
     val accent = LocalPassesSemantics.current.unverifiedArtifact.accent.toComposeColor()
     val labelText = isolated(card.label)
+    val formatToken = card.format.rowSubtitle()
 
     Row(
         modifier = modifier
@@ -97,7 +97,10 @@ public fun ScannableCardRowTile(
             .heightIn(min = ROW_HEIGHT)
             .clickable(onClick = onClick)
             .semantics(mergeDescendants = true) {
-                contentDescription = "$labelText, barcode card"
+                // Setting contentDescription on a merged node replaces descendant Text
+                // contributions, so the format subtitle below has to be inlined here or
+                // TalkBack loses it.
+                contentDescription = "$labelText, $formatToken, barcode card"
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -118,7 +121,7 @@ public fun ScannableCardRowTile(
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
-                text = card.format.rowSubtitle(),
+                text = formatToken,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
@@ -133,7 +136,6 @@ private fun LeadingAccentStrip(color: Color) {
     Box(
         modifier = Modifier
             .width(ACCENT_STRIP_WIDTH)
-            .heightIn(min = ROW_HEIGHT)
             .fillMaxHeight()
             .background(color),
     )
