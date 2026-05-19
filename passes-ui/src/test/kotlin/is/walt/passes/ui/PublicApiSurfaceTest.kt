@@ -431,6 +431,8 @@ class PublicApiSurfaceTest {
                 confirmContainer = argb,
                 confirmForeground = argb,
                 cancelForeground = argb,
+                eyebrowForeground = argb,
+                mutedForeground = argb,
             ),
             categoryAccent = CategoryAccentColors(
                 boardingPass = argb,
@@ -452,6 +454,8 @@ class PublicApiSurfaceTest {
         assertThat(semantics.signatureBadge.appleVerifiedBackground).isEqualTo(argb)
         assertThat(semantics.expiredBadge.scrimAlpha).isEqualTo(96)
         assertThat(semantics.securitySheet.confirmContainer).isEqualTo(argb)
+        assertThat(semantics.securitySheet.eyebrowForeground).isEqualTo(argb)
+        assertThat(semantics.securitySheet.mutedForeground).isEqualTo(argb)
         assertThat(semantics.categoryAccent.boardingPass).isEqualTo(argb)
         assertThat(semantics.unverifiedArtifact.accent).isEqualTo(argb)
         // captionIconTint defaults to captionForeground when not explicitly supplied —
@@ -459,6 +463,26 @@ class PublicApiSurfaceTest {
         // monochrome caption. Locking the default here keeps that contract testable.
         assertThat(semantics.unverifiedArtifact.captionIconTint)
             .isEqualTo(semantics.unverifiedArtifact.captionForeground)
+    }
+
+    @Test
+    fun securitySheetStyleDomainHeroTokensHaveSensibleDefaults() {
+        // wpass-48v: hosts that have not wired the DomainHero-specific tokens still
+        // get a reasonable muted hierarchy (eyebrow heavier than forensic/divider).
+        // The defaults are not the kernel's brand call — production callers always
+        // override — but locking them keeps a future refactor from silently flipping
+        // either field to e.g. transparent.
+        val style = SecuritySheetStyle(
+            sheetBackground = ArgbColor(0),
+            emphasisBackground = ArgbColor(0),
+            emphasisForeground = ArgbColor(0),
+            bodyForeground = ArgbColor(0),
+            confirmContainer = ArgbColor(0),
+            confirmForeground = ArgbColor(0),
+            cancelForeground = ArgbColor(0),
+        )
+        assertThat(style.eyebrowForeground.argb).isEqualTo(0xFF73777F.toInt())
+        assertThat(style.mutedForeground.argb).isEqualTo(0xFFC4C7C5.toInt())
     }
 
     @Test

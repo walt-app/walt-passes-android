@@ -331,10 +331,13 @@ private fun DomainHeroLayout(
     // the *layout shape* (eyebrow + hero + forensic + provenance + actions),
     // not to specific point sizes or letter spacing. The textual emphasis
     // hierarchy (hero > target > provenance) survives any theme.
+    //
+    // All four colors come from PassesSemantics.securitySheet — never raw
+    // MaterialTheme.colorScheme — so a host that retunes the security sheet via
+    // PassesTheme gets a fully-themed DomainHero, not a half-themed one.
     val body = emphasis.bodyForeground.toComposeColor()
-    val outline = MaterialTheme.colorScheme.outline
-    val dim = MaterialTheme.colorScheme.outlineVariant
-    val divider = MaterialTheme.colorScheme.outlineVariant
+    val eyebrow = emphasis.eyebrowForeground.toComposeColor()
+    val muted = emphasis.mutedForeground.toComposeColor()
     val eyebrowCopy = when (kind) {
         SecurityIntentKind.Url -> "LEAVING WALT"
         SecurityIntentKind.Phone -> "CALLING"
@@ -349,7 +352,7 @@ private fun DomainHeroLayout(
         Text(
             text = eyebrowCopy,
             style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-            color = outline,
+            color = eyebrow,
         )
         Text(
             // Hero is user-controlled (it's derived from the intent target); isolate
@@ -365,18 +368,18 @@ private fun DomainHeroLayout(
             // string is always visible.
             text = isolated(target),
             style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-            color = dim,
+            color = muted,
         )
         Text(
-            text = provenanceAnnotated(source, body, dim),
+            text = provenanceAnnotated(source, body, muted),
             style = MaterialTheme.typography.bodySmall,
-            color = dim,
+            color = muted,
         )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(divider),
+                .background(muted),
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
