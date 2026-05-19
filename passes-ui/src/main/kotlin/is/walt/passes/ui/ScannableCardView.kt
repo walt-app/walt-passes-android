@@ -32,11 +32,10 @@ import `is`.walt.passes.core.ScannableFormat
  * is square and [ContentScale.FillBounds] would distort it if the slot is non-square.
  * The four 1D symbologies use [ContentScale.FillBounds] because [BarcodeEncoder]
  * emits their matrices at the symbology's natural minimum — exactly one module tall
- * (ZxingBarcodeEncoder.kt:82-98) — and `Fit` against a ~200:1 painter intrinsic
- * ratio collapses the painted height to a few pixels in a normal-aspect slot
- * (wpass-0j1). `FillBounds` stretches vertically and, combined with
- * [FilterQuality.None], keeps module edges sharp since 1D barcodes carry no data on
- * the vertical axis.
+ * (see `ZxingBarcodeEncoder.writeMatrix`) — and `Fit` against a ~200:1 painter
+ * intrinsic ratio collapses the painted height to a few pixels in a normal-aspect
+ * slot. `FillBounds` stretches vertically and, combined with [FilterQuality.None],
+ * keeps module edges sharp since 1D barcodes carry no data on the vertical axis.
  *
  * Encoder failures render as a same-sized [Spacer] with a TalkBack-readable
  * `contentDescription` rather than throwing. Card chrome (background tint, label,
