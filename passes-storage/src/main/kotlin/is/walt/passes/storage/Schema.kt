@@ -36,11 +36,8 @@ public object Schema {
 
     /**
      * Statements that introduced the v3 scannable-cards table. Kept verbatim so a v2 -> v3
-     * upgrade still produces the historical shape (including the now-dropped `color_argb`
-     * column); the v3 -> v4 migration then rewrites the table to the current shape. Fresh
-     * installs skip this entirely and go straight to [V4_SCANNABLE_CARD_TABLES]. The
-     * fresh-vs-migrated parity guard in `SchemaMigrationTest` verifies the two paths
-     * converge at v4.
+     * upgrade still produces the historical shape; the v3 -> v4 migration then rewrites
+     * the table. Fresh installs skip this and go straight to [V4_SCANNABLE_CARD_TABLES].
      */
     private val V3_SCANNABLE_CARD_TABLES: List<String> = listOf(
         """
@@ -98,6 +95,8 @@ public object Schema {
             created_at_epoch_ms INTEGER NOT NULL
         )
         """.trimIndent(),
+        // Explicit column list intentional — SELECT * would pull color_argb and shift
+        // column order on the target table (label -> created_at_epoch_ms et al.).
         """
         INSERT INTO scannable_cards (id, payload, format, label, created_at_epoch_ms)
             SELECT id, payload, format, label, created_at_epoch_ms FROM scannable_cards_v3

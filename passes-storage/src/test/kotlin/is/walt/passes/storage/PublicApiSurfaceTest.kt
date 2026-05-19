@@ -199,7 +199,8 @@ class PublicApiSurfaceTest {
         assertThat(Schema.Tables.SCANNABLE_CARDS).isEqualTo("scannable_cards")
         // schema_meta + passes + 3 pass-side indexes + pass_images + pass_locales
         // + documents + 1 document index + document_thumbnails
-        // + scannable_cards + 1 scannable-card index = 12 statements.
+        // + scannable_cards (v4 shape, no color_argb) + 1 scannable-card index
+        // = 12 statements.
         assertThat(Schema.DDL).hasSize(12)
         assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2, 3)
     }
