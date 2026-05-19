@@ -56,6 +56,121 @@ class PublicApiSurfaceTest {
     }
 
     @Test
+    fun b3UrlIntentRegistrableDomainDefaultsToNull() {
+        // The kdoc promises the field is optional; consumers that construct intents
+        // outside the scanner (e.g. their own URL pipeline) get null and the
+        // DomainHero layout falls back to the verbatim URL.
+        val intent = B3UrlIntent(
+            url = "https://example.com",
+            sourceField = SourceField("k", "L", "Org"),
+        )
+        assertThat(intent.registrableDomain).isNull()
+    }
+
+    @Test
+    fun b3EmphasisStyleArmsAreReachableViaWhen() {
+        val styles: List<B3EmphasisStyle> = listOf(
+            B3EmphasisStyle.Container,
+            B3EmphasisStyle.DomainHero,
+        )
+        val labels = styles.map { style ->
+            when (style) {
+                B3EmphasisStyle.Container -> "container"
+                B3EmphasisStyle.DomainHero -> "domain-hero"
+            }
+        }
+        assertThat(labels).containsExactly("container", "domain-hero").inOrder()
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainKeepsTwoLabelMirrorHost() {
+        // wpass-48v reviewer note: `m.com` (2 labels) MUST NOT collapse to `com`.
+        // The mirror-label strip only fires when there's a non-TLD label behind it.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://m.com/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("m.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainKeepsTwoLabelMobileHost() {
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://mobile.io/", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("mobile.io")
+    }
+
+    @Test
+    fun fieldLinkScannerPopulatesRegistrableDomain() {
+        // Common case: www-prefixed registrable domain. The scanner's PSL-free
+        // extraction returns the host with the `www.` mirror label stripped.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("Visit https://www.tixly.com/refunds today", source)
+        assertThat(spans).hasSize(1)
+        val intent = spans.single().intent
+        assertThat(intent).isInstanceOf(B3UrlIntent::class.java)
+        assertThat((intent as B3UrlIntent).registrableDomain).isEqualTo("tixly.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainHandlesNakedHost() {
+        // No `www.` prefix: the host comes back unchanged.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://example.com/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("example.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainKeepsMultiLabelTld() {
+        // PSL-free: we surface the extra label rather than guessing co.uk is the
+        // suffix. Documented in `FieldLinkScanner.registrableDomainOf` kdoc:
+        // over-disclosing the destination is the right failure mode.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://www.example.co.uk/help", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("example.co.uk")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainStripsPortAndUserinfo() {
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://user@www.example.com:8443/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("example.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainLowercases() {
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://WWW.TIXLY.COM/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("tixly.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainPreservesNonMirrorSubdomain() {
+        // `accounts` is not in the mirror-label set, so the full host survives.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://accounts.example.com/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("accounts.example.com")
+    }
+
+    @Test
+    fun b3UrlIntentUrlIsLoadBearingTrustClaim() {
+        // Belt-and-suspenders: a B3UrlIntent constructed with a registrableDomain
+        // distinct from the url must NOT mutate the url. The trust contract is the
+        // verbatim url field; the registrable domain is presentation only.
+        val intent = B3UrlIntent(
+            url = "https://attacker.example/phish",
+            sourceField = SourceField("k", "L", "Org"),
+            registrableDomain = "trustedbank.com",
+        )
+        assertThat(intent.url).isEqualTo("https://attacker.example/phish")
+    }
+
+    @Test
     fun expiredOverlayStateArmsAreReachableViaWhen() {
         val states: List<ExpiredOverlayState> = listOf(
             ExpiredOverlayState.None,
@@ -316,6 +431,8 @@ class PublicApiSurfaceTest {
                 confirmContainer = argb,
                 confirmForeground = argb,
                 cancelForeground = argb,
+                eyebrowForeground = argb,
+                mutedForeground = argb,
             ),
             categoryAccent = CategoryAccentColors(
                 boardingPass = argb,
@@ -337,6 +454,8 @@ class PublicApiSurfaceTest {
         assertThat(semantics.signatureBadge.appleVerifiedBackground).isEqualTo(argb)
         assertThat(semantics.expiredBadge.scrimAlpha).isEqualTo(96)
         assertThat(semantics.securitySheet.confirmContainer).isEqualTo(argb)
+        assertThat(semantics.securitySheet.eyebrowForeground).isEqualTo(argb)
+        assertThat(semantics.securitySheet.mutedForeground).isEqualTo(argb)
         assertThat(semantics.categoryAccent.boardingPass).isEqualTo(argb)
         assertThat(semantics.unverifiedArtifact.accent).isEqualTo(argb)
         // captionIconTint defaults to captionForeground when not explicitly supplied —
@@ -344,6 +463,26 @@ class PublicApiSurfaceTest {
         // monochrome caption. Locking the default here keeps that contract testable.
         assertThat(semantics.unverifiedArtifact.captionIconTint)
             .isEqualTo(semantics.unverifiedArtifact.captionForeground)
+    }
+
+    @Test
+    fun securitySheetStyleDomainHeroTokensHaveSensibleDefaults() {
+        // wpass-48v: hosts that have not wired the DomainHero-specific tokens still
+        // get a reasonable muted hierarchy (eyebrow heavier than forensic/divider).
+        // The defaults are not the kernel's brand call — production callers always
+        // override — but locking them keeps a future refactor from silently flipping
+        // either field to e.g. transparent.
+        val style = SecuritySheetStyle(
+            sheetBackground = ArgbColor(0),
+            emphasisBackground = ArgbColor(0),
+            emphasisForeground = ArgbColor(0),
+            bodyForeground = ArgbColor(0),
+            confirmContainer = ArgbColor(0),
+            confirmForeground = ArgbColor(0),
+            cancelForeground = ArgbColor(0),
+        )
+        assertThat(style.eyebrowForeground.argb).isEqualTo(0xFF73777F.toInt())
+        assertThat(style.mutedForeground.argb).isEqualTo(0xFFC4C7C5.toInt())
     }
 
     @Test

@@ -5,6 +5,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.compose.ui.test.performClick
@@ -43,6 +44,7 @@ import org.robolectric.annotation.Config
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
+@Suppress("LargeClass")
 class TrustClaimSurfaceTest {
 
     @get:Rule
@@ -277,6 +279,290 @@ class TrustClaimSurfaceTest {
         composeRule.onNodeWithText(
             "⁨Acme Corp⁩ — ⁨Support⁩",
         ).assertIsDisplayed()
+    }
+
+    // wpass-btz: PassFront.showSignatureBadge default-true preserves the original
+    // ADR 0003 D5 posture; opt-out is permitted strictly for hosts that disclose the
+    // band in their own chrome (walt-android import-confirm TrustChip). Telemetry
+    // fires on the band regardless of the boolean - the trust contract is that the
+    // band is recorded, not that a specific pill renders.
+
+    @Test
+    fun passFrontDefaultRendersSignatureBadge() {
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 0L,
+                    telemetry = telemetry,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Verified").assertIsDisplayed()
+    }
+
+    @Test
+    fun passFrontShowSignatureBadgeFalseSuppressesPill() {
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 0L,
+                    telemetry = telemetry,
+                    showSignatureBadge = false,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Verified").assertDoesNotExist()
+    }
+
+    @Test
+    fun passFrontShowSignatureBadgeFalseStillFiresOnPassRendered() {
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(),
+                    signatureStatus = SignatureStatus.SelfSigned,
+                    nowEpochMillis = 0L,
+                    telemetry = telemetry,
+                    showSignatureBadge = false,
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        // Band must still be derivable and reported even when the visual badge is hidden.
+        assertThat(telemetry.events).contains("rendered:Generic:SelfSigned")
+    }
+
+    // wpass-d0k: showExpiredOverlay default-true preserves D5 behavior; opt-out lets
+    // a host treat expired passes as quiet archival rather than visual failure.
+
+    @Test
+    fun passFrontDefaultRendersExpiredOverlay() {
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(expirationDate = PassInstant(0L)),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 1_000L,
+                    telemetry = telemetry,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Expired").assertIsDisplayed()
+    }
+
+    @Test
+    fun passFrontShowExpiredOverlayFalseSuppressesScrim() {
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(expirationDate = PassInstant(0L)),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 1_000L,
+                    telemetry = telemetry,
+                    showExpiredOverlay = false,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Expired").assertDoesNotExist()
+    }
+
+    @Test
+    fun passFrontShowExpiredOverlayFalseSuppressesVoidedScrim() {
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(voided = true),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 0L,
+                    telemetry = telemetry,
+                    showExpiredOverlay = false,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Voided").assertDoesNotExist()
+    }
+
+    @Test
+    fun passFrontOptOutsAreIndependent() {
+        // Suppressing the signature badge does not affect the expired overlay and
+        // vice versa. The two booleans gate different chrome.
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(expirationDate = PassInstant(0L)),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 1_000L,
+                    telemetry = telemetry,
+                    showSignatureBadge = false,
+                    showExpiredOverlay = true,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Verified").assertDoesNotExist()
+        composeRule.onNodeWithText("Expired").assertIsDisplayed()
+    }
+
+    // wpass-48v: B3EmphasisStyle.DomainHero is a layout opt-in; both layouts
+    // display the verbatim target verbatim and fire the same telemetry.
+
+    @Test
+    fun securitySheetDomainHeroShowsVerbatimUrl() {
+        val intent = B3UrlIntent(
+            url = "https://www.tixly.com/refunds",
+            sourceField = SourceField("support", "Support", "Acme"),
+            registrableDomain = "tixly.com",
+        )
+        composeRule.setContent {
+            ThemedHost {
+                B3UrlConfirmSheet(
+                    intent = intent,
+                    passType = PassType.BoardingPass,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                    emphasisStyle = B3EmphasisStyle.DomainHero,
+                )
+            }
+        }
+        // Eyebrow.
+        composeRule.onNodeWithText("LEAVING WALT").assertIsDisplayed()
+        // Hero and forensic both contain "tixly.com"; use onAllNodes and assert at
+        // least one carries the bare domain (hero) and the full URL is also present
+        // (forensic row).
+        val domainNodes = composeRule.onAllNodesWithText("tixly.com", substring = true)
+            .fetchSemanticsNodes()
+        assertThat(domainNodes).isNotEmpty()
+        val urlNodes = composeRule.onAllNodesWithText("https://www.tixly.com/refunds", substring = true)
+            .fetchSemanticsNodes()
+        assertThat(urlNodes).isNotEmpty()
+        composeRule.waitForIdle()
+        assertThat(telemetry.events).contains("shown:Url:BoardingPass")
+    }
+
+    @Test
+    fun securitySheetDomainHeroFallsBackToTargetWhenRegistrableDomainNull() {
+        // The hero falls back to the verbatim target when the intent lacks a
+        // registrable domain, so both the hero and forensic rows display the same
+        // string — the trust contract (verbatim on-screen) still holds.
+        val intent = B3UrlIntent(
+            url = "https://example.com/x",
+            sourceField = SourceField("support", "Support", "Acme"),
+        )
+        composeRule.setContent {
+            ThemedHost {
+                B3UrlConfirmSheet(
+                    intent = intent,
+                    passType = PassType.BoardingPass,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                    emphasisStyle = B3EmphasisStyle.DomainHero,
+                )
+            }
+        }
+        // At least one node carries the verbatim URL; eyebrow confirms layout.
+        composeRule.onNodeWithText("LEAVING WALT").assertIsDisplayed()
+        val nodes = composeRule.onAllNodesWithText("https://example.com/x", substring = true)
+            .fetchSemanticsNodes()
+        assertThat(nodes).isNotEmpty()
+    }
+
+    @Test
+    fun securitySheetDomainHeroFiresConfirmTelemetry() {
+        var confirmed = 0
+        val intent = B3UrlIntent(
+            url = "https://tixly.com/x",
+            sourceField = SourceField("support", "Support", "Acme"),
+            registrableDomain = "tixly.com",
+        )
+        composeRule.setContent {
+            ThemedHost {
+                B3UrlConfirmSheet(
+                    intent = intent,
+                    passType = PassType.BoardingPass,
+                    telemetry = telemetry,
+                    onConfirm = { confirmed++ },
+                    onDismiss = {},
+                    emphasisStyle = B3EmphasisStyle.DomainHero,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Open in browser").performClick()
+        composeRule.waitForIdle()
+        assertThat(confirmed).isEqualTo(1)
+        assertThat(telemetry.events).contains("confirm:Url:BoardingPass")
+    }
+
+    @Test
+    fun securitySheetPhoneDomainHeroShowsVerbatim() {
+        val intent = PhoneIntent(
+            phoneNumber = "+1 (555) 123-4567",
+            sourceField = SourceField("phone", "Phone", "Acme"),
+        )
+        composeRule.setContent {
+            ThemedHost {
+                PhoneConfirmSheet(
+                    intent = intent,
+                    passType = PassType.EventTicket,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                    emphasisStyle = B3EmphasisStyle.DomainHero,
+                )
+            }
+        }
+        composeRule.onNodeWithText("CALLING").assertIsDisplayed()
+        // The verbatim digits are present; phoneHeroOf only collapses whitespace, so
+        // hero and forensic row carry the same string for inputs with no multi-space
+        // runs (the typical case). Trust contract is verbatim-on-screen, not a single
+        // node count.
+        val nodes = composeRule.onAllNodesWithText("+1 (555) 123-4567", substring = true)
+            .fetchSemanticsNodes()
+        assertThat(nodes).isNotEmpty()
+    }
+
+    @Test
+    fun securitySheetEmailDomainHeroHeroIsHostNotLocalPart() {
+        // wpass-48v reviewer note: the hero is the host portion of the address, not
+        // the attacker-controllable local-part. `support@phisher.example` must
+        // promote `phisher.example`, not `support`. The forensic row carries the
+        // full verbatim address either way.
+        val intent = EmailIntent(
+            emailAddress = "support@phisher.example",
+            sourceField = SourceField("email", "Email", "Acme"),
+        )
+        composeRule.setContent {
+            ThemedHost {
+                EmailConfirmSheet(
+                    intent = intent,
+                    passType = PassType.Coupon,
+                    telemetry = telemetry,
+                    onConfirm = {},
+                    onDismiss = {},
+                    emphasisStyle = B3EmphasisStyle.DomainHero,
+                )
+            }
+        }
+        composeRule.onNodeWithText("EMAILING").assertIsDisplayed()
+        // Hero (host portion) and forensic row (full address) both contain
+        // "phisher.example"; assert at least one node carries it (which proves the
+        // hero is NOT the local-part "support") and the full address is on screen.
+        val hostNodes = composeRule.onAllNodesWithText("phisher.example", substring = true)
+            .fetchSemanticsNodes()
+        assertThat(hostNodes).isNotEmpty()
+        val addressNodes = composeRule.onAllNodesWithText("support@phisher.example", substring = true)
+            .fetchSemanticsNodes()
+        assertThat(addressNodes).isNotEmpty()
+        // Negative assertion: the local-part alone (without the @-host) must NOT be
+        // the bare hero. If "support" appears as a standalone node it would mean
+        // the hero is the local-part — exactly the failure mode this guards against.
+        val bareLocalPartNodes = composeRule.onAllNodesWithText("support", substring = false)
+            .fetchSemanticsNodes()
+        assertThat(bareLocalPartNodes).isEmpty()
     }
 
     @Test

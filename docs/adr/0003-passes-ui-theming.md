@@ -125,8 +125,6 @@ the expired/voided overlay, the URL confirmation sheet, the phone confirmation
 sheet, and the email confirmation sheet. Their public composable signatures
 deliberately omit the parameters that would let a caller suppress them:
 
-- `PassFront` does not accept `showTrustBadge: Boolean`. The badge is
-  composited unconditionally; its color is the only thing the host controls.
 - `PassFront` does not accept `expiredOverlay: ExpiredOverlayState`. The state
   is computed inside the composable from `Pass.expirationDate`, `Pass.voided`,
   and a `nowEpochMillis` parameter. There is no API path that lets a host
@@ -142,10 +140,56 @@ deliberately omit the parameters that would let a caller suppress them:
   `onEmailIntent` callbacks. The host must wire all three; missing any one is
   a compile error, not a runtime no-op.
 
-Removing or weakening any of the above is a deliberate security-policy edit, not
-a refactor. The implementation bead's API-surface lock test (the eventual
-`PassesUiPublicApiTest` analog of `passes-storage`'s `PublicApiSurfaceTest`) will
-pin these properties as named parameter sets.
+#### Bounded opt-ins for cross-chrome disclosure (wpass-hy2)
+
+Two cases admit a single opt-in boolean each: when the host has already
+disclosed the same signal in its own chrome and the kernel-rendered chrome
+would double-label the user. These are explicit, non-default, and pinned in
+`ComposableSurfaceLockTest` so they cannot grow further without review:
+
+- `PassFront.showSignatureBadge: Boolean = true` (wpass-btz). Default-true
+  preserves the original posture: a hosted `PassFront` carries the band's pill.
+  `false` suppresses the pill but not the `onPassRendered(type, band)`
+  telemetry — the band is still derived and recorded. Intended for surfaces
+  like walt-android's import-confirm view where a sibling `TrustChip` already
+  shows the band. A host that opts out without rendering an equivalent
+  disclosure is breaching the contract; review at the call site.
+- `PassFront.showExpiredOverlay: Boolean = true` (wpass-d0k). Default-true
+  preserves the original posture: an expired or voided pass on `PassFront`
+  carries the black scrim and pill. `false` suppresses the scrim composition
+  only; the underlying `Pass.expirationDate` / `voided` data is unchanged, the
+  `ExpiredOverlay` composable itself remains non-suppressible if a host calls
+  it directly, and there is still no API that *displays* an arbitrary expiry
+  state. Intended for surfaces like walt-android's archival detail screen
+  where a sibling `PAST PASS` eyebrow and `Expired {date}` pill already
+  present the same status.
+
+The companion change — `B3UrlConfirmSheet` / `PhoneConfirmSheet` /
+`EmailConfirmSheet` taking `emphasisStyle: B3EmphasisStyle = Container`
+(wpass-48v) — is a pure layout switch, not a suppression. Both `Container`
+and `DomainHero` render the verbatim target string on-screen, fire the same
+telemetry on the same gestures, and block dispatch on an explicit confirm tap.
+The split exists so the verbatim target does not visually equate with the
+issuer Verified band on hosts that surface both.
+
+#### What is still forbidden
+
+Removing or weakening any non-opt-out property above is a deliberate
+security-policy edit, not a refactor. The bounded opt-ins do NOT open the door
+to:
+
+- `PassFront(.., signatureBand: SignatureBand = ...)` or any path that lets a
+  host *display* a band different from what `signatureStatus.toBand()` produces.
+- `PassFront(.., expiredOverlay: ExpiredOverlayState = ...)` or any path that
+  lets a host *display* an expiry state different from
+  `ExpiredOverlayState.from(pass, nowEpochMillis)`.
+- A `skipConfirmation: Boolean` on the security sheets.
+- An overload of `ExpiredOverlay` or `BoundedImage` that elides the existing
+  shape.
+
+`ComposableSurfaceLockTest` pins the user-visible parameter counts for each
+surface so any of the above would fail the lock before code review even
+opens the file.
 
 ### D6. Telemetry follows the `TelemetryGuard` discipline
 

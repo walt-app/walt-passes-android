@@ -70,8 +70,10 @@ fails fast.
  * pass surface only; chrome around the pass (the bottom sheet, the wallet list
  * background) keeps using the host theme.
  *
- * The signature trust badge and expired overlay (if applicable) are composited on top
- * of the front; they are not optional and cannot be suppressed by the caller.
+ * The signature trust badge and expired overlay default to always-on. The two
+ * opt-in booleans below (wpass-btz / wpass-d0k) let a host suppress the kernel
+ * chrome only when it has disclosed the equivalent signal in its own surrounding
+ * UI; see ADR 0003 D5 for the bounded-opt-in rules.
  */
 @Composable
 public fun PassFront(
@@ -81,6 +83,8 @@ public fun PassFront(
     modifier: Modifier = Modifier,
     locale: PassLocale = PassLocale("en"),
     nowEpochMillis: Long = System.currentTimeMillis(),
+    showSignatureBadge: Boolean = true,
+    showExpiredOverlay: Boolean = true,
 )
 ```
 
@@ -158,30 +162,44 @@ public fun BarcodeView(
 
 Each sheet displays the verbatim target string from its [SecurityIntent], the source
 field's label and the issuer's `organizationName`, then a confirm button.
+`emphasisStyle` (wpass-48v) chooses between the original `Container` layout and the
+`DomainHero` layout; both display the verbatim target, fire the same telemetry, and
+block dispatch on explicit confirm. See ADR 0003 D5.
 
 ```kotlin
+public sealed interface B3EmphasisStyle {
+    public data object Container : B3EmphasisStyle
+    public data object DomainHero : B3EmphasisStyle
+}
+
 @Composable
 public fun B3UrlConfirmSheet(
     intent: B3UrlIntent,
+    passType: PassType,
+    telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    telemetry: UiTelemetryGuard,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 )
 
 @Composable
 public fun PhoneConfirmSheet(
     intent: PhoneIntent,
+    passType: PassType,
+    telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    telemetry: UiTelemetryGuard,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 )
 
 @Composable
 public fun EmailConfirmSheet(
     intent: EmailIntent,
+    passType: PassType,
+    telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    telemetry: UiTelemetryGuard,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 )
 ```
 

@@ -32,26 +32,35 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
-    fun b3UrlConfirmSheetHasExactlyFiveUserVisibleParameters() {
-        // (intent, passType, telemetry, onConfirm, onDismiss) — D5: no skipConfirmation.
-        assertUserVisibleParamCount("SecuritySheetsKt", "B3UrlConfirmSheet", expected = 5)
+    fun b3UrlConfirmSheetHasExactlySixUserVisibleParameters() {
+        // (intent, passType, telemetry, onConfirm, onDismiss, emphasisStyle). The
+        // sixth parameter is the wpass-48v opt-in layout switch (B3EmphasisStyle:
+        // Container | DomainHero); both layouts display the verbatim target and
+        // fire identical telemetry. D5 still forbids a `skipConfirmation` parameter.
+        assertUserVisibleParamCount("SecuritySheetsKt", "B3UrlConfirmSheet", expected = 6)
     }
 
     @Test
-    fun phoneConfirmSheetHasExactlyFiveUserVisibleParameters() {
-        assertUserVisibleParamCount("SecuritySheetsKt", "PhoneConfirmSheet", expected = 5)
+    fun phoneConfirmSheetHasExactlySixUserVisibleParameters() {
+        assertUserVisibleParamCount("SecuritySheetsKt", "PhoneConfirmSheet", expected = 6)
     }
 
     @Test
-    fun emailConfirmSheetHasExactlyFiveUserVisibleParameters() {
-        assertUserVisibleParamCount("SecuritySheetsKt", "EmailConfirmSheet", expected = 5)
+    fun emailConfirmSheetHasExactlySixUserVisibleParameters() {
+        assertUserVisibleParamCount("SecuritySheetsKt", "EmailConfirmSheet", expected = 6)
     }
 
     @Test
-    fun passFrontHasExactlySixUserVisibleParameters() {
-        // (pass, signatureStatus, locale, nowEpochMillis, telemetry, modifier) — D5:
-        // no showTrustBadge, no showExpired, no expiredOverlay override.
-        assertUserVisibleParamCount("PassFrontKt", "PassFront", expected = 6)
+    fun passFrontHasExactlyEightUserVisibleParameters() {
+        // (pass, signatureStatus, telemetry, modifier, locale, nowEpochMillis,
+        // showSignatureBadge, showExpiredOverlay). The last two are the wpass-hy2
+        // R2 host opt-outs (wpass-btz, wpass-d0k) — non-breaking defaults that
+        // preserve the original ADR 0003 D5 posture. Adding a ninth parameter
+        // (e.g. `expiredOverlay: ExpiredOverlayState` that lets a host *display*
+        // an arbitrary expiry state, or `signatureBand: SignatureBand` that lets
+        // a host override the badge band) would breach D5; review the ADR before
+        // changing this number.
+        assertUserVisibleParamCount("PassFrontKt", "PassFront", expected = 8)
     }
 
     @Test

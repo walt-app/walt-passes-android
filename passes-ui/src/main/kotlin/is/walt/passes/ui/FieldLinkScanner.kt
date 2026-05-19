@@ -88,7 +88,11 @@ public object FieldLinkScanner {
             spans += LinkSpan(
                 start = match.range.first,
                 endExclusive = match.range.last + 1,
-                intent = B3UrlIntent(url = match.value, sourceField = source),
+                intent = B3UrlIntent(
+                    url = match.value,
+                    sourceField = source,
+                    registrableDomain = registrableDomainOf(match.value),
+                ),
             )
         }
 
@@ -177,6 +181,57 @@ public object FieldLinkScanner {
 
     /** `+` and `(` immediately before a digit run signal an unmatched-paren or international form. */
     private val PHONE_PREFIX_HINTS = setOf('+', '(')
+
+    /**
+     * Best-effort, PSL-free registrable-domain extraction for a scanned URL. The
+     * result is a presentation aid for `B3UrlConfirmSheet`'s domain-hero layout —
+     * the verbatim URL stays on the forensic row and carries the trust contract.
+     *
+     * Why no Public Suffix List: it would add ~200 KB and a monthly-freshness
+     * obligation for a presentation aid. The PSL-free answer for `example.co.uk`
+     * is `example.co.uk` (one label deeper than the PSL answer). Over-disclosing
+     * the destination beats under-disclosing it.
+     *
+     * Transformation: strip scheme, take the authority before the first `/?#`,
+     * drop `userinfo@` and `:port`, lowercase, trim trailing `.`. If the host has
+     * three or more labels and the leading label is `www` / `m` / `mb` / `mobile`,
+     * drop it; otherwise return the host unchanged. The `>= 3 labels` floor
+     * prevents collapsing two-label hosts like `m.com` → `com`, which would
+     * mislabel the destination rather than just over-disclose it.
+     *
+     * Consumers MUST NOT route the return value into an outbound `Intent` — it
+     * carries no scheme, no path, and is structurally lossy. The verbatim URL on
+     * [B3UrlIntent.url] is the only string the host's `Intent.ACTION_VIEW`
+     * receives.
+     */
+    @Suppress("ReturnCount")
+    internal fun registrableDomainOf(url: String): String? {
+        val schemeStripped = url.removePrefix("https://").removePrefix("http://")
+        if (schemeStripped == url) return null
+        val authorityEnd = schemeStripped.indexOfAny(charArrayOf('/', '?', '#'))
+        val authority = if (authorityEnd < 0) schemeStripped else schemeStripped.substring(0, authorityEnd)
+        if (authority.isEmpty()) return null
+        val afterUserinfo = authority.substringAfterLast('@')
+        // IPv6 literals appear bracketed; if so, return the bracketed form so the
+        // hero still shows what `Uri.parse` would call the host.
+        val hostAndPort = if (afterUserinfo.startsWith("[")) {
+            val close = afterUserinfo.indexOf(']')
+            if (close < 0) return null
+            afterUserinfo.substring(0, close + 1)
+        } else {
+            afterUserinfo.substringBefore(':')
+        }
+        val host = hostAndPort.lowercase().trimEnd('.')
+        if (host.isEmpty()) return null
+        val labels = host.split('.')
+        // Only strip a mirror label when there's a non-TLD label behind it.
+        // `m.com` (2 labels) MUST stay as `m.com`, not collapse to `com`.
+        if (labels.size < 3) return host
+        val first = labels.first()
+        return if (first in MIRROR_LABELS) labels.drop(1).joinToString(".") else host
+    }
+
+    private val MIRROR_LABELS = setOf("www", "m", "mb", "mobile")
 }
 
 /**

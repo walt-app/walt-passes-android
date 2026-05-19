@@ -50,14 +50,31 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * only — the trust badge and expired overlay above this composable still read from
  * `LocalPassesSemantics`. See ADR 0003 D4.
  *
- * The signature trust badge and (when applicable) the expired overlay are composited
- * on top of the pass; neither has a suppression parameter — see ADR 0003 D5.
+ * The signature trust badge and (when applicable) the expired overlay default to
+ * always-on, preserving the original ADR 0003 D5 posture. The two bounded opt-ins
+ * ([showSignatureBadge], [showExpiredOverlay]) exist because hosts that have already
+ * disclosed the equivalent signal in their own chrome would otherwise double-label
+ * the user; see ADR 0003 D5 and the wpass-hy2 epic for the rationale and the
+ * non-suppressible surfaces that remain.
  *
  * @param locale Drives `pass.strings` substitution via [Pass.resolveLocalizedStrings].
  *   The default `PassLocale("en")` is a *fallback for tests and previews*; production
  *   callers (walt-android) MUST thread the device locale through, or the user sees
  *   English labels regardless of system language.
+ * @param showSignatureBadge When `false`, the in-card `SignatureTrustBadge` pill is
+ *   not rendered. Defaults to `true`. `onPassRendered` telemetry fires regardless —
+ *   the band must still be derivable and recorded. Hosts that opt out MUST disclose
+ *   the band in their own surrounding chrome (e.g. walt-android's import-confirm
+ *   `TrustChip`).
+ * @param showExpiredOverlay When `false`, the black expired/voided scrim and pill
+ *   are not rendered even if [ExpiredOverlayState.from] would otherwise produce a
+ *   non-`None` state. Defaults to `true`. Hosts that opt out MUST present the
+ *   expired/voided status in their own chrome (e.g. walt-android's "PAST PASS"
+ *   eyebrow + "Expired {date}" pill on the archival detail surface). The expiry
+ *   data is unchanged on the underlying [Pass]; this is a layout opt-out, not a
+ *   data lie.
  */
+@Suppress("LongParameterList")
 @Composable
 public fun PassFront(
     pass: Pass,
@@ -66,6 +83,8 @@ public fun PassFront(
     modifier: Modifier = Modifier,
     locale: PassLocale = PassLocale("en"),
     nowEpochMillis: Long = System.currentTimeMillis(),
+    showSignatureBadge: Boolean = true,
+    showExpiredOverlay: Boolean = true,
 ) {
     val band = signatureStatus.toBand()
     val expired = remember(pass, nowEpochMillis) {
@@ -98,14 +117,16 @@ public fun PassFront(
                 passBackground = passBackground,
                 passForeground = passForeground,
                 passLabel = passLabel,
+                showSignatureBadge = showSignatureBadge,
             )
-            if (expired !is ExpiredOverlayState.None) {
+            if (showExpiredOverlay && expired !is ExpiredOverlayState.None) {
                 ExpiredOverlay(state = expired, modifier = Modifier.matchParentSize())
             }
         }
     }
 }
 
+@Suppress("LongParameterList")
 @Composable
 private fun PassFrontSurface(
     pass: Pass,
@@ -114,6 +135,7 @@ private fun PassFrontSurface(
     passBackground: Color,
     passForeground: Color,
     passLabel: Color,
+    showSignatureBadge: Boolean,
 ) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
@@ -137,7 +159,9 @@ private fun PassFrontSurface(
                     color = passLabel,
                     modifier = Modifier.weight(1f),
                 )
-                SignatureTrustBadge(band = band)
+                if (showSignatureBadge) {
+                    SignatureTrustBadge(band = band)
+                }
             }
 
             when (pass.type) {

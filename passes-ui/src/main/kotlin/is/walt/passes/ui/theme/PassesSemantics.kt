@@ -88,6 +88,14 @@ public data class ExpiredBadgeStyle(
  *
  * [emphasisBackground] / [emphasisForeground] style the panel that contains the
  * to-be-actioned target string itself; [bodyForeground] styles the explanatory copy.
+ *
+ * [eyebrowForeground] and [mutedForeground] are consumed by the [B3EmphasisStyle.DomainHero]
+ * layout (wpass-48v) for the `LEAVING WALT` / `CALLING` / `EMAILING` eyebrow and the
+ * forensic / provenance / hairline chrome respectively. Defaults approximate M3
+ * `colorScheme.outline` (eyebrow) and `outlineVariant` (muted) so a host that has not
+ * yet wired R2 tokens still gets a reasonable hierarchy; production callers
+ * (walt-android) override both to flow the brand palette through the same way
+ * [bodyForeground] already does.
  */
 public data class SecuritySheetStyle(
     public val sheetBackground: ArgbColor,
@@ -97,6 +105,8 @@ public data class SecuritySheetStyle(
     public val confirmContainer: ArgbColor,
     public val confirmForeground: ArgbColor,
     public val cancelForeground: ArgbColor,
+    public val eyebrowForeground: ArgbColor = ArgbColor(0xFF73777F.toInt()),
+    public val mutedForeground: ArgbColor = ArgbColor(0xFFC4C7C5.toInt()),
 )
 
 /**
