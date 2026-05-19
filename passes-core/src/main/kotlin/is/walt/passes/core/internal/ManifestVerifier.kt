@@ -4,7 +4,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import java.security.MessageDigest
-import java.util.HexFormat
 
 /**
  * Verifies the SHA-1 hash chain a PKPASS archive declares in `manifest.json`. Pure
@@ -133,12 +132,26 @@ private fun findExtraEntry(
  * Decodes a 40-character SHA-1 hex string to its 20 raw bytes, accepting any case
  * mix. Returns `null` (not an exception) so the caller can map to
  * [ManifestFailure.InvalidHashFormat] without a try/catch at every call site.
- * [HexFormat.parseHex] accepts both cases; the explicit length check is here because
- * `parseHex` accepts any even length and we require exactly SHA-1.
+ *
+ * Implemented as a manual nibble loop rather than `java.util.HexFormat` because the
+ * latter was added to AOSP at API 34 and D8 does not desugar it; on API 28–33 a
+ * file-scope `HexFormat.of()` triggers `NoClassDefFoundError` in `<clinit>` the
+ * first time any function in this file is called (wpass-g00).
  */
 private fun decodeSha1Hex(hex: String): ByteArray? {
     if (hex.length != SHA1_HEX_LENGTH) return null
-    return runCatching { HEX.parseHex(hex) }.getOrNull()
+    val out = ByteArray(SHA1_HEX_LENGTH / 2)
+    var ok = true
+    for (i in 0 until SHA1_HEX_LENGTH step 2) {
+        val hi = Character.digit(hex[i], 16)
+        val lo = Character.digit(hex[i + 1], 16)
+        if (hi < 0 || lo < 0) {
+            ok = false
+            break
+        }
+        out[i / 2] = (hi shl 4 or lo).toByte()
+    }
+    return if (ok) out else null
 }
 
 private sealed interface ManifestParse {
@@ -149,4 +162,3 @@ private sealed interface ManifestParse {
 
 private const val SHA1_ALGORITHM = "SHA-1"
 private const val SHA1_HEX_LENGTH = 40
-private val HEX: HexFormat = HexFormat.of()
