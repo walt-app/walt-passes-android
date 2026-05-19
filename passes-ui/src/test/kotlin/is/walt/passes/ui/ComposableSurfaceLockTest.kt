@@ -181,14 +181,15 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
-    fun scannableCardRowTileHasExactlyThreeUserVisibleParameters() {
-        // (card, onClick, modifier). Wallet-row register sibling of ScannableCardTile.
-        // The row deliberately drops the carousel tile's caption per the threat-model
-        // concession in SCANNABLE_CARD_THREAT_MODEL.md C1 / C2; adding a 4th parameter
-        // (e.g. `showSignatureBadge`, `leadingIcon`, `onLongPress`) either re-opens the
-        // trust-conflation risk or expands the surface past what the concession permits.
-        // Review the concession before changing this number.
-        assertUserVisibleParamCount("ScannableCardRowTileKt", "ScannableCardRowTile", expected = 3)
+    fun scannableCardRowTileHasExactlyFourUserVisibleParameters() {
+        // (card, onClick, modifier, leadingSlot). Wallet-row register sibling of
+        // ScannableCardTile. The row deliberately drops the carousel tile's caption per
+        // the threat-model concession in SCANNABLE_CARD_THREAT_MODEL.md C1 / C2;
+        // `leadingSlot` is a visual hook only (see wpass-2a2) and is not a trust signal —
+        // adding any further parameter (e.g. `showSignatureBadge`, `onLongPress`) either
+        // re-opens the trust-conflation risk or expands the surface past what the
+        // concession permits. Review the concession before changing this number.
+        assertUserVisibleParamCount("ScannableCardRowTileKt", "ScannableCardRowTile", expected = 4)
     }
 
     @Test

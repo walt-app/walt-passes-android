@@ -56,9 +56,14 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * appears as a short subtitle below the label. No tile, no thumbnail, no badge.
  *
  * The leading strip is sourced from [LocalPassesSemantics] `unverifiedArtifact.accent`,
- * the same accent the carousel tile uses. Consumers wanting a richer leading slot
- * (format-icon glyph, format-tinted tile) layer that themselves in their own wrapper —
- * the kernel surface stays minimal so the surface-lock test below can pin a tight shape.
+ * the same accent the carousel tile uses. Consumers wanting a richer leading affordance
+ * (format-icon glyph, format-tinted tile) pass a composable via [leadingSlot]; it sits
+ * between the accent strip and the label/format column, inside the row's
+ * `mergeDescendants` block. The kernel surface stays minimal; the slot is a visual hook
+ * only and is not a trust signal — anything composed inside it that exposes a non-null
+ * `contentDescription` will participate in the merged description Walt's accessibility
+ * contract already pins, so slot content should set `contentDescription = null` on its
+ * icons / images and rely on the kernel-built description.
  *
  * ## Trust-claim contract
  *
@@ -73,9 +78,10 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *   the format-as-subtitle visible to sighted users would otherwise be silent to AT. The
  *   `rowTileSemanticsExposeFormatToken` smoke test pins that this stays the case.
  * - No signature affordance is composed inside the row. The absence is structural; the
- *   surface-lock test (`scannableCardRowTileHasExactlyThreeUserVisibleParameters`) pins
+ *   surface-lock test (`scannableCardRowTileHasExactlyFourUserVisibleParameters`) pins
  *   the parameter shape so a future contributor cannot add `showSignatureBadge` without
- *   amending the threat-model concession.
+ *   amending the threat-model concession. [leadingSlot] is the only sanctioned
+ *   visual-hook parameter; a signature-bearing addition still belongs out of band.
  *
  * Lifecycle gestures (long-press, overflow, share) and alternative size profiles are
  * consumer responsibilities, same posture as [ScannableCardTile]; the kernel surface
@@ -86,6 +92,7 @@ public fun ScannableCardRowTile(
     card: ScannableCard,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    leadingSlot: @Composable () -> Unit = {},
 ) {
     val accent = LocalPassesSemantics.current.unverifiedArtifact.accent.toComposeColor()
     val labelText = isolated(card.label)
@@ -105,6 +112,7 @@ public fun ScannableCardRowTile(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LeadingAccentStrip(color = accent)
+        leadingSlot()
         Column(
             modifier = Modifier
                 .weight(1f)
