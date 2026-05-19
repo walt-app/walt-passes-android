@@ -187,6 +187,51 @@ class ScannableCardTrustSurfaceTest {
         composeRule.onNodeWithText("Created by you").assertIsDisplayed()
     }
 
+    @Test
+    fun rowTileDoesNotRenderTrustCaption() {
+        // The wallet-row register intentionally drops the carousel tile's "Created by
+        // you" caption per the SCANNABLE_CARD_THREAT_MODEL.md C1 / C2 concession. The
+        // detail surface (asserted separately by fullScreenRendersTrustCaptionDockedAtBottom)
+        // is where the trust caption surfaces for this register; missing it on the row
+        // is the load-bearing difference between the two siblings.
+        composeRule.setContent {
+            ThemedHost { ScannableCardRowTile(card = qrFixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("Created by you").assertDoesNotExist()
+    }
+
+    @Test
+    fun rowTileRendersIsolatedLabel() {
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardRowTile(card = qrFixture(label = "Library card"), onClick = {})
+            }
+        }
+        // FSI / PDI defense-in-depth on user-controlled label, same as ScannableCardTile.
+        composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowTileRendersFormatSubtitle() {
+        composeRule.setContent {
+            ThemedHost { ScannableCardRowTile(card = code128Fixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("Code 128").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowTilePropagatesClickToOnClickCallback() {
+        var clicks = 0
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardRowTile(card = qrFixture(), onClick = { clicks++ })
+            }
+        }
+        composeRule.onNodeWithText("⁨Membership⁩").performClick()
+        composeRule.waitForIdle()
+        assert(clicks == 1) { "expected one click propagation, got $clicks" }
+    }
+
     @Composable
     private fun ThemedHost(content: @Composable () -> Unit) {
         MaterialTheme { PassesTheme(semantics = semantics, content = content) }

@@ -172,14 +172,29 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
+    fun scannableCardRowTileHasExactlyThreeUserVisibleParameters() {
+        // (card, onClick, modifier). Wallet-row register sibling of ScannableCardTile.
+        // The row deliberately drops the carousel tile's caption per the threat-model
+        // concession in SCANNABLE_CARD_THREAT_MODEL.md C1 / C2; adding a 4th parameter
+        // (e.g. `showSignatureBadge`, `leadingIcon`, `onLongPress`) either re-opens the
+        // trust-conflation risk or expands the surface past what the concession permits.
+        // Review the concession before changing this number.
+        assertUserVisibleParamCount("ScannableCardRowTileKt", "ScannableCardRowTile", expected = 3)
+    }
+
+    @Test
     fun scannableCardSurfacesHaveNoOverloads() {
         // The caption non-suppressibility rule extends to overloads: a future
         // contributor cannot quietly add `ScannableCardTile(..., showCaption: Boolean)`
-        // as a sibling with the same name.
+        // as a sibling with the same name. `ScannableCardRowTile` is included even
+        // though it does not itself render the caption — the threat-model concession is
+        // a specific row shape (label + neutral leading strip + format subtitle) and an
+        // overload that adds richer chrome would dilute the shape this lock pins.
         listOf(
             "ScannableCardTrustCaptionKt" to "ScannableCardTrustCaption",
             "ScannableCardTileKt" to "ScannableCardTile",
             "ScannableCardScreenKt" to "ScannableCardScreen",
+            "ScannableCardRowTileKt" to "ScannableCardRowTile",
         ).forEach { (file, name) ->
             val klass = Class.forName("is.walt.passes.ui.$file")
             val matches = klass.methods.filter { it.name == name || it.name.startsWith("$name-") }
