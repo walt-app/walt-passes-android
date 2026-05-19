@@ -51,9 +51,9 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *
  * ## Visual shape
  *
- * A flat row, label-led, with a leading neutral-tone accent strip (NOT the user's chosen
- * `card.color` — that would re-create the verified-band read at list scale). The format
- * appears as a short subtitle below the label. No tile, no thumbnail, no badge.
+ * A flat row, label-led, with a leading neutral-tone accent strip (per-card user colour
+ * was removed from the kernel — it would re-create the verified-band read at list scale).
+ * The format appears as a short subtitle below the label. No tile, no thumbnail, no badge.
  *
  * The leading strip is sourced from [LocalPassesSemantics] `unverifiedArtifact.accent`,
  * the same accent the carousel tile uses. Consumers wanting a richer leading affordance

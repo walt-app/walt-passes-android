@@ -197,7 +197,6 @@ public class SqlCipherPassRepository internal constructor(
                     payload = approved.payload,
                     format = approved.format,
                     label = approved.label,
-                    colorArgb = approved.color?.argb,
                     nowEpochMs = now,
                 ),
             )

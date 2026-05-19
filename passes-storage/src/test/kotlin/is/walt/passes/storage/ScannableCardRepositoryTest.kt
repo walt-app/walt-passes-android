@@ -9,7 +9,6 @@ import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableCardCreateInput
 import `is`.walt.passes.core.ScannableCardId
 import `is`.walt.passes.core.ScannableCardInputValidator
-import `is`.walt.passes.core.ScannableColor
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.storage.internal.DeleteOutcome
@@ -75,7 +74,6 @@ class ScannableCardRepositoryTest {
                 payload = "5012345678900", // valid EAN-13 with check digit
                 format = ScannableFormat.Ean13,
                 label = "Grocery loyalty",
-                color = ScannableColor(0xFF112233.toInt()),
             ),
         )
 
@@ -85,7 +83,6 @@ class ScannableCardRepositoryTest {
         assertThat(rows[0].payload).isEqualTo("5012345678900")
         assertThat(rows[0].format).isEqualTo(ScannableFormat.Ean13)
         assertThat(rows[0].label).isEqualTo("Grocery loyalty")
-        assertThat(rows[0].color?.argb).isEqualTo(0xFF112233.toInt())
         assertThat(telemetry.events).containsExactly(
             "init:Tee",
             "card-created:Ean13",
@@ -103,7 +100,6 @@ class ScannableCardRepositoryTest {
                 payload = "abcdef", // bell character — Cc category
                 format = ScannableFormat.Code128,
                 label = "Test",
-                color = null,
             ),
         )
 
@@ -131,7 +127,6 @@ class ScannableCardRepositoryTest {
                 payload = "5012345678900",
                 format = ScannableFormat.Ean13,
                 label = "   ", // whitespace-only, trims to empty
-                color = null,
             ),
         )
 
@@ -156,7 +151,6 @@ class ScannableCardRepositoryTest {
                 payload = "HELLO WORLD",
                 format = ScannableFormat.Code128,
                 label = "x",
-                color = null,
             ),
         )
         check(create is StorageResult.Success)
@@ -201,7 +195,6 @@ class ScannableCardRepositoryTest {
                 payload = "5012345678900",
                 format = ScannableFormat.Ean13,
                 label = "Grocery",
-                color = ScannableColor(0x80AABBCC.toInt()),
             ),
         )
         check(create is StorageResult.Success)
@@ -213,7 +206,6 @@ class ScannableCardRepositoryTest {
         assertThat(card.payload).isEqualTo("5012345678900")
         assertThat(card.format).isEqualTo(ScannableFormat.Ean13)
         assertThat(card.label).isEqualTo("Grocery")
-        assertThat(card.color?.argb).isEqualTo(0x80AABBCC.toInt())
         // The kernel-visible id is the stringified row id minted by storage.
         assertThat(card.id.value).isEqualTo(id.value.toString())
     }
@@ -261,7 +253,6 @@ class ScannableCardRepositoryTest {
             val payload: String,
             val format: ScannableFormat,
             val label: String,
-            val colorArgb: Int?,
             val createdAtEpochMs: Long,
         )
 
@@ -287,7 +278,6 @@ class ScannableCardRepositoryTest {
                 payload = request.payload,
                 format = request.format,
                 label = request.label,
-                colorArgb = request.colorArgb,
                 createdAtEpochMs = request.nowEpochMs,
             )
             return ScannableCardInsertOutcome(id = ScannableCardRecordId(rowId))
@@ -306,7 +296,6 @@ class ScannableCardRepositoryTest {
                     payload = row.payload,
                     format = row.format,
                     label = row.label,
-                    color = row.colorArgb?.let(::ScannableColor),
                 ),
                 id = ScannableCardId(row.id.toString()),
                 createdAt = PassInstant(row.createdAtEpochMs),

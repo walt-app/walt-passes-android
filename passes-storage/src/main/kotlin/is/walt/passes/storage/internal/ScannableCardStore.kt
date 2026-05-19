@@ -34,7 +34,6 @@ internal data class ScannableCardInsertRequest(
     val payload: String,
     val format: ScannableFormat,
     val label: String,
-    val colorArgb: Int?,
     val nowEpochMs: Long,
 )
 

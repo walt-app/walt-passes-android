@@ -19,7 +19,6 @@ import `is`.walt.passes.core.ScannableCardCreateInput
 import `is`.walt.passes.core.ScannableCardCreateResult
 import `is`.walt.passes.core.ScannableCardId
 import `is`.walt.passes.core.ScannableCardInputValidator
-import `is`.walt.passes.core.ScannableColor
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
@@ -331,7 +330,6 @@ class ScannableCardTrustSurfaceTest {
                 payload = payload,
                 format = format,
                 label = label,
-                color = ScannableColor(0xFF334455.toInt()),
             ),
             id = ScannableCardId("test"),
             createdAt = PassInstant(0L),

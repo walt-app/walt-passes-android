@@ -71,9 +71,10 @@ only when, all three of the following hold:
    by `WalletListTest`'s "no scannable-card row owns a signature dot" invariant.
 2. The row owns no coloured leading strip styled to read as a verified-pass
    band. The kernel surface uses the `unverifiedArtifact.accent` token (the
-   same neutral token the carousel tile's leading strip uses), NOT the user's
-   `card.color`. Routing user-chosen colour through this strip at list scale
-   would re-create the trust-conflation risk row 1 names.
+   same neutral token the carousel tile's leading strip uses). Per-card
+   user-chosen colour was removed from the kernel (`wpass-q5p`); routing it
+   through this strip at list scale would have re-created the trust-conflation
+   risk row 1 names.
 3. The detail surface (`ScannableCardScreen`) retains the bottom-docked
    non-suppressible `ScannableCardTrustCaption`. The trust caption shifts from
    list-row to detail-surface only; a user who taps a row to *use* the artifact
@@ -302,14 +303,13 @@ browser CSS / SVG parsers (named-color injection, `var(--…)` escapes). A
 naive "type a hex code" picker could allow inputs that round-trip as something
 unexpected.
 
-**Mitigation.** `ScannableCard.color: Int?` is an ARGB integer, not a string.
-The walt-android consumer's color picker UI may present hex input, but the
-boundary between consumer and kernel is a 32-bit integer with no parsing on
-the kernel side. The picker UI's own sanitization is a consumer concern, filed
-as `wlt-*`.
+**Mitigation.** The kernel no longer exposes a per-card user colour at all
+(`wpass-q5p` removed `ScannableCard.color` and `ScannableColor`). With no
+colour field on the artifact, the kernel has no colour parsing or storage
+surface to attack, and the consumer's create flow no longer presents a colour
+picker.
 
-**Status.** Out of scope for the kernel (no parsing surface); consumer-side
-filed separately.
+**Status.** Removed at the kernel; no parsing surface remains.
 
 ### 11. Future TOTP / HMAC-OATH secret leakage — Explicit non-feature
 

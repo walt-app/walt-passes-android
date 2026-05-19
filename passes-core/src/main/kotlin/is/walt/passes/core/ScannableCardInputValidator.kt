@@ -40,7 +40,6 @@ public object ScannableCardInputValidator {
                 payload = trimmedPayload,
                 format = input.format,
                 label = trimmedLabel,
-                color = input.color,
                 createdAt = createdAt,
             ),
         )

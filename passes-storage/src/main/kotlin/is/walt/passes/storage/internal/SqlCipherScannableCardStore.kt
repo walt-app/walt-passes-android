@@ -8,7 +8,6 @@ import `is`.walt.passes.core.ScannableCardCreateInput
 import `is`.walt.passes.core.ScannableCardCreateResult
 import `is`.walt.passes.core.ScannableCardId
 import `is`.walt.passes.core.ScannableCardInputValidator
-import `is`.walt.passes.core.ScannableColor
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.storage.MigrationFailureKind
 import `is`.walt.passes.storage.ScannableCardRecordId
@@ -61,7 +60,6 @@ internal class SqlCipherScannableCardStore(
                 put("payload", request.payload)
                 put("format", request.format.name)
                 put("label", request.label)
-                request.colorArgb?.let { put("color_argb", it) } ?: putNull("color_argb")
                 put("created_at_epoch_ms", request.nowEpochMs)
             }
             rowId = db.insertOrThrow(Schema.Tables.SCANNABLE_CARDS, null, cv)
@@ -96,7 +94,6 @@ internal class SqlCipherScannableCardStore(
         val payloadIdx = getColumnIndexOrThrow("payload")
         val formatIdx = getColumnIndexOrThrow("format")
         val labelIdx = getColumnIndexOrThrow("label")
-        val colorIdx = getColumnIndexOrThrow("color_argb")
         val createdIdx = getColumnIndexOrThrow("created_at_epoch_ms")
 
         val format = ScannableFormat.entries.firstOrNull { it.name == getString(formatIdx) }
@@ -107,7 +104,6 @@ internal class SqlCipherScannableCardStore(
         val rowId = getLong(idIdx)
         val payload = getString(payloadIdx)
         val label = getString(labelIdx)
-        val colorArgb = if (isNull(colorIdx)) null else getInt(colorIdx)
         val createdAtMs = getLong(createdIdx)
 
         val result = ScannableCardInputValidator.validate(
@@ -115,7 +111,6 @@ internal class SqlCipherScannableCardStore(
                 payload = payload,
                 format = format,
                 label = label,
-                color = colorArgb?.let(::ScannableColor),
             ),
             id = ScannableCardId(rowId.toString()),
             createdAt = PassInstant(createdAtMs),
@@ -134,6 +129,6 @@ internal class SqlCipherScannableCardStore(
 
     private companion object {
         const val ALL_COLUMNS: String =
-            "id, payload, format, label, color_argb, created_at_epoch_ms"
+            "id, payload, format, label, created_at_epoch_ms"
     }
 }

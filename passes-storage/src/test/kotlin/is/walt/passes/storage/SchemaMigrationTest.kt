@@ -44,14 +44,23 @@ class SchemaMigrationTest {
     }
 
     /**
-     * Applies the v2 schema (v1 + the v1 -> v2 hop). A v2 -> v3 test stands on top of
-     * this and asserts that the result equals the full v3 schema once the second hop
-     * lands.
+     * Applies the v2 schema (v1 + the v1 -> v2 hop).
      */
     private fun applyV2Ddl(conn: Connection) {
         applyV1Ddl(conn)
         conn.createStatement().use { stmt ->
             for (sql in Schema.MIGRATIONS.getValue(1)) stmt.execute(sql)
+        }
+    }
+
+    /**
+     * Applies the v3 schema (v1 + v1 -> v2 + v2 -> v3). The v3 shape still carries the
+     * `color_argb` column on `scannable_cards`; the v3 -> v4 migration drops it.
+     */
+    private fun applyV3Ddl(conn: Connection) {
+        applyV2Ddl(conn)
+        conn.createStatement().use { stmt ->
+            for (sql in Schema.MIGRATIONS.getValue(2)) stmt.execute(sql)
         }
     }
 
@@ -312,6 +321,190 @@ class SchemaMigrationTest {
                     stmt.executeQuery("SELECT COUNT(*) FROM ${Schema.Tables.SCANNABLE_CARDS}")
                         .also { it.next() }.getInt(1),
                 ).isEqualTo(0)
+            }
+        }
+    }
+
+    @Test
+    fun migrationFromV3DropsColorArgbColumnFromScannableCards() {
+        openMemoryDb().use { conn ->
+            applyV3Ddl(conn)
+
+            for (sql in Schema.MIGRATIONS.getValue(3)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            val columns = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA table_info(${Schema.Tables.SCANNABLE_CARDS})")
+                while (rs.next()) columns.add(rs.getString("name"))
+            }
+            assertThat(columns).containsExactly(
+                "id",
+                "payload",
+                "format",
+                "label",
+                "created_at_epoch_ms",
+            )
+        }
+    }
+
+    @Test
+    fun migrationFromV3PreservesScannableCardRowsAndIdentities() {
+        openMemoryDb().use { conn ->
+            applyV3Ddl(conn)
+            // Two pre-migration v3 rows. Explicit ids assert row identity survives the
+            // table rewrite: the migration must INSERT...SELECT each existing id rather
+            // than letting AUTOINCREMENT reassign them.
+            insertV3ScannableCard(
+                conn,
+                id = 7L,
+                payload = "1234567890128",
+                format = "Ean13",
+                label = "Grocery",
+                colorArgb = 0xFF112233.toInt(),
+                createdAtMs = 1_700_000_000_000L,
+            )
+            insertV3ScannableCard(
+                conn,
+                id = 9L,
+                payload = "ZX-99",
+                format = "Code128",
+                label = "Cinema",
+                colorArgb = null,
+                createdAtMs = 1_700_000_010_000L,
+            )
+
+            for (sql in Schema.MIGRATIONS.getValue(3)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            assertThat(scannableCardRowsAfterMigration(conn)).containsExactly(
+                "7|1234567890128|Ean13|Grocery|1700000000000",
+                "9|ZX-99|Code128|Cinema|1700000010000",
+            ).inOrder()
+            // AUTOINCREMENT high-water mark survives: a fresh insert without an explicit
+            // id must mint id > 9, not collide with surviving rows.
+            assertThat(insertAfterMigrationAndReturnId(conn)).isGreaterThan(9L)
+        }
+    }
+
+    @Suppress("LongParameterList")
+    private fun insertV3ScannableCard(
+        conn: Connection,
+        id: Long,
+        payload: String,
+        format: String,
+        label: String,
+        colorArgb: Int?,
+        createdAtMs: Long,
+    ) {
+        conn.prepareStatement(
+            "INSERT INTO ${Schema.Tables.SCANNABLE_CARDS}" +
+                "(id, payload, format, label, color_argb, created_at_epoch_ms) " +
+                "VALUES (?, ?, ?, ?, ?, ?)",
+        ).use { ps ->
+            ps.setLong(1, id)
+            ps.setString(2, payload)
+            ps.setString(3, format)
+            ps.setString(4, label)
+            if (colorArgb == null) ps.setNull(5, java.sql.Types.INTEGER) else ps.setInt(5, colorArgb)
+            ps.setLong(6, createdAtMs)
+            ps.executeUpdate()
+        }
+    }
+
+    private fun scannableCardRowsAfterMigration(conn: Connection): List<String> {
+        val out = mutableListOf<String>()
+        conn.createStatement().use { stmt ->
+            val rs = stmt.executeQuery(
+                "SELECT id, payload, format, label, created_at_epoch_ms " +
+                    "FROM ${Schema.Tables.SCANNABLE_CARDS} ORDER BY id",
+            )
+            while (rs.next()) {
+                out += listOf(
+                    rs.getLong("id").toString(),
+                    rs.getString("payload"),
+                    rs.getString("format"),
+                    rs.getString("label"),
+                    rs.getLong("created_at_epoch_ms").toString(),
+                ).joinToString("|")
+            }
+        }
+        return out
+    }
+
+    private fun insertAfterMigrationAndReturnId(conn: Connection): Long {
+        conn.prepareStatement(
+            "INSERT INTO ${Schema.Tables.SCANNABLE_CARDS}" +
+                "(payload, format, label, created_at_epoch_ms) VALUES (?, ?, ?, ?)",
+        ).use { ps ->
+            ps.setString(1, "AFTER")
+            ps.setString(2, "Code128")
+            ps.setString(3, "After")
+            ps.setLong(4, 1_700_000_020_000L)
+            ps.executeUpdate()
+        }
+        conn.createStatement().use { stmt ->
+            val rs = stmt.executeQuery(
+                "SELECT id FROM ${Schema.Tables.SCANNABLE_CARDS} WHERE payload = 'AFTER'",
+            )
+            rs.next()
+            return rs.getLong("id")
+        }
+    }
+
+    @Test
+    fun migrationFromV3KeepsTheScannableCardsCreatedAtIndex() {
+        openMemoryDb().use { conn ->
+            applyV3Ddl(conn)
+            for (sql in Schema.MIGRATIONS.getValue(3)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            val indexes = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery(
+                    "SELECT name FROM sqlite_master WHERE type='index' AND name NOT LIKE 'sqlite_%'",
+                )
+                while (rs.next()) indexes.add(rs.getString(1))
+            }
+            assertThat(indexes).contains("idx_scannable_cards_created_at")
+        }
+    }
+
+    @Test
+    fun preexistingV3PassesAndDocumentsSurviveMigrationToV4() {
+        openMemoryDb().use { conn ->
+            applyV3Ddl(conn)
+
+            // Sibling tables that the v3 -> v4 migration must leave untouched.
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASSES}" +
+                    "(id, type, serial_number, organization_name, description, voided, " +
+                    "signature_status_kind, pass_json, created_at_epoch_ms, updated_at_epoch_ms) " +
+                    "VALUES (1, 'BoardingPass', 'S1', 'AcmeAir', 'desc', 0, 'AppleVerified', " +
+                    "x'00', 1, 1)",
+            ).use { it.executeUpdate() }
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.DOCUMENTS}" +
+                    "(id, display_label, pdf_bytes, byte_count, page_count, imported_at_epoch_ms) " +
+                    "VALUES (1, 'doc.pdf', x'00', 1, 1, 1)",
+            ).use { it.executeUpdate() }
+
+            for (sql in Schema.MIGRATIONS.getValue(3)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            conn.createStatement().use { stmt ->
+                assertThat(
+                    stmt.executeQuery("SELECT COUNT(*) FROM ${Schema.Tables.PASSES}")
+                        .also { it.next() }.getInt(1),
+                ).isEqualTo(1)
+                assertThat(
+                    stmt.executeQuery("SELECT COUNT(*) FROM ${Schema.Tables.DOCUMENTS}")
+                        .also { it.next() }.getInt(1),
+                ).isEqualTo(1)
             }
         }
     }
