@@ -19,13 +19,11 @@ class ScannableCardSurfaceTest {
                 payload = "1234567890128",
                 format = ScannableFormat.Ean13,
                 label = "Grocery loyalty",
-                color = ScannableColor(argb = 0xFF1F4FA0.toInt()),
                 createdAt = PassInstant(epochMillis = 1_800_000_000_000L),
             )
 
         assertThat(card.id).isEqualTo(ScannableCardId("card-001"))
         assertThat(card.format).isEqualTo(ScannableFormat.Ean13)
-        assertThat(card.color?.argb).isEqualTo(0xFF1F4FA0.toInt())
         // Every ScannableFormat referenced so removal breaks compilation here.
         val allFormats =
             setOf(
@@ -47,19 +45,12 @@ class ScannableCardSurfaceTest {
     }
 
     @Test
-    fun scannableCardColorIsOptional() {
-        val card = sampleCard(color = null)
-        assertThat(card.color).isNull()
-    }
-
-    @Test
     fun scannableCardCreateInputAcceptsEdgeValues() {
         val empty =
             ScannableCardCreateInput(
                 payload = "",
                 format = ScannableFormat.Qr,
                 label = "",
-                color = null,
             )
         assertThat(empty.payload).isEmpty()
         assertThat(empty.label).isEmpty()
@@ -70,7 +61,6 @@ class ScannableCardSurfaceTest {
                 payload = "X".repeat(10_000),
                 format = ScannableFormat.Code128,
                 label = "Y".repeat(1_000),
-                color = ScannableColor(argb = 0),
             )
         assertThat(maxish.payload).hasLength(10_000)
     }
@@ -152,10 +142,9 @@ class ScannableCardSurfaceTest {
     }
 
     @Test
-    fun scannableCardIdAndColorAreValueClasses() {
+    fun scannableCardIdIsAValueClass() {
         // @JvmInline value classes equate by wrapped value, not reference.
         assertThat(ScannableCardId("x")).isEqualTo(ScannableCardId("x"))
-        assertThat(ScannableColor(0x11223344)).isEqualTo(ScannableColor(0x11223344))
     }
 
     // Walks superclasses and their declared interfaces. Skips interface-of-interface ancestors
@@ -172,13 +161,12 @@ class ScannableCardSurfaceTest {
         return out
     }
 
-    private fun sampleCard(color: ScannableColor? = ScannableColor(argb = 0)): ScannableCard =
+    private fun sampleCard(): ScannableCard =
         ScannableCard(
             id = ScannableCardId("card-fixed"),
             payload = "PAYLOAD",
             format = ScannableFormat.Code128,
             label = "label",
-            color = color,
             createdAt = PassInstant(epochMillis = 1_700_000_000_000L),
         )
 }

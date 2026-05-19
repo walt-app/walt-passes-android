@@ -19,7 +19,6 @@ public data class ScannableCard internal constructor(
     public val payload: String,
     public val format: ScannableFormat,
     public val label: String,
-    public val color: ScannableColor?,
     public val createdAt: PassInstant,
 )
 
@@ -30,14 +29,3 @@ public data class ScannableCard internal constructor(
  */
 @JvmInline
 public value class ScannableCardId(public val value: String)
-
-/**
- * 32-bit packed ARGB color (`0xAARRGGBB`) for the card's background tint. Distinct from
- * [ColorValue] (24-bit RGB for PKPASS color fields) — that one originates from a verified
- * archive and never carries alpha; this one is user-chosen and may want translucency.
- *
- * passes-core cannot depend on passes-ui-core's `ArgbColor` (would invert the module dep
- * direction). The consumer module provides a conversion extension when rendering.
- */
-@JvmInline
-public value class ScannableColor(public val argb: Int)

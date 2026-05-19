@@ -81,7 +81,6 @@ class SchemaDdlTest {
                 "payload",
                 "format",
                 "label",
-                "color_argb",
                 "created_at_epoch_ms",
             )
         }

@@ -312,7 +312,6 @@ class ScannableCardInputValidatorTest {
                     payload = payload,
                     format = format,
                     label = label,
-                    color = null,
                 ),
             id = id,
             createdAt = now,
