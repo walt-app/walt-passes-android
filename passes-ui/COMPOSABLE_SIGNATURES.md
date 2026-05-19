@@ -167,9 +167,9 @@ field's label and the issuer's `organizationName`, then a confirm button.
 block dispatch on explicit confirm. See ADR 0003 D5.
 
 ```kotlin
-public sealed interface B3UrlEmphasisStyle {
-    public data object Container : B3UrlEmphasisStyle
-    public data object DomainHero : B3UrlEmphasisStyle
+public sealed interface B3EmphasisStyle {
+    public data object Container : B3EmphasisStyle
+    public data object DomainHero : B3EmphasisStyle
 }
 
 @Composable
@@ -179,7 +179,7 @@ public fun B3UrlConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 )
 
 @Composable
@@ -189,7 +189,7 @@ public fun PhoneConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 )
 
 @Composable
@@ -199,7 +199,7 @@ public fun EmailConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 )
 ```
 

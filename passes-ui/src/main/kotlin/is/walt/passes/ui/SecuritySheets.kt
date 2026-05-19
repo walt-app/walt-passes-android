@@ -1,5 +1,3 @@
-@file:Suppress("LongParameterList", "LongMethod")
-
 package `is`.walt.passes.ui
 
 import androidx.compose.foundation.background
@@ -27,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -35,11 +34,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
-import androidx.compose.ui.unit.sp
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.ui.core.isolated
 import `is`.walt.passes.ui.theme.LocalPassesSemantics
+import `is`.walt.passes.ui.theme.SecuritySheetStyle
 import `is`.walt.passes.ui.theme.toComposeColor
 
 /**
@@ -50,11 +48,12 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * host's outbound `Intent.ACTION_VIEW` MUST be the next thing constructed after that
  * callback fires. There is no `skipConfirmation` parameter — see ADR 0003 D5.
  *
- * @param emphasisStyle Layout choice between [B3UrlEmphasisStyle.Container] (default,
- *   behavior-identical to pre-wpass-48v) and [B3UrlEmphasisStyle.DomainHero]. Both
+ * @param emphasisStyle Layout choice between [B3EmphasisStyle.Container] (default,
+ *   behavior-identical to pre-wpass-48v) and [B3EmphasisStyle.DomainHero]. Both
  *   layouts show the verbatim URL; only the visual prominence and the second
- *   destination-summary line differ. See the [B3UrlEmphasisStyle] kdoc.
+ *   destination-summary line differ. See the [B3EmphasisStyle] kdoc.
  */
+@Suppress("LongParameterList")
 @Composable
 public fun B3UrlConfirmSheet(
     intent: B3UrlIntent,
@@ -62,7 +61,7 @@ public fun B3UrlConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 ) {
     SecuritySheet(
         kind = SecurityIntentKind.Url,
@@ -71,7 +70,14 @@ public fun B3UrlConfirmSheet(
         target = intent.url,
         hero = intent.registrableDomain,
         source = intent.sourceField,
-        confirmCopy = "Open in browser",
+        // Copy diverges between layouts: Container keeps the original "Open link"
+        // so existing call sites stay byte-identical (wpass-48v reviewer note),
+        // DomainHero uses "Open in browser" because the destination-summary hero
+        // makes the action explicit.
+        confirmCopy = when (emphasisStyle) {
+            B3EmphasisStyle.Container -> "Open link"
+            B3EmphasisStyle.DomainHero -> "Open in browser"
+        },
         emphasisStyle = emphasisStyle,
         telemetry = telemetry,
         onConfirm = onConfirm,
@@ -85,6 +91,7 @@ public fun B3UrlConfirmSheet(
  *
  * @param emphasisStyle See [B3UrlConfirmSheet].
  */
+@Suppress("LongParameterList")
 @Composable
 public fun PhoneConfirmSheet(
     intent: PhoneIntent,
@@ -92,7 +99,7 @@ public fun PhoneConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 ) {
     SecuritySheet(
         kind = SecurityIntentKind.Phone,
@@ -119,6 +126,7 @@ public fun PhoneConfirmSheet(
  *
  * @param emphasisStyle See [B3UrlConfirmSheet].
  */
+@Suppress("LongParameterList")
 @Composable
 public fun EmailConfirmSheet(
     intent: EmailIntent,
@@ -126,14 +134,21 @@ public fun EmailConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
+    emphasisStyle: B3EmphasisStyle = B3EmphasisStyle.Container,
 ) {
     SecuritySheet(
         kind = SecurityIntentKind.Email,
         passType = passType,
         title = "Send an email?",
         target = intent.emailAddress,
-        hero = emailHeroOf(intent.emailAddress),
+        // Hero is the *host portion* of the address, NOT the local-part. The
+        // local-part is attacker-chosen (`support@phisher.example` can pick any
+        // friendly local-part); the host is the security-relevant half. Mirrors
+        // the URL layout's domain-as-hero policy. Falls back to the full address
+        // when the `@` is missing (an EmailIntent constructed outside the scanner
+        // that took an ill-formed string — the forensic row still keeps the
+        // verbatim contract).
+        hero = emailHostHero(intent.emailAddress),
         source = intent.sourceField,
         confirmCopy = "Compose",
         emphasisStyle = emphasisStyle,
@@ -143,20 +158,16 @@ public fun EmailConfirmSheet(
     )
 }
 
-private fun phoneHeroOf(phone: String): String {
-    // Trim and collapse any internal runs of whitespace; preserves the user's
-    // chosen grouping (parens, dashes) without producing a different-looking
-    // hero than the forensic row.
-    val trimmed = phone.trim()
-    return trimmed.replace(Regex("\\s+"), " ")
-}
+private fun phoneHeroOf(phone: String): String =
+    phone.trim().replace(Regex("\\s+"), " ")
 
-private fun emailHeroOf(email: String): String {
+private fun emailHostHero(email: String): String {
     val at = email.indexOf('@')
-    return if (at > 0) email.substring(0, at) else email
+    return if (at in 0 until email.length - 1) email.substring(at + 1) else email
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList")
 @Composable
 private fun SecuritySheet(
     kind: SecurityIntentKind,
@@ -166,7 +177,7 @@ private fun SecuritySheet(
     hero: String?,
     source: SourceField,
     confirmCopy: String,
-    emphasisStyle: B3UrlEmphasisStyle,
+    emphasisStyle: B3EmphasisStyle,
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
@@ -187,7 +198,8 @@ private fun SecuritySheet(
         containerColor = emphasis.sheetBackground.toComposeColor(),
     ) {
         when (emphasisStyle) {
-            B3UrlEmphasisStyle.Container -> ContainerLayout(
+            B3EmphasisStyle.Container -> ContainerLayout(
+                emphasis = emphasis,
                 title = title,
                 target = target,
                 source = source,
@@ -198,7 +210,8 @@ private fun SecuritySheet(
                 onConfirm = onConfirm,
                 onDismiss = onDismiss,
             )
-            B3UrlEmphasisStyle.DomainHero -> DomainHeroLayout(
+            B3EmphasisStyle.DomainHero -> DomainHeroLayout(
+                emphasis = emphasis,
                 target = target,
                 hero = hero ?: target,
                 source = source,
@@ -213,8 +226,10 @@ private fun SecuritySheet(
     }
 }
 
+@Suppress("LongParameterList", "LongMethod")
 @Composable
 private fun ContainerLayout(
+    emphasis: SecuritySheetStyle,
     title: String,
     target: String,
     source: SourceField,
@@ -225,7 +240,6 @@ private fun ContainerLayout(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val emphasis = LocalPassesSemantics.current.securitySheet
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -297,8 +311,10 @@ private fun ContainerLayout(
     }
 }
 
+@Suppress("LongParameterList", "LongMethod")
 @Composable
 private fun DomainHeroLayout(
+    emphasis: SecuritySheetStyle,
     target: String,
     hero: String,
     source: SourceField,
@@ -309,10 +325,16 @@ private fun DomainHeroLayout(
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val emphasis = LocalPassesSemantics.current.securitySheet
+    // The DomainHero typography reads from MaterialTheme so hosts retain the
+    // theme contract: walt-android's core/ui supplies the type ramp, dark/large-
+    // text/dynamic-color scaling flow through unchanged. The kernel commits to
+    // the *layout shape* (eyebrow + hero + forensic + provenance + actions),
+    // not to specific point sizes or letter spacing. The textual emphasis
+    // hierarchy (hero > target > provenance) survives any theme.
     val body = emphasis.bodyForeground.toComposeColor()
-    val outline = body.copy(alpha = 0.7f)
-    val dim = body.copy(alpha = 0.5f)
+    val outline = MaterialTheme.colorScheme.outline
+    val dim = MaterialTheme.colorScheme.outlineVariant
+    val divider = MaterialTheme.colorScheme.outlineVariant
     val eyebrowCopy = when (kind) {
         SecurityIntentKind.Url -> "LEAVING WALT"
         SecurityIntentKind.Phone -> "CALLING"
@@ -326,24 +348,15 @@ private fun DomainHeroLayout(
     ) {
         Text(
             text = eyebrowCopy,
-            style = MaterialTheme.typography.labelMedium.copy(
-                fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                letterSpacing = 0.2.em,
-            ),
+            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
             color = outline,
         )
         Text(
-            // The hero is a presentation aid (registrable domain / formatted phone /
-            // email local-part). It's user-controlled by way of the underlying
-            // intent value, so isolate it the same way as the verbatim target.
+            // Hero is user-controlled (it's derived from the intent target); isolate
+            // it the same way as the verbatim target so a bidi character cannot
+            // reorder surrounding chrome.
             text = isolated(hero),
-            style = MaterialTheme.typography.headlineSmall.copy(
-                fontSize = 26.sp,
-                fontWeight = FontWeight.SemiBold,
-                lineHeight = 27.3.sp,
-                letterSpacing = (-0.035).em,
-            ),
+            style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
             color = body,
         )
         Text(
@@ -351,22 +364,19 @@ private fun DomainHeroLayout(
             // string. Monospace + lower visual weight so the hero leads, but the
             // string is always visible.
             text = isolated(target),
-            style = MaterialTheme.typography.bodyMedium.copy(
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-            ),
+            style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
             color = dim,
         )
         Text(
             text = provenanceAnnotated(source, body, dim),
-            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+            style = MaterialTheme.typography.bodySmall,
             color = dim,
         )
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(1.dp)
-                .background(outline.copy(alpha = 0.2f)),
+                .background(divider),
         )
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -403,14 +413,11 @@ private fun DomainHeroLayout(
 
 private fun provenanceAnnotated(
     source: SourceField,
-    bodyColor: androidx.compose.ui.graphics.Color,
-    dimColor: androidx.compose.ui.graphics.Color,
+    bodyColor: Color,
+    dimColor: Color,
 ): AnnotatedString {
     val label = source.fieldLabel?.let { isolated(it) }
     val org = isolated(source.organizationName)
-    // "From the {fieldLabel} field on your {organizationName} pass." with the two
-    // user-controlled fragments bolded. Falls back to a simpler phrasing if the
-    // pass field had no label.
     return buildAnnotatedString {
         withStyle(SpanStyle(color = dimColor)) {
             append(if (label != null) "From the " else "From your ")

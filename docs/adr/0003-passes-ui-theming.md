@@ -165,7 +165,7 @@ would double-label the user. These are explicit, non-default, and pinned in
   present the same status.
 
 The companion change — `B3UrlConfirmSheet` / `PhoneConfirmSheet` /
-`EmailConfirmSheet` taking `emphasisStyle: B3UrlEmphasisStyle = Container`
+`EmailConfirmSheet` taking `emphasisStyle: B3EmphasisStyle = Container`
 (wpass-48v) — is a pure layout switch, not a suppression. Both `Container`
 and `DomainHero` render the verbatim target string on-screen, fire the same
 telemetry on the same gestures, and block dispatch on an explicit confirm tap.

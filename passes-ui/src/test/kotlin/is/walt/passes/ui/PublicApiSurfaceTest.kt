@@ -68,18 +68,36 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun b3UrlEmphasisStyleArmsAreReachableViaWhen() {
-        val styles: List<B3UrlEmphasisStyle> = listOf(
-            B3UrlEmphasisStyle.Container,
-            B3UrlEmphasisStyle.DomainHero,
+    fun b3EmphasisStyleArmsAreReachableViaWhen() {
+        val styles: List<B3EmphasisStyle> = listOf(
+            B3EmphasisStyle.Container,
+            B3EmphasisStyle.DomainHero,
         )
         val labels = styles.map { style ->
             when (style) {
-                B3UrlEmphasisStyle.Container -> "container"
-                B3UrlEmphasisStyle.DomainHero -> "domain-hero"
+                B3EmphasisStyle.Container -> "container"
+                B3EmphasisStyle.DomainHero -> "domain-hero"
             }
         }
         assertThat(labels).containsExactly("container", "domain-hero").inOrder()
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainKeepsTwoLabelMirrorHost() {
+        // wpass-48v reviewer note: `m.com` (2 labels) MUST NOT collapse to `com`.
+        // The mirror-label strip only fires when there's a non-TLD label behind it.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://m.com/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("m.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainKeepsTwoLabelMobileHost() {
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://mobile.io/", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("mobile.io")
     }
 
     @Test

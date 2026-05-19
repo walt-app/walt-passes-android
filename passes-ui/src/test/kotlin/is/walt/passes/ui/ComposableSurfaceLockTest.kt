@@ -34,9 +34,9 @@ class ComposableSurfaceLockTest {
     @Test
     fun b3UrlConfirmSheetHasExactlySixUserVisibleParameters() {
         // (intent, passType, telemetry, onConfirm, onDismiss, emphasisStyle). The
-        // sixth parameter is the wpass-48v opt-in layout switch (B3UrlEmphasisStyle:
-        // Container | DomainHero); both layouts display the verbatim target string
-        // and fire identical telemetry. D5 still forbids a `skipConfirmation` parameter.
+        // sixth parameter is the wpass-48v opt-in layout switch (B3EmphasisStyle:
+        // Container | DomainHero); both layouts display the verbatim target and
+        // fire identical telemetry. D5 still forbids a `skipConfirmation` parameter.
         assertUserVisibleParamCount("SecuritySheetsKt", "B3UrlConfirmSheet", expected = 6)
     }
 

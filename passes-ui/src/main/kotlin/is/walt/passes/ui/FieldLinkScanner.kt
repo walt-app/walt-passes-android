@@ -183,54 +183,31 @@ public object FieldLinkScanner {
     private val PHONE_PREFIX_HINTS = setOf('+', '(')
 
     /**
-     * Best-effort registrable-domain extraction for a scanned URL. Returns `null` when
-     * the URL cannot be parsed into a host. The result is intended for the
-     * `B3UrlConfirmSheet`'s domain-hero layout (wpass-48v) — a presentation aid sitting
-     * above the verbatim URL forensic row, not a substitute for it.
+     * Best-effort, PSL-free registrable-domain extraction for a scanned URL. The
+     * result is a presentation aid for `B3UrlConfirmSheet`'s domain-hero layout —
+     * the verbatim URL stays on the forensic row and carries the trust contract.
      *
-     * The extraction is deliberately PSL-free. The transformation is:
+     * Why no Public Suffix List: it would add ~200 KB and a monthly-freshness
+     * obligation for a presentation aid. The PSL-free answer for `example.co.uk`
+     * is `example.co.uk` (one label deeper than the PSL answer). Over-disclosing
+     * the destination beats under-disclosing it.
      *
-     * 1. Trim the URL through the scanner's already-validated character class (RFC 3986
-     *    reserved + unreserved + percent-encoded ASCII), then split off the scheme
-     *    (`https?://`).
-     * 2. Take the authority — everything before the first `/`, `?`, or `#`.
-     * 3. Drop a leading `userinfo@` if present (already rare given the RFC 3986 regex,
-     *    but `tixly.com` is still the right answer for `https://user@tixly.com/x`).
-     * 4. Drop a trailing `:port`.
-     * 5. Lowercase. Trim a trailing `.`.
-     * 6. Strip a leading subdomain label if it is one of `www`, `m`, `mb`, `mobile`.
-     *    This is the load-bearing simplification: the four mobile/canonical mirror
-     *    labels are the common cases the domain-hero layout wants to elide. Other
-     *    subdomains (`accounts.google.com`, `api.example.co.uk`) survive unchanged
-     *    because eliding them would mislabel the destination.
-     *
-     * Why no PSL (Public Suffix List):
-     *
-     * - Bundling a PSL into this kernel module is a real binary-size and freshness
-     *   cost (the list is ~200 KB compressed, updates monthly) for a presentation
-     *   aid. The full URL is what carries the trust claim; the hero label is a
-     *   reading convenience.
-     * - The PSL-free answer for `example.co.uk` is `example.co.uk`, which is one
-     *   label *deeper* than the PSL answer (`example.co.uk` vs `co.uk`). The user
-     *   reading the sheet still sees the registrable destination correctly; they
-     *   just see one extra label. That is the right failure mode — over-disclosing
-     *   the destination beats under-disclosing it.
-     * - IDN homograph handling (Punycode comparison) is similarly a presentation
-     *   concern handled at a higher layer if needed; the scanner already rejects
-     *   any field containing Unicode Cf/Cc codepoints, and RFC 3986 forces IDN
-     *   hosts into their ASCII `xn--` form, so the string returned here is already
-     *   the Punycode label a vigilant user can spot-check.
+     * Transformation: strip scheme, take the authority before the first `/?#`,
+     * drop `userinfo@` and `:port`, lowercase, trim trailing `.`. If the host has
+     * three or more labels and the leading label is `www` / `m` / `mb` / `mobile`,
+     * drop it; otherwise return the host unchanged. The `>= 3 labels` floor
+     * prevents collapsing two-label hosts like `m.com` → `com`, which would
+     * mislabel the destination rather than just over-disclose it.
      *
      * Consumers MUST NOT route the return value into an outbound `Intent` — it
      * carries no scheme, no path, and is structurally lossy. The verbatim URL on
-     * `B3UrlIntent.url` is the only string the host's `Intent.ACTION_VIEW`
-     * receives. Trust-claim discipline lives on [B3UrlIntent.url], not here.
+     * [B3UrlIntent.url] is the only string the host's `Intent.ACTION_VIEW`
+     * receives.
      */
     @Suppress("ReturnCount")
     internal fun registrableDomainOf(url: String): String? {
         val schemeStripped = url.removePrefix("https://").removePrefix("http://")
         if (schemeStripped == url) return null
-        // Authority ends at the first `/`, `?`, or `#`.
         val authorityEnd = schemeStripped.indexOfAny(charArrayOf('/', '?', '#'))
         val authority = if (authorityEnd < 0) schemeStripped else schemeStripped.substring(0, authorityEnd)
         if (authority.isEmpty()) return null
@@ -247,7 +224,9 @@ public object FieldLinkScanner {
         val host = hostAndPort.lowercase().trimEnd('.')
         if (host.isEmpty()) return null
         val labels = host.split('.')
-        if (labels.size <= 1) return host
+        // Only strip a mirror label when there's a non-TLD label behind it.
+        // `m.com` (2 labels) MUST stay as `m.com`, not collapse to `com`.
+        if (labels.size < 3) return host
         val first = labels.first()
         return if (first in MIRROR_LABELS) labels.drop(1).joinToString(".") else host
     }

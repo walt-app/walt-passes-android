@@ -55,8 +55,8 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
 1. *No URL leaves the device without the user seeing the verbatim target.* The host
    does not open `Intent.ACTION_VIEW` for a pass-derived URL except inside the
    confirm callback of `B3UrlConfirmSheet`. This holds for both
-   `B3UrlEmphasisStyle.Container` (the original layout) and
-   `B3UrlEmphasisStyle.DomainHero` (the wpass-48v layout): the latter places the
+   `B3EmphasisStyle.Container` (the original layout) and
+   `B3EmphasisStyle.DomainHero` (the wpass-48v layout): the latter places the
    verbatim URL in a smaller monospace "forensic row" rather than the orange
    container, but the string is still on-screen before the user can tap confirm.
 2. *The displayed URL is identical to the URL that opens.* The sheet does not show
