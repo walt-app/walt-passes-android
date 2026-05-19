@@ -1,17 +1,22 @@
+@file:Suppress("LongParameterList", "LongMethod")
+
 package `is`.walt.passes.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -22,7 +27,16 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.ui.core.isolated
 import `is`.walt.passes.ui.theme.LocalPassesSemantics
@@ -35,6 +49,11 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * is about to open. `onConfirm` fires only on the user's explicit confirm tap; the
  * host's outbound `Intent.ACTION_VIEW` MUST be the next thing constructed after that
  * callback fires. There is no `skipConfirmation` parameter — see ADR 0003 D5.
+ *
+ * @param emphasisStyle Layout choice between [B3UrlEmphasisStyle.Container] (default,
+ *   behavior-identical to pre-wpass-48v) and [B3UrlEmphasisStyle.DomainHero]. Both
+ *   layouts show the verbatim URL; only the visual prominence and the second
+ *   destination-summary line differ. See the [B3UrlEmphasisStyle] kdoc.
  */
 @Composable
 public fun B3UrlConfirmSheet(
@@ -43,14 +62,17 @@ public fun B3UrlConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
 ) {
     SecuritySheet(
         kind = SecurityIntentKind.Url,
         passType = passType,
         title = "Open this link?",
         target = intent.url,
+        hero = intent.registrableDomain,
         source = intent.sourceField,
-        confirmCopy = "Open link",
+        confirmCopy = "Open in browser",
+        emphasisStyle = emphasisStyle,
         telemetry = telemetry,
         onConfirm = onConfirm,
         onDismiss = onDismiss,
@@ -60,6 +82,8 @@ public fun B3UrlConfirmSheet(
 /**
  * Security confirmation bottom sheet for an outbound phone number detected on a pass
  * back-field. Displays the verbatim digits the host is about to dial.
+ *
+ * @param emphasisStyle See [B3UrlConfirmSheet].
  */
 @Composable
 public fun PhoneConfirmSheet(
@@ -68,14 +92,20 @@ public fun PhoneConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
 ) {
     SecuritySheet(
         kind = SecurityIntentKind.Phone,
         passType = passType,
         title = "Call this number?",
         target = intent.phoneNumber,
+        // The verbatim string already IS the formatted phone in real input; the
+        // hero collapses adjacent spaces / dashes for a more compact read but the
+        // forensic row carries every character the dialer receives.
+        hero = phoneHeroOf(intent.phoneNumber),
         source = intent.sourceField,
         confirmCopy = "Call",
+        emphasisStyle = emphasisStyle,
         telemetry = telemetry,
         onConfirm = onConfirm,
         onDismiss = onDismiss,
@@ -86,6 +116,8 @@ public fun PhoneConfirmSheet(
  * Security confirmation bottom sheet for an outbound email address. Displays the
  * verbatim address; the host's outbound composer Intent receives ONLY the address
  * (no subject, no body) — see TRUST_CLAIMS.md.
+ *
+ * @param emphasisStyle See [B3UrlConfirmSheet].
  */
 @Composable
 public fun EmailConfirmSheet(
@@ -94,18 +126,34 @@ public fun EmailConfirmSheet(
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    emphasisStyle: B3UrlEmphasisStyle = B3UrlEmphasisStyle.Container,
 ) {
     SecuritySheet(
         kind = SecurityIntentKind.Email,
         passType = passType,
         title = "Send an email?",
         target = intent.emailAddress,
+        hero = emailHeroOf(intent.emailAddress),
         source = intent.sourceField,
         confirmCopy = "Compose",
+        emphasisStyle = emphasisStyle,
         telemetry = telemetry,
         onConfirm = onConfirm,
         onDismiss = onDismiss,
     )
+}
+
+private fun phoneHeroOf(phone: String): String {
+    // Trim and collapse any internal runs of whitespace; preserves the user's
+    // chosen grouping (parens, dashes) without producing a different-looking
+    // hero than the forensic row.
+    val trimmed = phone.trim()
+    return trimmed.replace(Regex("\\s+"), " ")
+}
+
+private fun emailHeroOf(email: String): String {
+    val at = email.indexOf('@')
+    return if (at > 0) email.substring(0, at) else email
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -115,8 +163,10 @@ private fun SecuritySheet(
     passType: PassType,
     title: String,
     target: String,
+    hero: String?,
     source: SourceField,
     confirmCopy: String,
+    emphasisStyle: B3UrlEmphasisStyle,
     telemetry: UiTelemetryGuard,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
@@ -136,74 +186,248 @@ private fun SecuritySheet(
         sheetState = sheetState,
         containerColor = emphasis.sheetBackground.toComposeColor(),
     ) {
+        when (emphasisStyle) {
+            B3UrlEmphasisStyle.Container -> ContainerLayout(
+                title = title,
+                target = target,
+                source = source,
+                confirmCopy = confirmCopy,
+                kind = kind,
+                passType = passType,
+                telemetry = telemetry,
+                onConfirm = onConfirm,
+                onDismiss = onDismiss,
+            )
+            B3UrlEmphasisStyle.DomainHero -> DomainHeroLayout(
+                target = target,
+                hero = hero ?: target,
+                source = source,
+                confirmCopy = confirmCopy,
+                kind = kind,
+                passType = passType,
+                telemetry = telemetry,
+                onConfirm = onConfirm,
+                onDismiss = onDismiss,
+            )
+        }
+    }
+}
+
+@Composable
+private fun ContainerLayout(
+    title: String,
+    target: String,
+    source: SourceField,
+    confirmCopy: String,
+    kind: SecurityIntentKind,
+    passType: PassType,
+    telemetry: UiTelemetryGuard,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val emphasis = LocalPassesSemantics.current.securitySheet
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(PaddingValues(horizontal = 24.dp, vertical = 16.dp)),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            // Title is a hardcoded English literal, not user-controlled, so no
+            // isolation needed.
+            text = title,
+            style = MaterialTheme.typography.headlineSmall,
+            color = emphasis.bodyForeground.toComposeColor(),
+        )
+        Text(
+            // Organization name and field label come straight from the parsed
+            // pass and ARE user-controlled. Isolate each independently so a
+            // bidi character in either cannot reorder the rest of the line.
+            text = isolated(source.organizationName) +
+                (source.fieldLabel?.let { " — ${isolated(it)}" } ?: ""),
+            style = MaterialTheme.typography.bodySmall,
+            color = emphasis.bodyForeground.toComposeColor(),
+        )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(PaddingValues(horizontal = 24.dp, vertical = 16.dp)),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+                .clip(RoundedCornerShape(12.dp))
+                .background(emphasis.emphasisBackground.toComposeColor())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Text(
-                // Title is a hardcoded English literal, not user-controlled, so no
-                // isolation needed.
-                text = title,
-                style = MaterialTheme.typography.headlineSmall,
-                color = emphasis.bodyForeground.toComposeColor(),
+                // The verbatim target is the trust-claim load-bearing string.
+                // Isolate it so any residual directional marks (the scanner
+                // already rejects Cf/Cc, but defense in depth) cannot reorder
+                // glyphs against surrounding context.
+                text = isolated(target),
+                style = MaterialTheme.typography.bodyLarge,
+                color = emphasis.emphasisForeground.toComposeColor(),
             )
-            Text(
-                // Organization name and field label come straight from the parsed
-                // pass and ARE user-controlled. Isolate each independently so a
-                // bidi character in either cannot reorder the rest of the line.
-                text = isolated(source.organizationName) +
-                    (source.fieldLabel?.let { " — ${isolated(it)}" } ?: ""),
-                style = MaterialTheme.typography.bodySmall,
-                color = emphasis.bodyForeground.toComposeColor(),
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(emphasis.emphasisBackground.toComposeColor())
-                    .padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+        ) {
+            TextButton(
+                onClick = {
+                    telemetry.onSecuritySheetDismissed(kind, passType)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = emphasis.cancelForeground.toComposeColor(),
+                ),
             ) {
-                Text(
-                    // The verbatim target is the trust-claim load-bearing string.
-                    // Isolate it so any residual directional marks (the scanner
-                    // already rejects Cf/Cc, but defense in depth) cannot reorder
-                    // glyphs against surrounding context.
-                    text = isolated(target),
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = emphasis.emphasisForeground.toComposeColor(),
-                )
+                Text("Cancel")
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End),
+            Button(
+                onClick = {
+                    telemetry.onSecuritySheetConfirmed(kind, passType)
+                    onConfirm()
+                },
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = emphasis.confirmContainer.toComposeColor(),
+                    contentColor = emphasis.confirmForeground.toComposeColor(),
+                ),
             ) {
-                TextButton(
-                    onClick = {
-                        telemetry.onSecuritySheetDismissed(kind, passType)
-                        onDismiss()
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = emphasis.cancelForeground.toComposeColor(),
-                    ),
-                ) {
-                    Text("Cancel")
-                }
-                Button(
-                    onClick = {
-                        telemetry.onSecuritySheetConfirmed(kind, passType)
-                        onConfirm()
-                    },
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = emphasis.confirmContainer.toComposeColor(),
-                        contentColor = emphasis.confirmForeground.toComposeColor(),
-                    ),
-                ) {
-                    Text(confirmCopy)
-                }
+                Text(confirmCopy)
             }
+        }
+    }
+}
+
+@Composable
+private fun DomainHeroLayout(
+    target: String,
+    hero: String,
+    source: SourceField,
+    confirmCopy: String,
+    kind: SecurityIntentKind,
+    passType: PassType,
+    telemetry: UiTelemetryGuard,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val emphasis = LocalPassesSemantics.current.securitySheet
+    val body = emphasis.bodyForeground.toComposeColor()
+    val outline = body.copy(alpha = 0.7f)
+    val dim = body.copy(alpha = 0.5f)
+    val eyebrowCopy = when (kind) {
+        SecurityIntentKind.Url -> "LEAVING WALT"
+        SecurityIntentKind.Phone -> "CALLING"
+        SecurityIntentKind.Email -> "EMAILING"
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(PaddingValues(horizontal = 24.dp, vertical = 16.dp)),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Text(
+            text = eyebrowCopy,
+            style = MaterialTheme.typography.labelMedium.copy(
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                letterSpacing = 0.2.em,
+            ),
+            color = outline,
+        )
+        Text(
+            // The hero is a presentation aid (registrable domain / formatted phone /
+            // email local-part). It's user-controlled by way of the underlying
+            // intent value, so isolate it the same way as the verbatim target.
+            text = isolated(hero),
+            style = MaterialTheme.typography.headlineSmall.copy(
+                fontSize = 26.sp,
+                fontWeight = FontWeight.SemiBold,
+                lineHeight = 27.3.sp,
+                letterSpacing = (-0.035).em,
+            ),
+            color = body,
+        )
+        Text(
+            // Forensic row: the verbatim target is the trust-claim load-bearing
+            // string. Monospace + lower visual weight so the hero leads, but the
+            // string is always visible.
+            text = isolated(target),
+            style = MaterialTheme.typography.bodyMedium.copy(
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+            ),
+            color = dim,
+        )
+        Text(
+            text = provenanceAnnotated(source, body, dim),
+            style = MaterialTheme.typography.bodySmall.copy(fontSize = 13.sp),
+            color = dim,
+        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(outline.copy(alpha = 0.2f)),
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            OutlinedButton(
+                onClick = {
+                    telemetry.onSecuritySheetDismissed(kind, passType)
+                    onDismiss()
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.outlinedButtonColors(
+                    contentColor = emphasis.cancelForeground.toComposeColor(),
+                ),
+            ) {
+                Text("Cancel", textAlign = TextAlign.Center)
+            }
+            Button(
+                onClick = {
+                    telemetry.onSecuritySheetConfirmed(kind, passType)
+                    onConfirm()
+                },
+                modifier = Modifier.weight(1f),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = emphasis.confirmContainer.toComposeColor(),
+                    contentColor = emphasis.confirmForeground.toComposeColor(),
+                ),
+            ) {
+                Text(confirmCopy, textAlign = TextAlign.Center)
+            }
+        }
+    }
+}
+
+private fun provenanceAnnotated(
+    source: SourceField,
+    bodyColor: androidx.compose.ui.graphics.Color,
+    dimColor: androidx.compose.ui.graphics.Color,
+): AnnotatedString {
+    val label = source.fieldLabel?.let { isolated(it) }
+    val org = isolated(source.organizationName)
+    // "From the {fieldLabel} field on your {organizationName} pass." with the two
+    // user-controlled fragments bolded. Falls back to a simpler phrasing if the
+    // pass field had no label.
+    return buildAnnotatedString {
+        withStyle(SpanStyle(color = dimColor)) {
+            append(if (label != null) "From the " else "From your ")
+        }
+        if (label != null) {
+            withStyle(SpanStyle(color = bodyColor, fontWeight = FontWeight.SemiBold)) {
+                append(label)
+            }
+            withStyle(SpanStyle(color = dimColor)) {
+                append(" field on your ")
+            }
+        }
+        withStyle(SpanStyle(color = bodyColor, fontWeight = FontWeight.SemiBold)) {
+            append(org)
+        }
+        withStyle(SpanStyle(color = dimColor)) {
+            append(" pass.")
         }
     }
 }

@@ -56,6 +56,103 @@ class PublicApiSurfaceTest {
     }
 
     @Test
+    fun b3UrlIntentRegistrableDomainDefaultsToNull() {
+        // The kdoc promises the field is optional; consumers that construct intents
+        // outside the scanner (e.g. their own URL pipeline) get null and the
+        // DomainHero layout falls back to the verbatim URL.
+        val intent = B3UrlIntent(
+            url = "https://example.com",
+            sourceField = SourceField("k", "L", "Org"),
+        )
+        assertThat(intent.registrableDomain).isNull()
+    }
+
+    @Test
+    fun b3UrlEmphasisStyleArmsAreReachableViaWhen() {
+        val styles: List<B3UrlEmphasisStyle> = listOf(
+            B3UrlEmphasisStyle.Container,
+            B3UrlEmphasisStyle.DomainHero,
+        )
+        val labels = styles.map { style ->
+            when (style) {
+                B3UrlEmphasisStyle.Container -> "container"
+                B3UrlEmphasisStyle.DomainHero -> "domain-hero"
+            }
+        }
+        assertThat(labels).containsExactly("container", "domain-hero").inOrder()
+    }
+
+    @Test
+    fun fieldLinkScannerPopulatesRegistrableDomain() {
+        // Common case: www-prefixed registrable domain. The scanner's PSL-free
+        // extraction returns the host with the `www.` mirror label stripped.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("Visit https://www.tixly.com/refunds today", source)
+        assertThat(spans).hasSize(1)
+        val intent = spans.single().intent
+        assertThat(intent).isInstanceOf(B3UrlIntent::class.java)
+        assertThat((intent as B3UrlIntent).registrableDomain).isEqualTo("tixly.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainHandlesNakedHost() {
+        // No `www.` prefix: the host comes back unchanged.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://example.com/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("example.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainKeepsMultiLabelTld() {
+        // PSL-free: we surface the extra label rather than guessing co.uk is the
+        // suffix. Documented in `FieldLinkScanner.registrableDomainOf` kdoc:
+        // over-disclosing the destination is the right failure mode.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://www.example.co.uk/help", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("example.co.uk")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainStripsPortAndUserinfo() {
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://user@www.example.com:8443/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("example.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainLowercases() {
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://WWW.TIXLY.COM/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("tixly.com")
+    }
+
+    @Test
+    fun fieldLinkScannerRegistrableDomainPreservesNonMirrorSubdomain() {
+        // `accounts` is not in the mirror-label set, so the full host survives.
+        val source = SourceField("k", "L", "Acme")
+        val spans = FieldLinkScanner.scan("https://accounts.example.com/x", source)
+        val intent = spans.single().intent as B3UrlIntent
+        assertThat(intent.registrableDomain).isEqualTo("accounts.example.com")
+    }
+
+    @Test
+    fun b3UrlIntentUrlIsLoadBearingTrustClaim() {
+        // Belt-and-suspenders: a B3UrlIntent constructed with a registrableDomain
+        // distinct from the url must NOT mutate the url. The trust contract is the
+        // verbatim url field; the registrable domain is presentation only.
+        val intent = B3UrlIntent(
+            url = "https://attacker.example/phish",
+            sourceField = SourceField("k", "L", "Org"),
+            registrableDomain = "trustedbank.com",
+        )
+        assertThat(intent.url).isEqualTo("https://attacker.example/phish")
+    }
+
+    @Test
     fun expiredOverlayStateArmsAreReachableViaWhen() {
         val states: List<ExpiredOverlayState> = listOf(
             ExpiredOverlayState.None,

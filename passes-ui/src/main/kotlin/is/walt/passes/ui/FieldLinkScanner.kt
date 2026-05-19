@@ -88,7 +88,11 @@ public object FieldLinkScanner {
             spans += LinkSpan(
                 start = match.range.first,
                 endExclusive = match.range.last + 1,
-                intent = B3UrlIntent(url = match.value, sourceField = source),
+                intent = B3UrlIntent(
+                    url = match.value,
+                    sourceField = source,
+                    registrableDomain = registrableDomainOf(match.value),
+                ),
             )
         }
 
@@ -177,6 +181,78 @@ public object FieldLinkScanner {
 
     /** `+` and `(` immediately before a digit run signal an unmatched-paren or international form. */
     private val PHONE_PREFIX_HINTS = setOf('+', '(')
+
+    /**
+     * Best-effort registrable-domain extraction for a scanned URL. Returns `null` when
+     * the URL cannot be parsed into a host. The result is intended for the
+     * `B3UrlConfirmSheet`'s domain-hero layout (wpass-48v) — a presentation aid sitting
+     * above the verbatim URL forensic row, not a substitute for it.
+     *
+     * The extraction is deliberately PSL-free. The transformation is:
+     *
+     * 1. Trim the URL through the scanner's already-validated character class (RFC 3986
+     *    reserved + unreserved + percent-encoded ASCII), then split off the scheme
+     *    (`https?://`).
+     * 2. Take the authority — everything before the first `/`, `?`, or `#`.
+     * 3. Drop a leading `userinfo@` if present (already rare given the RFC 3986 regex,
+     *    but `tixly.com` is still the right answer for `https://user@tixly.com/x`).
+     * 4. Drop a trailing `:port`.
+     * 5. Lowercase. Trim a trailing `.`.
+     * 6. Strip a leading subdomain label if it is one of `www`, `m`, `mb`, `mobile`.
+     *    This is the load-bearing simplification: the four mobile/canonical mirror
+     *    labels are the common cases the domain-hero layout wants to elide. Other
+     *    subdomains (`accounts.google.com`, `api.example.co.uk`) survive unchanged
+     *    because eliding them would mislabel the destination.
+     *
+     * Why no PSL (Public Suffix List):
+     *
+     * - Bundling a PSL into this kernel module is a real binary-size and freshness
+     *   cost (the list is ~200 KB compressed, updates monthly) for a presentation
+     *   aid. The full URL is what carries the trust claim; the hero label is a
+     *   reading convenience.
+     * - The PSL-free answer for `example.co.uk` is `example.co.uk`, which is one
+     *   label *deeper* than the PSL answer (`example.co.uk` vs `co.uk`). The user
+     *   reading the sheet still sees the registrable destination correctly; they
+     *   just see one extra label. That is the right failure mode — over-disclosing
+     *   the destination beats under-disclosing it.
+     * - IDN homograph handling (Punycode comparison) is similarly a presentation
+     *   concern handled at a higher layer if needed; the scanner already rejects
+     *   any field containing Unicode Cf/Cc codepoints, and RFC 3986 forces IDN
+     *   hosts into their ASCII `xn--` form, so the string returned here is already
+     *   the Punycode label a vigilant user can spot-check.
+     *
+     * Consumers MUST NOT route the return value into an outbound `Intent` — it
+     * carries no scheme, no path, and is structurally lossy. The verbatim URL on
+     * `B3UrlIntent.url` is the only string the host's `Intent.ACTION_VIEW`
+     * receives. Trust-claim discipline lives on [B3UrlIntent.url], not here.
+     */
+    @Suppress("ReturnCount")
+    internal fun registrableDomainOf(url: String): String? {
+        val schemeStripped = url.removePrefix("https://").removePrefix("http://")
+        if (schemeStripped == url) return null
+        // Authority ends at the first `/`, `?`, or `#`.
+        val authorityEnd = schemeStripped.indexOfAny(charArrayOf('/', '?', '#'))
+        val authority = if (authorityEnd < 0) schemeStripped else schemeStripped.substring(0, authorityEnd)
+        if (authority.isEmpty()) return null
+        val afterUserinfo = authority.substringAfterLast('@')
+        // IPv6 literals appear bracketed; if so, return the bracketed form so the
+        // hero still shows what `Uri.parse` would call the host.
+        val hostAndPort = if (afterUserinfo.startsWith("[")) {
+            val close = afterUserinfo.indexOf(']')
+            if (close < 0) return null
+            afterUserinfo.substring(0, close + 1)
+        } else {
+            afterUserinfo.substringBefore(':')
+        }
+        val host = hostAndPort.lowercase().trimEnd('.')
+        if (host.isEmpty()) return null
+        val labels = host.split('.')
+        if (labels.size <= 1) return host
+        val first = labels.first()
+        return if (first in MIRROR_LABELS) labels.drop(1).joinToString(".") else host
+    }
+
+    private val MIRROR_LABELS = setOf("www", "m", "mb", "mobile")
 }
 
 /**

@@ -21,6 +21,18 @@ what the trust claim is, and how the implementation bead's tests pin it.
 parse time and persisted by `passes-storage`. The UI cannot upgrade or downgrade a
 status, and the status cannot be rebound by the host.
 
+`PassFront.showSignatureBadge` (default `true`) is a presentation opt-out introduced
+in wpass-btz so a host that has already disclosed the band in its own chrome (e.g.
+walt-android's import-confirm `TrustChip`) does not double-label the user with two
+visually different "verified" affordances. The band itself remains
+non-suppressible: `onPassRendered(type, band)` fires regardless of the boolean, and
+the underlying status is still derived from `passes-core`. A host that opts out
+without disclosing the band elsewhere is breaking the contract — pinned in code by
+`ComposableSurfaceLockTest.passFrontHasExactlyEightUserVisibleParameters`, which
+forces a reviewer conversation if anyone tries to add a third suppression
+parameter that would let a host hide *both* the badge and any cross-chrome
+disclosure.
+
 **How tested.**
 
 - `PublicApiSurfaceTest` (already in this skeleton) pins `SignatureBand` to the four
@@ -42,10 +54,18 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
 
 1. *No URL leaves the device without the user seeing the verbatim target.* The host
    does not open `Intent.ACTION_VIEW` for a pass-derived URL except inside the
-   confirm callback of `B3UrlConfirmSheet`.
+   confirm callback of `B3UrlConfirmSheet`. This holds for both
+   `B3UrlEmphasisStyle.Container` (the original layout) and
+   `B3UrlEmphasisStyle.DomainHero` (the wpass-48v layout): the latter places the
+   verbatim URL in a smaller monospace "forensic row" rather than the orange
+   container, but the string is still on-screen before the user can tap confirm.
 2. *The displayed URL is identical to the URL that opens.* The sheet does not show
    `example.com` and open `attacker.example`. The string in [B3UrlIntent.url] IS the
-   string the host hands to its `Intent`.
+   string the host hands to its `Intent`. The `DomainHero` layout's "hero" line
+   shows [B3UrlIntent.registrableDomain] when present, but this is a presentation
+   aid above the verbatim row — never a substitute. A `B3UrlIntent` constructed
+   with a hero string that disagrees with the URL still routes the URL to the
+   `Intent`; the registrable-domain field is structurally non-actionable.
 3. *The displayed URL is rendered as it was typed.* The sheet defends against the
    Unicode-bidi class of attacks, where a pass author embeds U+202E
    (Right-to-Left Override), zero-width marks, or other formatting/control
@@ -112,9 +132,20 @@ input shape from the pass.
 marked `voided: true` carries a dim scrim over its front and a pill reading
 "Expired" or "Voided".
 
-**Trust claim.** The overlay is non-suppressible. There is no `enabled` parameter,
-no caller-supplied flag, and no theme token that hides it. A pass whose validity
-window has closed cannot present as valid.
+**Trust claim.** A pass whose validity window has closed cannot present as valid
+*without the host disclosing that status elsewhere on the same screen*. The kernel
+overlay itself has no `enabled` parameter on `ExpiredOverlay` and no theme token
+that hides it; what `PassFront.showExpiredOverlay = false` (wpass-d0k) does is
+suppress the **scrim composition step** on `PassFront` specifically, for the
+single case where the host's own chrome already presents the expired/voided state
+(e.g. walt-android's archival detail surface with a `PAST PASS` eyebrow and an
+`Expired {date}` pill). The underlying pass data is unchanged — the expiration
+date and voided flag still flow through to the host — and `ExpiredOverlay` itself
+remains non-suppressible if called directly. A host that suppresses the overlay
+without rendering an equivalent disclosure is breaking the contract; the bounded
+shape of the opt-in (a single suppression boolean on a single composable, with no
+overload that lets a host *display* an arbitrary expiry state) is what makes the
+breach legible at code-review time.
 
 **How tested.**
 
