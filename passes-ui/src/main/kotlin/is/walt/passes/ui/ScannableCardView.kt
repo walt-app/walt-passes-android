@@ -11,6 +11,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -26,6 +27,15 @@ import `is`.walt.passes.core.ScannableFormat
  * consistent at gate distance: 240 dp square for QR, 320 dp x 96 dp for the four
  * 1D symbologies. Painted with `FilterQuality.None` so the per-module upscale stays
  * nearest-neighbor and module edges remain sharp.
+ *
+ * `contentScale` differs per format. QR uses [ContentScale.Fit] because its matrix
+ * is square and [ContentScale.FillBounds] would distort it if the slot is non-square.
+ * The four 1D symbologies use [ContentScale.FillBounds] because [BarcodeEncoder]
+ * emits their matrices at the symbology's natural minimum — exactly one module tall
+ * (see `ZxingBarcodeEncoder.writeMatrix`) — and `Fit` against a ~200:1 painter
+ * intrinsic ratio collapses the painted height to a few pixels in a normal-aspect
+ * slot. `FillBounds` stretches vertically and, combined with [FilterQuality.None],
+ * keeps module edges sharp since 1D barcodes carry no data on the vertical axis.
  *
  * Encoder failures render as a same-sized [Spacer] with a TalkBack-readable
  * `contentDescription` rather than throwing. Card chrome (background tint, label,
@@ -53,6 +63,7 @@ public fun ScannableCardView(
                 filterQuality = FilterQuality.None,
             ),
             contentDescription = card.label,
+            contentScale = card.format.contentScale(),
             modifier = modifier.defaultMinSize(
                 minWidth = minWidthDp.dp,
                 minHeight = minHeightDp.dp,
@@ -78,6 +89,16 @@ private fun ScannableFormat.minRenderSizeDp(): Pair<Int, Int> = when (this) {
     ScannableFormat.UpcA,
     ScannableFormat.Code39,
     -> 320 to 96
+}
+
+/** Per-symbology paint scale. See ScannableCardView KDoc for the QR-vs-1D split. */
+private fun ScannableFormat.contentScale(): ContentScale = when (this) {
+    ScannableFormat.Qr -> ContentScale.Fit
+    ScannableFormat.Code128,
+    ScannableFormat.Ean13,
+    ScannableFormat.UpcA,
+    ScannableFormat.Code39,
+    -> ContentScale.FillBounds
 }
 
 /**
