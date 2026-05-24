@@ -410,18 +410,30 @@ class ScannableCardTrustSurfaceTest {
      * reach the encoder-failure UI branch from a unit test is to invoke the
      * type's internal constructor directly via kotlin-reflect. Limit usage to
      * tests that need to assert behaviour of that defensive path.
+     *
+     * Bound by parameter name via `callBy` rather than positional `call`: a
+     * future add / remove / reorder of a primary-constructor parameter surfaces
+     * as a clear missing-key failure at test time, not a same-typed-field swap
+     * that quietly tests the wrong assertion.
      */
     private fun encoderRejectedEan13Fixture(): ScannableCard {
         val ctor = requireNotNull(ScannableCard::class.primaryConstructor) {
             "ScannableCard has no primary constructor"
         }
         ctor.isAccessible = true
-        return ctor.call(
-            ScannableCardId("test"),
-            "12345678901",
-            ScannableFormat.Ean13,
-            "Library card",
-            PassInstant(0L),
+        val args = mapOf(
+            "id" to ScannableCardId("test"),
+            "payload" to "12345678901",
+            "format" to ScannableFormat.Ean13,
+            "label" to "Library card",
+            "createdAt" to PassInstant(0L),
         )
+        val byName = ctor.parameters.associateBy { it.name }
+        val missing = args.keys - byName.keys
+        require(missing.isEmpty()) {
+            "ScannableCard primary constructor drifted; unknown params: $missing. " +
+                "Update encoderRejectedEan13Fixture before changing the data class."
+        }
+        return ctor.callBy(args.mapKeys { (name, _) -> byName.getValue(name) })
     }
 }

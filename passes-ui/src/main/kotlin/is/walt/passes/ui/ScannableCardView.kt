@@ -80,12 +80,9 @@ public fun ScannableCardView(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(CAPTION_GAP),
         ) {
-            // When the caption is on, the image's contentDescription is dropped
-            // (caller chrome — the screen title — already speaks the label, and the
-            // payload caption below is the announce-worthy text). A
-            // clearAndSetSemantics wrapper would also dedupe but would zap the
-            // caption from a11y, which is the opposite of what the POS-fallback
-            // case needs.
+            // Drop the image's contentDescription so TalkBack reads the caption,
+            // not the duplicate label. clearAndSetSemantics would dedupe too but
+            // would zap the caption.
             BarcodeImage(card.format, bitmap, imageDescription = null, modifier = Modifier)
             SelectionContainer {
                 Text(
