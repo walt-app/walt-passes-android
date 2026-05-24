@@ -13,6 +13,12 @@ internal interface DocumentStore {
     fun insert(request: DocumentInsertRequest): DocumentInsertOutcome
     fun loadBytes(id: DocumentRecordId): ByteArray?
     fun loadThumbnail(id: DocumentRecordId): ByteArray?
+
+    /**
+     * Single-column UPDATE on the documents row. Returns `true` if a row matched [id],
+     * `false` otherwise (caller maps to `IntegrityViolation`).
+     */
+    fun updateLabel(id: DocumentRecordId, label: String): Boolean
     fun delete(id: DocumentRecordId): DocumentDeleteOutcome?
 
     /**

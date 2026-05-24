@@ -152,6 +152,22 @@ public class SqlCipherPassRepository internal constructor(
         StorageResult.Success(outcome.id)
     }
 
+    override suspend fun updateDocumentLabel(
+        id: DocumentRecordId,
+        label: String,
+    ): StorageResult<Unit> = runIo {
+        if (label.length > DocumentBounds.MAX_LABEL_CHARS) {
+            return@runIo rejectDocument(DocumentStorageRejectedKind.LabelTooLongAtStorage)
+        }
+        val matched = writeMutex.withLock {
+            val ok = documentStore.updateLabel(id, label)
+            if (ok) _documents.value = documentStore.listRows()
+            ok
+        }
+        if (!matched) return@runIo failure(StorageError.IntegrityViolation(id))
+        StorageResult.Success(Unit)
+    }
+
     override fun observeDocuments(): Flow<List<DocumentRow>> = _documents.asStateFlow()
 
     override suspend fun createScannableCard(

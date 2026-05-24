@@ -326,6 +326,7 @@ class PassRepositoryContractTest {
             error("unused in pass-side tests")
         override fun loadBytes(id: DocumentRecordId): ByteArray? = null
         override fun loadThumbnail(id: DocumentRecordId): ByteArray? = null
+        override fun updateLabel(id: DocumentRecordId, label: String): Boolean = false
         override fun delete(id: DocumentRecordId): DocumentDeleteOutcome? = null
         override fun close() { closeCount++ }
     }

@@ -223,6 +223,105 @@ class DocumentRepositoryTest {
     }
 
     @Test
+    fun updateLabelReplacesDisplayLabelAndPreservesPositionWithNoTelemetry() = runTest {
+        val docs = FakeDocumentStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(docs, telemetry)
+
+        val insert = repo.insertDocument(
+            label = "old.pdf",
+            pdfBytes = ByteArray(8),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(insert is StorageResult.Success)
+        val id = insert.value
+
+        val result = repo.updateDocumentLabel(id, "new.pdf")
+        check(result is StorageResult.Success)
+
+        val rows = repo.observeDocuments().first()
+        assertThat(rows).hasSize(1)
+        assertThat(rows[0].id).isEqualTo(id)
+        assertThat(rows[0].displayLabel).isEqualTo("new.pdf")
+        // Rename emits no telemetry: nothing follows the import event.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "doc-imported:8:1",
+        ).inOrder()
+    }
+
+    @Test
+    fun updateLabelOfUnknownIdReturnsIntegrityViolation() = runTest {
+        val telemetry = RecordingGuard()
+        val repo = repo(FakeDocumentStore(), telemetry)
+
+        val result = repo.updateDocumentLabel(DocumentRecordId(404L), "x")
+
+        check(result is StorageResult.Failure)
+        val violation = result.error as StorageError.IntegrityViolation
+        check(violation.recordId is DocumentRecordId)
+        assertThat(violation.recordId.value).isEqualTo(404L)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "failure:IntegrityViolation:n/a",
+        ).inOrder()
+    }
+
+    @Test
+    fun updateLabelMaxLengthBoundaryIsAcceptedAndPlusOneIsRejected() = runTest {
+        val docs = FakeDocumentStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(docs, telemetry)
+
+        val insert = repo.insertDocument(
+            label = "seed",
+            pdfBytes = ByteArray(8),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(insert is StorageResult.Success)
+        val id = insert.value
+
+        val okLabel = "a".repeat(DocumentBounds.MAX_LABEL_CHARS)
+        val ok = repo.updateDocumentLabel(id, okLabel)
+        check(ok is StorageResult.Success)
+        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo(okLabel)
+
+        val tooLong = "a".repeat(DocumentBounds.MAX_LABEL_CHARS + 1)
+        val rejected = repo.updateDocumentLabel(id, tooLong)
+        check(rejected is StorageResult.Failure)
+        val err = rejected.error as StorageError.DocumentRejected
+        assertThat(err.kind).isEqualTo(DocumentStorageRejectedKind.LabelTooLongAtStorage)
+        // Rejection emits exactly `doc-rejected`; no `failure:DocumentRejected:...`.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "doc-imported:8:1",
+            "doc-rejected:LabelTooLongAtStorage",
+        ).inOrder()
+        // Stored label was not overwritten by the rejected update.
+        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo(okLabel)
+    }
+
+    @Test
+    fun updateLabelAcceptsEmptyAndBlankToMatchInsertDocument() = runTest {
+        val repo = repo(FakeDocumentStore(), RecordingGuard())
+        val insert = repo.insertDocument(
+            label = "seed",
+            pdfBytes = ByteArray(1),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(insert is StorageResult.Success)
+        val id = insert.value
+
+        check(repo.updateDocumentLabel(id, "") is StorageResult.Success)
+        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo("")
+        check(repo.updateDocumentLabel(id, "   ") is StorageResult.Success)
+        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo("   ")
+    }
+
+    @Test
     fun loadDocumentBytesAndThumbnailRoundTripUntouched() = runTest {
         val docs = FakeDocumentStore()
         val telemetry = RecordingGuard()
@@ -322,6 +421,12 @@ class DocumentRepositoryTest {
 
         override fun loadThumbnail(id: DocumentRecordId): ByteArray? =
             entries[id.value]?.thumbnailBytes?.copyOf()
+
+        override fun updateLabel(id: DocumentRecordId, label: String): Boolean {
+            val entry = entries[id.value] ?: return false
+            entries[id.value] = entry.copy(row = entry.row.copy(displayLabel = label))
+            return true
+        }
 
         override fun delete(id: DocumentRecordId): DocumentDeleteOutcome? {
             val entry = entries.remove(id.value) ?: return null
