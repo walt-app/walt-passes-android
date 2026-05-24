@@ -152,6 +152,27 @@ public interface PassRepository {
     ): StorageResult<ScannableCardRecordId>
 
     /**
+     * Overwrites the payload / format / label of an existing scannable-card row. Re-runs
+     * the kernel `ScannableCardInputValidator` (the single insert-time choke point per
+     * [createScannableCard]'s KDoc) on the new [input] before the row is touched; a
+     * validation rejection bubbles up as [StorageError.ScannableCardRejected] with the
+     * typed reason preserved and shares the same `onScannableCardRejected` telemetry
+     * channel as [createScannableCard]. The row is not modified on rejection.
+     *
+     * Validation is checked before the row is loaded, so an invalid [input] against an
+     * unknown [id] surfaces as [StorageError.ScannableCardRejected], not
+     * [StorageError.IntegrityViolation], mirroring [updateDocumentLabel]'s precedence.
+     *
+     * Returns [StorageError.IntegrityViolation] if no row matches [id] and the input
+     * passed validation. On success the row's `created_at_epoch_ms` is unchanged (edit
+     * is not a re-insert), so the row's position in [observeScannableCards] is preserved.
+     */
+    public suspend fun updateScannableCard(
+        id: ScannableCardRecordId,
+        input: ScannableCardCreateInput,
+    ): StorageResult<Unit>
+
+    /**
      * Loads a stored [ScannableCard] by row id. Returns [StorageError.IntegrityViolation]
      * if no row matches.
      */
@@ -170,8 +191,8 @@ public interface PassRepository {
 
     /**
      * Cold flow of [ScannableCard] rows sorted by `created_at_epoch_ms` descending.
-     * Emits the current snapshot on collect and re-emits on insert / delete. Unlike the
-     * pass and document lanes, the full card materializes here — there are no large
+     * Emits the current snapshot on collect and re-emits on insert / update / delete.
+     * Unlike the pass and document lanes, the full card materializes here — there are no large
      * blob columns to defer, and the consumer's tile renderer needs the payload to
      * re-encode the barcode at render time.
      */

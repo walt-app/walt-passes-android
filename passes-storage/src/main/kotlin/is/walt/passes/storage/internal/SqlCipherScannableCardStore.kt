@@ -70,6 +70,28 @@ internal class SqlCipherScannableCardStore(
         return ScannableCardInsertOutcome(id = ScannableCardRecordId(rowId))
     }
 
+    override fun update(id: ScannableCardRecordId, request: ScannableCardUpdateRequest): Boolean {
+        val rows: Int
+        db.beginTransaction()
+        try {
+            val cv = ContentValues().apply {
+                put("payload", request.payload)
+                put("format", request.format.name)
+                put("label", request.label)
+            }
+            rows = db.update(
+                Schema.Tables.SCANNABLE_CARDS,
+                cv,
+                "id = ?",
+                arrayOf(id.value.toString()),
+            )
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return rows > 0
+    }
+
     override fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome? {
         val card = loadById(id) ?: return null
         db.beginTransaction()
