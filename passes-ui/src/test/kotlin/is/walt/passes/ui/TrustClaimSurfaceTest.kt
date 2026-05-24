@@ -607,7 +607,9 @@ class TrustClaimSurfaceTest {
                 )
             }
         }
-        composeRule.onNodeWithText("Tixly").assertIsDisplayed()
+        // Substring match because PassFront's eyebrow now routes through
+        // PassIdentityBlock, which fences with FSI/PDI (ADR 0007 D6).
+        composeRule.onNodeWithText("Tixly", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -681,9 +683,11 @@ class TrustClaimSurfaceTest {
                 PassIdentityBlock(pass = passFixture(), userLabel = null)
             }
         }
-        composeRule.onNodeWithText("Acme").assertIsDisplayed()
+        // Substring match because the rendered text is FSI/PDI-fenced (see the
+        // dedicated bidi-isolation test below).
+        composeRule.onNodeWithText("Acme", substring = true).assertIsDisplayed()
         // No override → no second line. Exactly one node carries the org name.
-        val nodes = composeRule.onAllNodesWithText("Acme", substring = false)
+        val nodes = composeRule.onAllNodesWithText("Acme", substring = true)
             .fetchSemanticsNodes()
         assertThat(nodes).hasSize(1)
     }
@@ -701,8 +705,8 @@ class TrustClaimSurfaceTest {
                 )
             }
         }
-        composeRule.onNodeWithText("Mom's flight home").assertIsDisplayed()
-        composeRule.onNodeWithText("Acme").assertIsDisplayed()
+        composeRule.onNodeWithText("Mom's flight home", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Acme", substring = true).assertIsDisplayed()
     }
 
     @Test
@@ -716,7 +720,7 @@ class TrustClaimSurfaceTest {
             }
         }
         // "Acme" appears exactly once — the displayed signed org, not a duplicate.
-        val nodes = composeRule.onAllNodesWithText("Acme", substring = false)
+        val nodes = composeRule.onAllNodesWithText("Acme", substring = true)
             .fetchSemanticsNodes()
         assertThat(nodes).hasSize(1)
     }
@@ -738,8 +742,27 @@ class TrustClaimSurfaceTest {
                 )
             }
         }
-        composeRule.onNodeWithText("Mom's flight").assertIsDisplayed()
-        composeRule.onNodeWithText("Tixly").assertIsDisplayed()
+        composeRule.onNodeWithText("Mom's flight", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Tixly", substring = true).assertIsDisplayed()
+    }
+
+    @Test
+    fun passIdentityBlockFencesBothLinesWithBidiIsolation() {
+        // Defense in depth: both the user-supplied userLabel and the parsed-from-PKPASS
+        // organizationName are untrusted strings. PassIdentityBlock wraps each with
+        // FSI/PDI (passes-ui-core::isolated) so a bidi-override character in either
+        // value cannot reorder the other line or surrounding chrome. Mirrors
+        // securitySheetUrlIsBidiIsolated in shape.
+        composeRule.setContent {
+            ThemedHost {
+                PassIdentityBlock(
+                    pass = passFixture(),
+                    userLabel = "Mom's flight home",
+                )
+            }
+        }
+        composeRule.onNodeWithText("⁨Mom's flight home⁩").assertIsDisplayed()
+        composeRule.onNodeWithText("⁨Acme⁩").assertIsDisplayed()
     }
 
     @Test
@@ -758,8 +781,8 @@ class TrustClaimSurfaceTest {
             }
         }
         // Both the override and the signed org name must be on the front of the card.
-        composeRule.onNodeWithText("Mom's flight home").assertIsDisplayed()
-        composeRule.onNodeWithText("Acme").assertIsDisplayed()
+        composeRule.onNodeWithText("Mom's flight home", substring = true).assertIsDisplayed()
+        composeRule.onNodeWithText("Acme", substring = true).assertIsDisplayed()
         // Signature badge still renders.
         composeRule.onNodeWithText("Verified").assertIsDisplayed()
     }

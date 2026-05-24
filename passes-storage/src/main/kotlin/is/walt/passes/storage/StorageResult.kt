@@ -121,11 +121,6 @@ public sealed interface ScannableCardRejectionReason {
 }
 
 /**
- * Stable telemetry-friendly enumeration of the open-ended failure space. New arms here
- * are an API addition; new strings are not. Mirrors the `passes-core` discipline of
- * routing telemetry through enums rather than free-form strings.
- */
-/**
  * Why a [PassRepository.updatePassUserLabel] call was refused. One arm today; future
  * caps (illegal-character filters, locale-specific limits, etc.) would add arms here.
  * Mirrors [DocumentStorageRejectedKind] in shape but lives separately so a future
@@ -135,6 +130,11 @@ public enum class PassUpdateRejectedKind {
     LabelTooLong,
 }
 
+/**
+ * Stable telemetry-friendly enumeration of the open-ended failure space. New arms here
+ * are an API addition; new strings are not. Mirrors the `passes-core` discipline of
+ * routing telemetry through enums rather than free-form strings.
+ */
 public enum class UnknownStorageFailureKind {
     DiskFull,
     PermissionDenied,

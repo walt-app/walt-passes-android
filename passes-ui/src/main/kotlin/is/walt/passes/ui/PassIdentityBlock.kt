@@ -9,11 +9,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.lookupOrSelf
 import `is`.walt.passes.core.resolveLocalizedStrings
+import `is`.walt.passes.ui.core.isolated
 
 /**
  * The canonical renderer of a pkpass's visible identity (ADR 0007 D6). Given the parsed
@@ -36,24 +38,13 @@ import `is`.walt.passes.core.resolveLocalizedStrings
  * D5). Walt-android's pkpass tile, lane row, and detail chrome are expected to call
  * this rather than reading `StoredPass.userLabel` directly.
  *
- * Theming: the kernel chooses the structural shape and typographic hierarchy; the
- * consumer chooses colors via [primaryColor] and [eyebrowColor]. Defaults route
- * through [LocalContentColor] so a host that does not theme falls back to its
- * surrounding `MaterialTheme.contentColor`.
- *
- * @param pass The parsed pass. `pass.organizationName` (after `pass.strings`
- *   substitution against [locale]) is the signed identity surfaced as the eyebrow.
- * @param userLabel The user-supplied override from `StoredPass.userLabel` /
- *   `PassSummary.userLabel`. `null` means no override.
- * @param locale Drives `pass.strings` substitution. Production callers MUST thread the
- *   device locale through; the default is a fallback for tests and previews.
- * @param primaryColor Color of the primary identity line (either the override or the
- *   org name when no override). Defaults to [LocalContentColor].
- * @param eyebrowColor Color of the signed-identity eyebrow underneath an override.
- *   Defaults to [primaryColor] at 70% alpha — a single muted derivation so a host that
- *   does not theme still gets visible hierarchy.
+ * Both lines are fenced with FSI/PDI via [isolated] — both the user-supplied
+ * `userLabel` and the parsed-from-PKPASS `organizationName` are untrusted strings
+ * that could carry bidi-override characters. The fence prevents either line from
+ * reordering the other or surrounding chrome. Mirrors `ScannableCardTile` and
+ * `passes-pdf-ui::DocumentTile` for the analogous display-label fields.
  */
-@Suppress("LongParameterList")
+@Suppress("LongParameterList") // detekt functionThreshold=6; trips on six declared params.
 @Composable
 public fun PassIdentityBlock(
     pass: Pass,
@@ -72,15 +63,17 @@ public fun PassIdentityBlock(
         else -> resolvedPrimary.copy(alpha = 0.7f)
     }
 
-    val trimmedOverride = userLabel?.trim()?.takeIf { it.isNotEmpty() }
-    val shouldRenderOverride = trimmedOverride != null &&
-        !trimmedOverride.equals(displayOrganizationName.trim(), ignoreCase = true)
+    val override = userLabel
+        ?.trim()
+        ?.takeIf { it.isNotEmpty() && !it.equals(displayOrganizationName.trim(), ignoreCase = true) }
 
-    if (!shouldRenderOverride) {
+    if (override == null) {
         Text(
-            text = displayOrganizationName,
+            text = isolated(displayOrganizationName),
             style = MaterialTheme.typography.labelLarge,
             color = resolvedPrimary,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = modifier,
         )
         return
@@ -90,15 +83,25 @@ public fun PassIdentityBlock(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(2.dp),
     ) {
+        // Primary line (user-supplied): cap at 2 lines, ellipsize. Mirrors
+        // ScannableCardTile / DocumentTile for analogous user-controlled labels.
         Text(
-            text = trimmedOverride!!,
+            text = isolated(override),
             style = MaterialTheme.typography.labelLarge,
             color = resolvedPrimary,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
         )
+        // Eyebrow (signed identity): never truncate; mirrors ScannableCardTrustCaption's
+        // "trust caption never truncates" posture so the issuer identity stays visible
+        // even under bounded tile chrome.
         Text(
-            text = displayOrganizationName,
+            text = isolated(displayOrganizationName),
             style = MaterialTheme.typography.labelSmall,
             color = resolvedEyebrow,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Visible,
         )
     }
 }
