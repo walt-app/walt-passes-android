@@ -62,13 +62,8 @@ public fun ScannableCardScreen(
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            // showPayloadCaption=true: the human-readable fallback for a failed POS
-            // scanner (GH #102). Only the detail surface opts in — tile / row
-            // registers are too small. ScannableCardView internally drops the
-            // image's contentDescription when the caption is on (the title Text
-            // above already speaks the label and the caption is what TalkBack
-            // needs to announce); no clearAndSetSemantics here, since that would
-            // zap the caption from a11y as well.
+            // POS-scan fallback for GH #102; only the detail surface is large
+            // enough. A11y rationale lives on ScannableCardView.
             ScannableCardView(
                 card = card,
                 showPayloadCaption = true,

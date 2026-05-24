@@ -20,6 +20,8 @@ import `is`.walt.passes.core.ScannableCardCreateResult
 import `is`.walt.passes.core.ScannableCardId
 import `is`.walt.passes.core.ScannableCardInputValidator
 import `is`.walt.passes.core.ScannableFormat
+import kotlin.reflect.full.primaryConstructor
+import kotlin.reflect.jvm.isAccessible
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
 import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
@@ -317,6 +319,23 @@ class ScannableCardTrustSurfaceTest {
     }
 
     @Test
+    fun fullScreenRendersPayloadCaptionEvenWhenEncoderFails() {
+        // GH #102's whole point is that the user can fall back to reading the
+        // number aloud when the *scanner* fails. The kernel-internal mirror of
+        // that is: when the *encoder* fails (the validator-bypassed defensive
+        // path inside ScannableCardView), the caption must still render — a user
+        // with an unrenderable barcode can still read their payload. An 11-digit
+        // EAN-13 trips ZxingBarcodeEncoder (see BarcodeEncoderTest's
+        // ean13RejectsWrongLengthAtWriter) but is rejected upstream by the
+        // validator; construct the card via the internal constructor so the
+        // encoder-failure UI path is exercised end-to-end.
+        composeRule.setContent {
+            ThemedHost { ScannableCardScreen(card = encoderRejectedEan13Fixture()) }
+        }
+        composeRule.onNodeWithText("⁨12345678901⁩").assertIsDisplayed()
+    }
+
+    @Test
     fun rowTileDoesNotRenderPayloadCaption() {
         // The wallet-row register is the smallest surface of the three; same
         // default-off rationale as the carousel tile.
@@ -382,5 +401,27 @@ class ScannableCardTrustSurfaceTest {
             createdAt = PassInstant(0L),
         )
         return (result as ScannableCardCreateResult.Success).card
+    }
+
+    /**
+     * Bypasses [ScannableCardInputValidator] so the test can hand
+     * [ScannableCardView] a payload that ZXing's writer rejects. The validator
+     * exists precisely to prevent this state in production, so the only way to
+     * reach the encoder-failure UI branch from a unit test is to invoke the
+     * type's internal constructor directly via kotlin-reflect. Limit usage to
+     * tests that need to assert behaviour of that defensive path.
+     */
+    private fun encoderRejectedEan13Fixture(): ScannableCard {
+        val ctor = requireNotNull(ScannableCard::class.primaryConstructor) {
+            "ScannableCard has no primary constructor"
+        }
+        ctor.isAccessible = true
+        return ctor.call(
+            ScannableCardId("test"),
+            "12345678901",
+            ScannableFormat.Ean13,
+            "Library card",
+            PassInstant(0L),
+        )
     }
 }

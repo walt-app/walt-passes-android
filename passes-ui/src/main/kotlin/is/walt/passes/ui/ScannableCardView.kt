@@ -73,7 +73,7 @@ public fun ScannableCardView(
     }
 
     if (!showPayloadCaption) {
-        BarcodeImage(card, bitmap, imageDescription = card.label, modifier = modifier)
+        BarcodeImage(card.format, bitmap, imageDescription = card.label, modifier = modifier)
     } else {
         Column(
             modifier = modifier,
@@ -82,10 +82,11 @@ public fun ScannableCardView(
         ) {
             // When the caption is on, the image's contentDescription is dropped
             // (caller chrome — the screen title — already speaks the label, and the
-            // payload caption below is the announce-worthy text). Avoids the
-            // triple-announce a clearAndSetSemantics applied at the wrapping
-            // modifier would also block but at the cost of zapping the caption.
-            BarcodeImage(card, bitmap, imageDescription = null, modifier = Modifier)
+            // payload caption below is the announce-worthy text). A
+            // clearAndSetSemantics wrapper would also dedupe but would zap the
+            // caption from a11y, which is the opposite of what the POS-fallback
+            // case needs.
+            BarcodeImage(card.format, bitmap, imageDescription = null, modifier = Modifier)
             SelectionContainer {
                 Text(
                     text = isolated(card.payload),
@@ -101,12 +102,12 @@ public fun ScannableCardView(
 
 @Composable
 private fun BarcodeImage(
-    card: ScannableCard,
+    format: ScannableFormat,
     bitmap: Bitmap?,
     imageDescription: String?,
     modifier: Modifier,
 ) {
-    val (minWidthDp, minHeightDp) = card.format.minRenderSizeDp()
+    val (minWidthDp, minHeightDp) = format.minRenderSizeDp()
     if (bitmap != null) {
         Image(
             painter = BitmapPainter(
@@ -114,7 +115,7 @@ private fun BarcodeImage(
                 filterQuality = FilterQuality.None,
             ),
             contentDescription = imageDescription,
-            contentScale = card.format.contentScale(),
+            contentScale = format.contentScale(),
             modifier = modifier.defaultMinSize(
                 minWidth = minWidthDp.dp,
                 minHeight = minHeightDp.dp,
