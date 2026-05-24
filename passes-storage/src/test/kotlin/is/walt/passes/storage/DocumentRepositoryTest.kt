@@ -16,6 +16,7 @@ import `is`.walt.passes.storage.internal.ScannableCardDeleteOutcome
 import `is`.walt.passes.storage.internal.ScannableCardInsertOutcome
 import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
 import `is`.walt.passes.storage.internal.ScannableCardStore
+import `is`.walt.passes.storage.internal.ScannableCardUpdateRequest
 import `is`.walt.passes.storage.internal.UpsertOutcome
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -446,6 +447,8 @@ class DocumentRepositoryTest {
         override fun listAll(): List<ScannableCard> = emptyList()
         override fun loadById(id: ScannableCardRecordId): ScannableCard? = null
         override fun insert(request: ScannableCardInsertRequest): ScannableCardInsertOutcome =
+            error("unused in document tests")
+        override fun update(id: ScannableCardRecordId, request: ScannableCardUpdateRequest): Boolean =
             error("unused in document tests")
         override fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome? = null
         override fun close() = Unit

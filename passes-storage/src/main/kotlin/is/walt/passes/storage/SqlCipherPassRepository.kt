@@ -15,6 +15,7 @@ import `is`.walt.passes.storage.internal.DocumentStore
 import `is`.walt.passes.storage.internal.PassStore
 import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
 import `is`.walt.passes.storage.internal.ScannableCardStore
+import `is`.walt.passes.storage.internal.ScannableCardUpdateRequest
 import `is`.walt.passes.storage.internal.SqlCipherDatabaseFactory
 import `is`.walt.passes.storage.internal.SqlCipherDocumentStore
 import `is`.walt.passes.storage.internal.SqlCipherPassStore
@@ -221,6 +222,58 @@ public class SqlCipherPassRepository internal constructor(
         }
         telemetryGuard.onScannableCardCreated(approved.format)
         StorageResult.Success(outcome.id)
+    }
+
+    override suspend fun updateScannableCard(
+        id: ScannableCardRecordId,
+        input: ScannableCardCreateInput,
+    ): StorageResult<Unit> = runIo {
+        // Validator does not consume the id or timestamp for validation logic; storage
+        // preserves the existing row's created_at_epoch_ms at the SQL layer, so the
+        // placeholders below never reach disk.
+        val validation = ScannableCardInputValidator.validate(
+            input = input,
+            id = ScannableCardId(id.value.toString()),
+            createdAt = PassInstant(clock()),
+        )
+        val approved = when (validation) {
+            is ScannableCardCreateResult.Success -> validation.card
+            is ScannableCardCreateResult.InvalidLabel ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.InvalidLabel(validation.reason),
+                    telemetryKind = ScannableCardRejectedKind.LabelInvalid,
+                )
+            is ScannableCardCreateResult.InvalidPayload ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.InvalidPayload(validation.reason),
+                    telemetryKind = ScannableCardRejectedKind.PayloadInvalid,
+                )
+            is ScannableCardCreateResult.UnsupportedFormat ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.UnsupportedFormat(validation.format),
+                    telemetryKind = ScannableCardRejectedKind.FormatUnsupported,
+                )
+            is ScannableCardCreateResult.EncoderFailure ->
+                return@runIo rejectScannableCard(
+                    ScannableCardRejectionReason.EncoderFailure(validation.reason),
+                    telemetryKind = ScannableCardRejectedKind.EncoderFailed,
+                )
+        }
+
+        val matched = writeMutex.withLock {
+            val ok = scannableCardStore.update(
+                id,
+                ScannableCardUpdateRequest(
+                    payload = approved.payload,
+                    format = approved.format,
+                    label = approved.label,
+                ),
+            )
+            if (ok) _scannableCards.value = scannableCardStore.listAll()
+            ok
+        }
+        if (!matched) return@runIo failure(StorageError.IntegrityViolation(id))
+        StorageResult.Success(Unit)
     }
 
     override suspend fun loadScannableCard(

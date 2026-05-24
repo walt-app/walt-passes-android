@@ -21,6 +21,13 @@ internal interface ScannableCardStore {
     fun listAll(): List<ScannableCard>
     fun loadById(id: ScannableCardRecordId): ScannableCard?
     fun insert(request: ScannableCardInsertRequest): ScannableCardInsertOutcome
+
+    /**
+     * Multi-column UPDATE on the scannable-cards row. Returns `true` if a row matched
+     * [id], `false` otherwise (caller maps to `IntegrityViolation`). `created_at_epoch_ms`
+     * is preserved so the row's position in `listAll()` does not move on update.
+     */
+    fun update(id: ScannableCardRecordId, request: ScannableCardUpdateRequest): Boolean
     fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome?
     fun close()
 }
@@ -35,6 +42,17 @@ internal data class ScannableCardInsertRequest(
     val format: ScannableFormat,
     val label: String,
     val nowEpochMs: Long,
+)
+
+/**
+ * Pre-validated request to overwrite a scannable card's mutable columns. Same payload
+ * shape as [ScannableCardInsertRequest] minus `nowEpochMs`: rename / re-edit is not a
+ * re-insert, so the row's `created_at_epoch_ms` is preserved.
+ */
+internal data class ScannableCardUpdateRequest(
+    val payload: String,
+    val format: ScannableFormat,
+    val label: String,
 )
 
 internal data class ScannableCardInsertOutcome(

@@ -21,6 +21,7 @@ import `is`.walt.passes.storage.internal.ScannableCardDeleteOutcome
 import `is`.walt.passes.storage.internal.ScannableCardInsertOutcome
 import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
 import `is`.walt.passes.storage.internal.ScannableCardStore
+import `is`.walt.passes.storage.internal.ScannableCardUpdateRequest
 import `is`.walt.passes.storage.internal.UpsertOutcome
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
@@ -57,6 +58,13 @@ import org.robolectric.annotation.Config
  *     validator) and re-mints the [ScannableCardId] as the stringified row id.
  *  8. `close()` releases the scannable-card store along with the pass and document
  *     stores; the call is idempotent.
+ *  9. `updateScannableCard` re-runs the validator before any write, re-emits the
+ *     observe flow on success, emits no success telemetry, and shares the
+ *     `onScannableCardRejected` channel with `createScannableCard` on rejection.
+ * 10. `updateScannableCard` of an unknown id returns [StorageError.IntegrityViolation]
+ *     when the input passed validation; an invalid input against an unknown id
+ *     surfaces as [StorageError.ScannableCardRejected] (validation precedes the row
+ *     lookup, mirroring `updateDocumentLabel`).
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -186,6 +194,169 @@ class ScannableCardRepositoryTest {
     }
 
     @Test
+    fun updateReplacesFieldsPreservesRowPositionAndEmitsNoSuccessTelemetry() = runTest {
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val seed = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = "5012345678900",
+                format = ScannableFormat.Ean13,
+                label = "old",
+            ),
+        )
+        check(seed is StorageResult.Success)
+        val id = seed.value
+
+        val result = repo.updateScannableCard(
+            id,
+            ScannableCardCreateInput(
+                payload = "HELLO WORLD",
+                format = ScannableFormat.Code128,
+                label = "new",
+            ),
+        )
+
+        check(result is StorageResult.Success)
+        val rows = repo.observeScannableCards().first()
+        assertThat(rows).hasSize(1)
+        assertThat(rows[0].id.value).isEqualTo(id.value.toString())
+        assertThat(rows[0].payload).isEqualTo("HELLO WORLD")
+        assertThat(rows[0].format).isEqualTo(ScannableFormat.Code128)
+        assertThat(rows[0].label).isEqualTo("new")
+        // Update emits no telemetry: nothing follows the original card-created event.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-created:Ean13",
+        ).inOrder()
+    }
+
+    @Test
+    fun updateOfUnknownIdWithValidInputReturnsIntegrityViolation() = runTest {
+        val telemetry = RecordingGuard()
+        val repo = repo(FakeScannableCardStore(), telemetry)
+
+        val result = repo.updateScannableCard(
+            ScannableCardRecordId(404L),
+            ScannableCardCreateInput(
+                payload = "5012345678900",
+                format = ScannableFormat.Ean13,
+                label = "Grocery",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val violation = result.error as StorageError.IntegrityViolation
+        check(violation.recordId is ScannableCardRecordId)
+        assertThat(violation.recordId.value).isEqualTo(404L)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "failure:IntegrityViolation:n/a",
+        ).inOrder()
+    }
+
+    @Test
+    fun updateWithControlCharInPayloadIsRejectedAndStoredRowIsUnchanged() = runTest {
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val seed = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = "5012345678900",
+                format = ScannableFormat.Ean13,
+                label = "seed",
+            ),
+        )
+        check(seed is StorageResult.Success)
+
+        val result = repo.updateScannableCard(
+            seed.value,
+            ScannableCardCreateInput(
+                payload = "abcdef", // bell character — Cc category
+                format = ScannableFormat.Code128,
+                label = "new",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        check(rejected.reason is ScannableCardRejectionReason.InvalidPayload)
+        // Same telemetry channel as createScannableCard rejections; no `failure:...`.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-created:Ean13",
+            "card-rejected:PayloadInvalid",
+        ).inOrder()
+        // Stored row was not overwritten by the rejected update.
+        val rows = repo.observeScannableCards().first()
+        assertThat(rows).hasSize(1)
+        assertThat(rows[0].payload).isEqualTo("5012345678900")
+        assertThat(rows[0].label).isEqualTo("seed")
+    }
+
+    @Test
+    fun updateWithEmptyLabelIsRejectedWithTypedReason() = runTest {
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val seed = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = "5012345678900",
+                format = ScannableFormat.Ean13,
+                label = "seed",
+            ),
+        )
+        check(seed is StorageResult.Success)
+
+        val result = repo.updateScannableCard(
+            seed.value,
+            ScannableCardCreateInput(
+                payload = "5012345678900",
+                format = ScannableFormat.Ean13,
+                label = "   ", // whitespace-only, trims to empty
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        check(rejected.reason is ScannableCardRejectionReason.InvalidLabel)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-created:Ean13",
+            "card-rejected:LabelInvalid",
+        ).inOrder()
+    }
+
+    @Test
+    fun updateOfUnknownIdWithInvalidInputPrefersRejectionOverIntegrityViolation() = runTest {
+        // Validation runs before the row is loaded; an invalid input against an unknown
+        // id surfaces as ScannableCardRejected, mirroring updateDocumentLabel's
+        // label-cap-before-load precedence.
+        val telemetry = RecordingGuard()
+        val repo = repo(FakeScannableCardStore(), telemetry)
+
+        val result = repo.updateScannableCard(
+            ScannableCardRecordId(999L),
+            ScannableCardCreateInput(
+                payload = "abcdef", // bell character — Cc category
+                format = ScannableFormat.Code128,
+                label = "x",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        check(rejected.reason is ScannableCardRejectionReason.InvalidPayload)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-rejected:PayloadInvalid",
+        ).inOrder()
+    }
+
+    @Test
     fun loadRoundTripsStoredFields() = runTest {
         val cards = FakeScannableCardStore()
         val repo = repo(cards, RecordingGuard())
@@ -281,6 +452,17 @@ class ScannableCardRepositoryTest {
                 createdAtEpochMs = request.nowEpochMs,
             )
             return ScannableCardInsertOutcome(id = ScannableCardRecordId(rowId))
+        }
+
+        override fun update(id: ScannableCardRecordId, request: ScannableCardUpdateRequest): Boolean {
+            val row = rows[id.value] ?: return false
+            // createdAtEpochMs is preserved so the row's position in listAll() is unchanged.
+            rows[id.value] = row.copy(
+                payload = request.payload,
+                format = request.format,
+                label = request.label,
+            )
+            return true
         }
 
         override fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome? {

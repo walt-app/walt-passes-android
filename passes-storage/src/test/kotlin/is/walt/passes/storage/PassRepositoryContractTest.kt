@@ -29,6 +29,7 @@ import `is`.walt.passes.storage.internal.ScannableCardDeleteOutcome
 import `is`.walt.passes.storage.internal.ScannableCardInsertOutcome
 import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
 import `is`.walt.passes.storage.internal.ScannableCardStore
+import `is`.walt.passes.storage.internal.ScannableCardUpdateRequest
 import `is`.walt.passes.storage.internal.UpsertOutcome
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -339,6 +340,8 @@ class PassRepositoryContractTest {
         override fun listAll(): List<ScannableCard> = emptyList()
         override fun loadById(id: ScannableCardRecordId): ScannableCard? = null
         override fun insert(request: ScannableCardInsertRequest): ScannableCardInsertOutcome =
+            error("unused in pass-side tests")
+        override fun update(id: ScannableCardRecordId, request: ScannableCardUpdateRequest): Boolean =
             error("unused in pass-side tests")
         override fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome? = null
         override fun close() = Unit

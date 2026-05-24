@@ -102,11 +102,13 @@ public interface StorageTelemetryGuard {
     public fun onScannableCardDeleted(format: ScannableFormat)
 
     /**
-     * A scannable-card insert was refused by the kernel validator. Emitted before any
-     * row is created. The structural [kind] is what flows through telemetry; the
-     * underlying kernel rejection reason is preserved on the typed
-     * [StorageError.ScannableCardRejected] for the consumer's error UI but is NOT
-     * carried here (it would re-link telemetry to user input — bidi-marker offsets,
+     * A scannable-card write was refused by the kernel validator. Fires for both
+     * [PassRepository.createScannableCard] and [PassRepository.updateScannableCard]:
+     * aggregate counts blend the two paths. Emitted before any row is created or
+     * modified; storage state is unchanged on rejection. The structural [kind] is what
+     * flows through telemetry; the underlying kernel rejection reason is preserved on
+     * the typed [StorageError.ScannableCardRejected] for the consumer's error UI but is
+     * NOT carried here (it would re-link telemetry to user input — bidi-marker offsets,
      * offending characters, etc.).
      */
     public fun onScannableCardRejected(kind: ScannableCardRejectedKind)
