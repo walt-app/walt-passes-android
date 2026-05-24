@@ -73,6 +73,17 @@ internal class SqlCipherDocumentStore(
         }
     }
 
+    override fun updateLabel(id: DocumentRecordId, label: String): Boolean {
+        val cv = ContentValues().apply { put("display_label", label) }
+        val rows = db.update(
+            Schema.Tables.DOCUMENTS,
+            cv,
+            "id = ?",
+            arrayOf(id.value.toString()),
+        )
+        return rows > 0
+    }
+
     override fun loadBytes(id: DocumentRecordId): ByteArray? = db.rawQuery(
         "SELECT pdf_bytes FROM ${Schema.Tables.DOCUMENTS} WHERE id = ?",
         arrayOf(id.value.toString()),

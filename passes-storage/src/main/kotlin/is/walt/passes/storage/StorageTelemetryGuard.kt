@@ -74,8 +74,11 @@ public interface StorageTelemetryGuard {
     public fun onDocumentImported(event: DocumentImportedEvent)
 
     /**
-     * A document insertion was rejected by the storage-side defense-in-depth check
-     * (ADR 0005 D7). Emitted before the row is created. The row never reaches disk.
+     * A document write was rejected by the storage-side defense-in-depth check
+     * (ADR 0005 D7). Fires for both [PassRepository.insertDocument] and
+     * [PassRepository.updateDocumentLabel]: aggregate counts blend the two paths.
+     * Emitted before any row is created or modified; storage state is unchanged on
+     * rejection.
      */
     public fun onDocumentRejected(kind: DocumentStorageRejectedKind)
 

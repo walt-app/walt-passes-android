@@ -16,6 +16,9 @@ import kotlinx.coroutines.flow.StateFlow
  * All trust-claim-bearing storage logic lives behind this interface: encryption-at-rest,
  * backup exclusion, irreversible deletion, decoded summary maintenance.
  */
+// TooManyFunctions: scales with the per-tier surface (pass, document, scannable-card).
+// Splitting would scatter the one-stop consumer contract walt-android binds against.
+@Suppress("TooManyFunctions")
 public interface PassRepository {
     /**
      * Hot list of pass summaries, sorted by `created_at_epoch_ms` descending. Backed by the
@@ -87,10 +90,30 @@ public interface PassRepository {
     ): StorageResult<DocumentRecordId>
 
     /**
+     * Updates the display label of an existing document row. Mirrors [insertDocument]'s
+     * label cap: rejects labels longer than [DocumentBounds.MAX_LABEL_CHARS] with
+     * [StorageError.DocumentRejected] carrying
+     * [DocumentStorageRejectedKind.LabelTooLongAtStorage], and no row is touched. The cap
+     * is checked before the row is loaded, so an over-long label against an unknown
+     * [id] surfaces as [StorageError.DocumentRejected], not
+     * [StorageError.IntegrityViolation]. Empty and blank labels are accepted, matching
+     * [insertDocument]'s behavior.
+     *
+     * Returns [StorageError.IntegrityViolation] if no row matches [id] (and the label
+     * passed the cap). On success, the row's `imported_at_epoch_ms` is unchanged
+     * (rename is not a re-import), so the row's position in [observeDocuments] is
+     * preserved.
+     */
+    public suspend fun updateDocumentLabel(
+        id: DocumentRecordId,
+        label: String,
+    ): StorageResult<Unit>
+
+    /**
      * Cold flow of document list-view rows, sorted by `imported_at_epoch_ms` descending.
-     * Emits the current snapshot on collect and re-emits when documents are inserted or
-     * deleted. The PDF and thumbnail blobs are NOT loaded by this flow; consumers fetch
-     * them with [loadDocumentBytes] / [loadDocumentThumbnail] on demand.
+     * Emits the current snapshot on collect and re-emits when documents are inserted,
+     * relabeled, or deleted. The PDF and thumbnail blobs are NOT loaded by this flow;
+     * consumers fetch them with [loadDocumentBytes] / [loadDocumentThumbnail] on demand.
      */
     public fun observeDocuments(): Flow<List<DocumentRow>>
 
