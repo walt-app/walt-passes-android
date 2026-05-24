@@ -3,6 +3,7 @@ package `is`.walt.passes.pdf.android
 import android.app.Service
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
 import android.os.IBinder
@@ -144,6 +145,11 @@ private fun rasterise(
 ): RenderResult.Ok {
     val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
     try {
+        // PdfRenderer.Page.render() draws PDF content on top of existing pixels without
+        // clearing them. Pages that rely on the implicit white page background otherwise
+        // rasterise as content-on-transparent and compose against the host's dark surface,
+        // hiding white-on-page artwork (GitHub #92: QR codes vanish in dark mode).
+        bitmap.eraseColor(Color.WHITE)
         val transform = matrixFor(sourceRect, p.width, p.height, widthPx, heightPx)
         p.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
         val pageAspect = p.width.toFloat() / p.height.toFloat()
