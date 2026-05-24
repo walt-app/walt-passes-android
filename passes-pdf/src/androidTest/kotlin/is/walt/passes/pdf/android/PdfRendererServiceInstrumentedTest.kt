@@ -52,4 +52,14 @@ class PdfRendererServiceInstrumentedTest {
     fun elevenPagePdfRejectsAtProbe() {
         // bind, probe 11-page PDF, expect ProbeResult.Rejected(TooManyPages).
     }
+
+    @Test
+    @Ignore("Pending fixture set + on-device CI wiring (wpass-5v9 follow-up)")
+    fun pageBackgroundRasterisesWhiteNotTransparent() {
+        // bind, send a PDF whose page draws only a small centred glyph on the implicit
+        // white background, render(0, 800, 1200), reconstruct ARGB_8888 bitmap from
+        // SharedMemory, assert corner pixels == Color.WHITE (not transparent / not
+        // ColorScheme.background). Regression for GitHub #92: QR codes were invisible
+        // in dark mode because the renderer left the page background transparent.
+    }
 }
