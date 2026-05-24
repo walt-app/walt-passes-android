@@ -3,10 +3,16 @@ package `is`.walt.passes.ui
 import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
@@ -14,12 +20,15 @@ import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.BarcodeEncoder
 import `is`.walt.passes.core.BarcodeMatrix
 import `is`.walt.passes.core.EncodeResult
 import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableFormat
+import `is`.walt.passes.ui.core.isolated
 
 /**
  * Renders [card]'s barcode through [BarcodeEncoder] as a 1-bit-per-module bitmap.
@@ -41,14 +50,21 @@ import `is`.walt.passes.core.ScannableFormat
  * `contentDescription` rather than throwing. Card chrome (background tint, label,
  * "Created by you" trust caption) belongs on the surrounding tile (wpass-lzi.8) so
  * this surface can be reused as the full-screen scan view unchanged.
+ *
+ * When [showPayloadCaption] is true the encoded payload is rendered as a monospace,
+ * user-selectable caption beneath the barcode — fallback for when a point-of-sale
+ * scanner cannot read the code (GH issue #102). The caption is FSI/PDI isolated as
+ * defense-in-depth on top of the create-boundary Cf/Cc rejection (C3 in
+ * `docs/SCANNABLE_CARD_THREAT_MODEL.md`). Default false; only [ScannableCardScreen]
+ * opts in. The tile / row registers keep it off because their identification-sized
+ * preview leaves no room for a legible caption.
  */
 @Composable
 public fun ScannableCardView(
     card: ScannableCard,
     modifier: Modifier = Modifier,
+    showPayloadCaption: Boolean = false,
 ) {
-    val (minWidthDp, minHeightDp) = card.format.minRenderSizeDp()
-
     val bitmap = remember(card.payload, card.format) {
         when (val result = BarcodeEncoder.encode(card.payload, card.format)) {
             is EncodeResult.Success -> result.matrix.toMonochromeBitmap()
@@ -56,14 +72,47 @@ public fun ScannableCardView(
         }
     }
 
+    if (!showPayloadCaption) {
+        BarcodeImage(card.format, bitmap, imageDescription = card.label, modifier = modifier)
+    } else {
+        Column(
+            modifier = modifier,
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(CAPTION_GAP),
+        ) {
+            // Drop the image's contentDescription so TalkBack reads the caption,
+            // not the duplicate label. clearAndSetSemantics would dedupe too but
+            // would zap the caption.
+            BarcodeImage(card.format, bitmap, imageDescription = null, modifier = Modifier)
+            SelectionContainer {
+                Text(
+                    text = isolated(card.payload),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontFamily = FontFamily.Monospace,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BarcodeImage(
+    format: ScannableFormat,
+    bitmap: Bitmap?,
+    imageDescription: String?,
+    modifier: Modifier,
+) {
+    val (minWidthDp, minHeightDp) = format.minRenderSizeDp()
     if (bitmap != null) {
         Image(
             painter = BitmapPainter(
                 image = bitmap.asImageBitmap(),
                 filterQuality = FilterQuality.None,
             ),
-            contentDescription = card.label,
-            contentScale = card.format.contentScale(),
+            contentDescription = imageDescription,
+            contentScale = format.contentScale(),
             modifier = modifier.defaultMinSize(
                 minWidth = minWidthDp.dp,
                 minHeight = minHeightDp.dp,
@@ -115,3 +164,5 @@ private fun BarcodeMatrix.toMonochromeBitmap(): Bitmap {
     }
     return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
 }
+
+private val CAPTION_GAP = 12.dp

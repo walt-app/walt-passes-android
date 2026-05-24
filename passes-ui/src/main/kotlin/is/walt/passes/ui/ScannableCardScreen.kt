@@ -11,7 +11,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,12 +62,11 @@ public fun ScannableCardScreen(
                 .padding(24.dp),
             contentAlignment = Alignment.Center,
         ) {
-            // clearAndSetSemantics drops the barcode's standalone contentDescription
-            // (which is `card.label`) so TalkBack does not announce the label twice —
-            // the title Text above already speaks it.
+            // POS-scan fallback for GH #102; only the detail surface is large
+            // enough. A11y rationale lives on ScannableCardView.
             ScannableCardView(
                 card = card,
-                modifier = Modifier.clearAndSetSemantics {},
+                showPayloadCaption = true,
             )
         }
 

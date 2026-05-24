@@ -20,6 +20,8 @@ import `is`.walt.passes.core.ScannableCardCreateResult
 import `is`.walt.passes.core.ScannableCardId
 import `is`.walt.passes.core.ScannableCardInputValidator
 import `is`.walt.passes.core.ScannableFormat
+import kotlin.reflect.full.primaryConstructor
+import kotlin.reflect.jvm.isAccessible
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
 import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
@@ -280,6 +282,70 @@ class ScannableCardTrustSurfaceTest {
     }
 
     @Test
+    fun fullScreenRendersPayloadCaptionVerbatim() {
+        // GH #102: the encoded payload is displayed below the barcode as a
+        // human-readable fallback for a failed POS scanner. The caption is FSI/PDI
+        // isolated as defense-in-depth on the create-boundary Cf/Cc rejection (C3
+        // in SCANNABLE_CARD_THREAT_MODEL.md); assert the isolated form so a
+        // regression that dropped the bidi fence would fail this test.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(card = qrFixture(label = "Library card"))
+            }
+        }
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun fullScreenRendersPayloadCaptionForOneDimensionalFormat() {
+        // Both encoder paths (QR and 1D) must reach the caption — the POS-scanner
+        // fallback case is more common for 1D loyalty cards than for QR.
+        composeRule.setContent {
+            ThemedHost { ScannableCardScreen(card = code128Fixture()) }
+        }
+        composeRule.onNodeWithText("⁨ABCDE12345⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun tileDoesNotRenderPayloadCaption() {
+        // The carousel tile is identification-only; rendering the payload below
+        // its small preview would crowd the chrome and is not the surface the
+        // GH #102 fallback targets. Default-off behaviour pinned here so the
+        // caption stays scoped to the detail surface.
+        composeRule.setContent {
+            ThemedHost { ScannableCardTile(card = qrFixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertDoesNotExist()
+    }
+
+    @Test
+    fun fullScreenRendersPayloadCaptionEvenWhenEncoderFails() {
+        // GH #102's whole point is that the user can fall back to reading the
+        // number aloud when the *scanner* fails. The kernel-internal mirror of
+        // that is: when the *encoder* fails (the validator-bypassed defensive
+        // path inside ScannableCardView), the caption must still render — a user
+        // with an unrenderable barcode can still read their payload. An 11-digit
+        // EAN-13 trips ZxingBarcodeEncoder (see BarcodeEncoderTest's
+        // ean13RejectsWrongLengthAtWriter) but is rejected upstream by the
+        // validator; construct the card via the internal constructor so the
+        // encoder-failure UI path is exercised end-to-end.
+        composeRule.setContent {
+            ThemedHost { ScannableCardScreen(card = encoderRejectedEan13Fixture()) }
+        }
+        composeRule.onNodeWithText("⁨12345678901⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun rowTileDoesNotRenderPayloadCaption() {
+        // The wallet-row register is the smallest surface of the three; same
+        // default-off rationale as the carousel tile.
+        composeRule.setContent {
+            ThemedHost { ScannableCardRowTile(card = qrFixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertDoesNotExist()
+    }
+
+    @Test
     fun rowTileLeadingSlotWithoutContentDescriptionDoesNotPolluteMergedSemantics() {
         // The slot lives inside the row's mergeDescendants block. The kernel-built
         // contentDescription on the merged node replaces (not appends to) descendant
@@ -335,5 +401,39 @@ class ScannableCardTrustSurfaceTest {
             createdAt = PassInstant(0L),
         )
         return (result as ScannableCardCreateResult.Success).card
+    }
+
+    /**
+     * Bypasses [ScannableCardInputValidator] so the test can hand
+     * [ScannableCardView] a payload that ZXing's writer rejects. The validator
+     * exists precisely to prevent this state in production, so the only way to
+     * reach the encoder-failure UI branch from a unit test is to invoke the
+     * type's internal constructor directly via kotlin-reflect. Limit usage to
+     * tests that need to assert behaviour of that defensive path.
+     *
+     * Bound by parameter name via `callBy` rather than positional `call`: a
+     * future add / remove / reorder of a primary-constructor parameter surfaces
+     * as a clear missing-key failure at test time, not a same-typed-field swap
+     * that quietly tests the wrong assertion.
+     */
+    private fun encoderRejectedEan13Fixture(): ScannableCard {
+        val ctor = requireNotNull(ScannableCard::class.primaryConstructor) {
+            "ScannableCard has no primary constructor"
+        }
+        ctor.isAccessible = true
+        val args = mapOf(
+            "id" to ScannableCardId("test"),
+            "payload" to "12345678901",
+            "format" to ScannableFormat.Ean13,
+            "label" to "Library card",
+            "createdAt" to PassInstant(0L),
+        )
+        val byName = ctor.parameters.associateBy { it.name }
+        val missing = args.keys - byName.keys
+        require(missing.isEmpty()) {
+            "ScannableCard primary constructor drifted; unknown params: $missing. " +
+                "Update encoderRejectedEan13Fixture before changing the data class."
+        }
+        return ctor.callBy(args.mapKeys { (name, _) -> byName.getValue(name) })
     }
 }
