@@ -464,6 +464,10 @@ class DocumentRepositoryTest {
             nowEpochMs: Long,
         ): UpsertOutcome = error("unused in document tests")
         override fun delete(id: PassRecordId): DeleteOutcome? = null
+        override fun updateUserLabel(
+            id: PassRecordId,
+            label: String?,
+        ): `is`.walt.passes.storage.internal.UpdateUserLabelOutcome? = null
         override fun close() = Unit
     }
 
@@ -500,5 +504,11 @@ class DocumentRepositoryTest {
         override fun onScannableCardCreated(format: ScannableFormat) = Unit
         override fun onScannableCardDeleted(format: ScannableFormat) = Unit
         override fun onScannableCardRejected(kind: ScannableCardRejectedKind) = Unit
+        override fun onUserLabelUpdated(
+            type: `is`.walt.passes.core.PassType,
+            hadPriorLabel: Boolean,
+            clearing: Boolean,
+        ) = Unit
+        override fun onPassRejected(kind: PassUpdateRejectedKind) = Unit
     }
 }

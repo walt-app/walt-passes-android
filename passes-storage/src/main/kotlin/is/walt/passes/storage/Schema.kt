@@ -14,7 +14,7 @@ package `is`.walt.passes.storage
 public object Schema {
     public const val DATABASE_NAME: String = "walt_passes.db"
 
-    public const val VERSION: Int = 4
+    public const val VERSION: Int = 5
 
     public object Tables {
         public const val SCHEMA_META: String = "schema_meta"
@@ -73,6 +73,16 @@ public object Schema {
         """.trimIndent(),
         "CREATE INDEX IF NOT EXISTS idx_scannable_cards_created_at " +
             "ON scannable_cards(created_at_epoch_ms)",
+    )
+
+    /**
+     * v4 -> v5 migration. Adds the nullable `user_label` column to the `passes` table for
+     * the side-channel rename override (ADR 0007 D1). NULL = no override; existing rows
+     * default to NULL so the post-migration shape preserves pre-migration display
+     * behavior. No data transformation; no row can fail the migration.
+     */
+    private val V4_TO_V5_ADD_USER_LABEL: List<String> = listOf(
+        "ALTER TABLE passes ADD COLUMN user_label TEXT",
     )
 
     /**
@@ -156,7 +166,8 @@ public object Schema {
             signature_status_kind TEXT    NOT NULL,
             pass_json             BLOB    NOT NULL,
             created_at_epoch_ms   INTEGER NOT NULL,
-            updated_at_epoch_ms   INTEGER NOT NULL
+            updated_at_epoch_ms   INTEGER NOT NULL,
+            user_label            TEXT
         )
         """.trimIndent(),
         "CREATE INDEX IF NOT EXISTS idx_passes_type ON passes(type)",
@@ -199,10 +210,15 @@ public object Schema {
      * consumer no longer reads or writes the field (walt-android `wlt-z17`); the
      * column was dormant user-private data on disk. Row identity is preserved; per-row
      * colour bytes are lost, which is intentional — Walt already stopped reading them.
+     *
+     * v4 -> v5 adds the nullable `user_label` column to `passes` for the side-channel
+     * rename override (ADR 0007). Pure additive change; existing rows default to NULL
+     * (no override) so display behavior is unchanged for pre-migration data.
      */
     public val MIGRATIONS: Map<Int, List<String>> = mapOf(
         1 to V2_DOCUMENT_TABLES,
         2 to V3_SCANNABLE_CARD_TABLES,
         3 to V3_TO_V4_DROP_COLOR_COLUMN,
+        4 to V4_TO_V5_ADD_USER_LABEL,
     )
 }

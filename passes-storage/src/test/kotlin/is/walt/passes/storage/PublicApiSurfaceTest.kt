@@ -48,6 +48,7 @@ class PublicApiSurfaceTest {
             StorageError.ScannableCardRejected(
                 ScannableCardRejectionReason.InvalidLabel(LabelRejection.Empty),
             ),
+            StorageError.PassRejected(PassUpdateRejectedKind.LabelTooLong),
         )
         val labels = errors.map { error ->
             when (error) {
@@ -72,6 +73,7 @@ class PublicApiSurfaceTest {
                     is ScannableCardRejectionReason.EncoderFailure ->
                         "card-rejected:enc:${r.reason::class.simpleName}"
                 }
+                is StorageError.PassRejected -> "pass-rejected:${error.kind.name}"
             }
         }
         assertThat(labels).containsExactly(
@@ -85,6 +87,7 @@ class PublicApiSurfaceTest {
             "unknown:DiskFull",
             "doc-rejected:OversizedAtStorage",
             "card-rejected:label:Empty",
+            "pass-rejected:LabelTooLong",
         ).inOrder()
     }
 
@@ -151,6 +154,7 @@ class PublicApiSurfaceTest {
             StorageError.ScannableCardRejected(
                 ScannableCardRejectionReason.InvalidPayload(PayloadRejection.Empty),
             ),
+            StorageError.PassRejected(PassUpdateRejectedKind.LabelTooLong),
         )
         val kinds = errors.map { error ->
             when (error) {
@@ -162,6 +166,7 @@ class PublicApiSurfaceTest {
                 is StorageError.Unknown -> StorageFailureKind.Unknown
                 is StorageError.DocumentRejected -> StorageFailureKind.DocumentRejected
                 is StorageError.ScannableCardRejected -> StorageFailureKind.ScannableCardRejected
+                is StorageError.PassRejected -> StorageFailureKind.PassRejected
             }
         }
         assertThat(kinds.toSet()).containsExactlyElementsIn(StorageFailureKind.entries)
@@ -188,8 +193,18 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun schemaDeclaresSevenTablesAndIsAtVersionFour() {
-        assertThat(Schema.VERSION).isEqualTo(4)
+    fun passUpdateRejectedKindCoversTheDocumentedArms() {
+        // ADR 0007 D2: today there is one arm (LabelTooLong). Adding new caps (e.g.
+        // illegal-character filters) requires a new arm here, which forces a deliberate
+        // edit and a matching change in StorageError.PassRejected handling.
+        assertThat(PassUpdateRejectedKind.entries.map { it.name }).containsExactly(
+            "LabelTooLong",
+        ).inOrder()
+    }
+
+    @Test
+    fun schemaDeclaresSevenTablesAndIsAtVersionFive() {
+        assertThat(Schema.VERSION).isEqualTo(5)
         assertThat(Schema.Tables.SCHEMA_META).isEqualTo("schema_meta")
         assertThat(Schema.Tables.PASSES).isEqualTo("passes")
         assertThat(Schema.Tables.PASS_IMAGES).isEqualTo("pass_images")
@@ -202,7 +217,7 @@ class PublicApiSurfaceTest {
         // + scannable_cards (v4 shape, no color_argb) + 1 scannable-card index
         // = 12 statements.
         assertThat(Schema.DDL).hasSize(12)
-        assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2, 3)
+        assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2, 3, 4)
     }
 
     @Test
@@ -401,6 +416,18 @@ class PublicApiSurfaceTest {
             override fun onScannableCardRejected(kind: ScannableCardRejectedKind) {
                 recorded += "card-rejected:${kind.name}"
             }
+
+            override fun onUserLabelUpdated(
+                type: PassType,
+                hadPriorLabel: Boolean,
+                clearing: Boolean,
+            ) {
+                recorded += "userlabel:${type.name}:prior=$hadPriorLabel:clearing=$clearing"
+            }
+
+            override fun onPassRejected(kind: PassUpdateRejectedKind) {
+                recorded += "pass-rejected:${kind.name}"
+            }
         }
         guard.onKeyProviderInitialized(KeyBacking.StrongBox)
         guard.onPassUpserted(PassType.BoardingPass, SignatureStatusKind.AppleVerified, false)
@@ -413,6 +440,8 @@ class PublicApiSurfaceTest {
         guard.onScannableCardCreated(ScannableFormat.Qr)
         guard.onScannableCardDeleted(ScannableFormat.Code128)
         guard.onScannableCardRejected(ScannableCardRejectedKind.PayloadInvalid)
+        guard.onUserLabelUpdated(PassType.Generic, hadPriorLabel = false, clearing = false)
+        guard.onPassRejected(PassUpdateRejectedKind.LabelTooLong)
 
         assertThat(recorded).containsExactly(
             "init:StrongBox",
@@ -426,6 +455,8 @@ class PublicApiSurfaceTest {
             "card-created:Qr",
             "card-deleted:Code128",
             "card-rejected:PayloadInvalid",
+            "userlabel:Generic:prior=false:clearing=false",
+            "pass-rejected:LabelTooLong",
         ).inOrder()
     }
 

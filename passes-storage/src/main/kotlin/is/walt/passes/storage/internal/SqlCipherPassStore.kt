@@ -74,6 +74,7 @@ internal class SqlCipherPassStore(
             signatureStatus = summary.signatureStatus,
             createdAt = summary.createdAt,
             updatedAt = summary.updatedAt,
+            userLabel = summary.userLabel,
         )
     }
 
@@ -198,6 +199,34 @@ internal class SqlCipherPassStore(
         return DeleteOutcome(summary)
     }
 
+    @Suppress("ReturnCount")
+    override fun updateUserLabel(id: PassRecordId, label: String?): UpdateUserLabelOutcome? {
+        // Read the prior summary before the UPDATE so `hadPriorLabel` reflects the row's
+        // state at call time. The post-UPDATE summary is what flows into the StateFlow.
+        // The three returns correspond to the three reachable "row is gone" arms (no
+        // prior, UPDATE matched zero rows, post-update re-read missed); collapsing them
+        // would hide the distinct race windows.
+        val prior = summaryById(id) ?: return null
+        val hadPriorLabel = prior.userLabel != null
+
+        val cv = ContentValues().apply {
+            if (label == null) putNull("user_label") else put("user_label", label)
+        }
+        // updated_at_epoch_ms is intentionally NOT touched (ADR 0007 D3): rename is
+        // metadata, not a canonical-payload mutation. Same posture as updateDocumentLabel
+        // ("rename is not a re-import") and updateScannableCard ("edit is not a re-insert").
+        val rows = db.update(
+            Schema.Tables.PASSES,
+            cv,
+            "id = ?",
+            arrayOf(id.value.toString()),
+        )
+        if (rows == 0) return null
+
+        val updated = summaryById(id) ?: return null
+        return UpdateUserLabelOutcome(summary = updated, hadPriorLabel = hadPriorLabel)
+    }
+
     override fun close() {
         // Close the SQLiteDatabase first, THEN zero the key buffer. The connection
         // pool may re-key connections during shutdown; zeroing first would corrupt
@@ -266,6 +295,8 @@ internal class SqlCipherPassStore(
                 telemetryGuard.onMigrationRowDropped(MigrationFailureKind.UnknownEnumValue)
                 return null
             }
+        val userLabelIdx = getColumnIndexOrThrow("user_label")
+        val userLabel = if (isNull(userLabelIdx)) null else getString(userLabelIdx)
         return PassSummary(
             id = PassRecordId(getLong(idIdx)),
             type = type,
@@ -277,6 +308,7 @@ internal class SqlCipherPassStore(
             signatureStatus = signatureStatus,
             createdAt = PassInstant(getLong(createdIdx)),
             updatedAt = PassInstant(getLong(updatedIdx)),
+            userLabel = userLabel,
         )
     }
 
@@ -284,6 +316,6 @@ internal class SqlCipherPassStore(
         const val SUMMARY_COLUMNS: String =
             "id, type, serial_number, organization_name, description, " +
                 "expiration_epoch_ms, voided, signature_status_kind, " +
-                "created_at_epoch_ms, updated_at_epoch_ms"
+                "created_at_epoch_ms, updated_at_epoch_ms, user_label"
     }
 }

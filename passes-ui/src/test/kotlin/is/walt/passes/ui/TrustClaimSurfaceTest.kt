@@ -671,6 +671,99 @@ class TrustClaimSurfaceTest {
     // Document-surface trust assertions (caption, tile bidi-isolation, lane wiring)
     // moved to passes-pdf-ui::DocumentTrustSurfaceTest with the composables (wpass-r4z).
 
+    // wpass-7xa / ADR 0007 D5+D6: PassIdentityBlock is the canonical renderer of the
+    // user-label trust-caption rule. The cases below lock the documented render paths.
+
+    @Test
+    fun passIdentityBlockNullOverrideShowsSignedOrgNameAlone() {
+        composeRule.setContent {
+            ThemedHost {
+                PassIdentityBlock(pass = passFixture(), userLabel = null)
+            }
+        }
+        composeRule.onNodeWithText("Acme").assertIsDisplayed()
+        // No override → no second line. Exactly one node carries the org name.
+        val nodes = composeRule.onAllNodesWithText("Acme", substring = false)
+            .fetchSemanticsNodes()
+        assertThat(nodes).hasSize(1)
+    }
+
+    @Test
+    fun passIdentityBlockOverrideShowsBothUserLabelAndSignedOrgName() {
+        // The load-bearing trust-caption case: a user-renamed pass still surfaces the
+        // signed organizationName as a sub-line eyebrow so the issuer identity is not
+        // hidden. Both lines on the same surface.
+        composeRule.setContent {
+            ThemedHost {
+                PassIdentityBlock(
+                    pass = passFixture(),
+                    userLabel = "Mom's flight home",
+                )
+            }
+        }
+        composeRule.onNodeWithText("Mom's flight home").assertIsDisplayed()
+        composeRule.onNodeWithText("Acme").assertIsDisplayed()
+    }
+
+    @Test
+    fun passIdentityBlockOverrideEqualToOrgNameSuppressesRedundantEyebrow() {
+        // ADR 0007 D5 edge case: case-insensitive equality between override and signed
+        // org name collapses to a single line. The trust rule is satisfied trivially
+        // because the primary identity already IS the signed identity.
+        composeRule.setContent {
+            ThemedHost {
+                PassIdentityBlock(pass = passFixture(), userLabel = "ACME")
+            }
+        }
+        // "Acme" appears exactly once — the displayed signed org, not a duplicate.
+        val nodes = composeRule.onAllNodesWithText("Acme", substring = false)
+            .fetchSemanticsNodes()
+        assertThat(nodes).hasSize(1)
+    }
+
+    @Test
+    fun passIdentityBlockSubstitutesOrgNameThroughLocalizedStrings() {
+        // Per PassFront's pass.strings discipline (wpass-38y) the eyebrow MUST
+        // substitute organizationName through the pass.strings table. PassIdentityBlock
+        // owns its own substitution so the rule holds in walt-android tile contexts
+        // that have no surrounding LocalLocalizedStrings provider.
+        composeRule.setContent {
+            ThemedHost {
+                PassIdentityBlock(
+                    pass = localizedFixture(
+                        organizationName = "#ORGNAME#",
+                        backFields = emptyList(),
+                    ),
+                    userLabel = "Mom's flight",
+                )
+            }
+        }
+        composeRule.onNodeWithText("Mom's flight").assertIsDisplayed()
+        composeRule.onNodeWithText("Tixly").assertIsDisplayed()
+    }
+
+    @Test
+    fun passFrontUserLabelParameterRoutesThroughPassIdentityBlock() {
+        // PassFront re-wires its eyebrow through PassIdentityBlock; the userLabel
+        // parameter is the consumer-facing entry point for the trust-caption rule.
+        composeRule.setContent {
+            ThemedHost {
+                PassFront(
+                    pass = passFixture(),
+                    signatureStatus = SignatureStatus.AppleVerified,
+                    nowEpochMillis = 0L,
+                    telemetry = telemetry,
+                    userLabel = "Mom's flight home",
+                )
+            }
+        }
+        // Both the override and the signed org name must be on the front of the card.
+        composeRule.onNodeWithText("Mom's flight home").assertIsDisplayed()
+        composeRule.onNodeWithText("Acme").assertIsDisplayed()
+        // Signature badge still renders.
+        composeRule.onNodeWithText("Verified").assertIsDisplayed()
+    }
+
     @Test
     fun importConfirmShowsTrustCaptionForAppleVerified() {
         composeRule.setContent {

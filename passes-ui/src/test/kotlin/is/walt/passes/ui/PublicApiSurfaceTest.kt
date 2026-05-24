@@ -267,6 +267,23 @@ class PublicApiSurfaceTest {
     }
 
     @Test
+    fun passIdentityBlockIsPublicAndIsTheCanonicalTrustCaptionRenderer() {
+        // ADR 0007 D6: PassIdentityBlock is the kernel-owned Composable that enforces
+        // the trust-caption rule (signed organizationName remains visible when a
+        // user_label override is set). Walt-android's pkpass tile, lane row, and detail
+        // chrome are required to call this rather than rendering StoredPass.userLabel
+        // directly. Removing or renaming the symbol breaks the consumer contract; this
+        // test fails closed at JVM-test time so any such change is a deliberate edit.
+        val klass = Class.forName("is.walt.passes.ui.PassIdentityBlockKt")
+        // Compose may name-mangle Composables that take inline value-class parameters
+        // (Color is a value class, and the composable's default Color.Unspecified
+        // triggers the suffix). Accept any method whose name starts with
+        // "PassIdentityBlock" so the lock is robust to compiler-internal renames.
+        val methods = klass.declaredMethods.map { it.name }
+        assertThat(methods.any { it.startsWith("PassIdentityBlock") }).isTrue()
+    }
+
+    @Test
     fun argbColorIsAValueClassWrappingAnInt() {
         val color = ArgbColor(0xFFEE2200.toInt())
         assertThat(color.argb).isEqualTo(0xFFEE2200.toInt())

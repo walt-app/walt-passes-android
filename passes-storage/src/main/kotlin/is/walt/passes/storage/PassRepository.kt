@@ -61,6 +61,40 @@ public interface PassRepository {
     public suspend fun delete(id: PassRecordId): StorageResult<Unit>
 
     /**
+     * Sets or clears the user-supplied display label for a pkpass row (ADR 0007 D2). The
+     * override is stored alongside the signed `pass_json` blob, never inside it, so the
+     * `Pass` body remains bit-equivalent to what the PKCS#7 signature attests.
+     *
+     * Semantics:
+     *
+     * - `label = null` clears the override (writes SQL NULL to `user_label`).
+     * - A non-null `label` whose `.trim()` is empty is treated as a clear (defense in
+     *   depth against an "all whitespace" rename that would render an invisible primary
+     *   identity).
+     * - A non-null `label` is trimmed of leading and trailing whitespace before storage;
+     *   internal whitespace is preserved.
+     * - Rejects labels whose trimmed length exceeds [PassUserLabelBounds.MAX_USER_LABEL_CHARS]
+     *   with [StorageError.PassRejected] carrying [PassUpdateRejectedKind.LabelTooLong].
+     *   The cap is checked before the row is loaded, so an over-long label against an
+     *   unknown [id] surfaces as [StorageError.PassRejected], not
+     *   [StorageError.IntegrityViolation], mirroring [updateDocumentLabel]'s precedence.
+     *
+     * Returns [StorageError.IntegrityViolation] if no row matches [id] and the label
+     * passed the cap. On success the row's `updated_at_epoch_ms` is unchanged — rename
+     * is metadata, not a canonical-payload mutation (ADR 0007 D3), matching
+     * [updateDocumentLabel] and [updateScannableCard].
+     *
+     * Trust-caption rule: when this method has set a non-null label, every UI surface
+     * presenting that pass MUST also surface the signed `organizationName` (ADR 0007
+     * D5). The kernel-owned [is.walt.passes.ui.PassIdentityBlock] Composable is the
+     * canonical renderer.
+     */
+    public suspend fun updatePassUserLabel(
+        id: PassRecordId,
+        label: String?,
+    ): StorageResult<Unit>
+
+    /**
      * Insert a stored PDF document. Bytes and thumbnail bytes are written into the
      * `documents` and `document_thumbnails` tables in the same transaction; the assigned
      * row id is returned. The repository never decodes [pdfBytes] or [thumbnailBytes];
@@ -226,6 +260,13 @@ public data class PassSummary(
     public val signatureStatus: SignatureStatus,
     public val createdAt: PassInstant,
     public val updatedAt: PassInstant,
+    /**
+     * User-supplied display-label override (ADR 0007 D1). `null` means no override —
+     * surfaces present `organizationName` as today. When non-null, surfaces MUST
+     * present this value alongside the signed `organizationName` (ADR 0007 D5); the
+     * `is.walt.passes.ui.PassIdentityBlock` Composable is the canonical renderer.
+     */
+    public val userLabel: String? = null,
 )
 
 /**
@@ -240,7 +281,24 @@ public data class StoredPass(
     public val signatureStatus: SignatureStatus,
     public val createdAt: PassInstant,
     public val updatedAt: PassInstant,
+    /**
+     * User-supplied display-label override (ADR 0007 D1). See [PassSummary.userLabel].
+     */
+    public val userLabel: String? = null,
 )
+
+/**
+ * Defensive caps `passes-storage` enforces on the user-supplied pkpass display label.
+ * Mirrors [DocumentBounds.MAX_LABEL_CHARS]'s role for documents but lives separately so
+ * a future pass-side cap change cannot silently collide with a document-side cap.
+ *
+ * The cap exists only at this layer: nothing upstream of [PassRepository.updatePassUserLabel]
+ * bounds the consumer-supplied label, and the column is loaded with every row, so a
+ * multi-MB string would inflate every load and StateFlow emission.
+ */
+public object PassUserLabelBounds {
+    public const val MAX_USER_LABEL_CHARS: Int = 100
+}
 
 /**
  * Common surrogate-key surface shared by [PassRecordId] and [DocumentRecordId]. Carrying

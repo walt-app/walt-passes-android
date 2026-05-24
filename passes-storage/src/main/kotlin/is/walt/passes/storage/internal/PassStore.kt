@@ -21,6 +21,15 @@ internal interface PassStore {
     fun summaryById(id: PassRecordId): PassSummary?
     fun upsert(pass: Pass, signatureStatus: SignatureStatus, nowEpochMs: Long): UpsertOutcome
     fun delete(id: PassRecordId): DeleteOutcome?
+
+    /**
+     * Sets or clears the `user_label` column on the row matching [id]. Returns the
+     * outcome (carrying the pass type and whether a prior label was present, for
+     * telemetry) or `null` when no row matches. The caller is responsible for trimming
+     * and cap-checking [label] before invocation; the store treats [label] as already
+     * normalized.
+     */
+    fun updateUserLabel(id: PassRecordId, label: String?): UpdateUserLabelOutcome?
     fun close()
 }
 
@@ -32,4 +41,9 @@ internal data class UpsertOutcome(
 
 internal data class DeleteOutcome(
     val summary: PassSummary,
+)
+
+internal data class UpdateUserLabelOutcome(
+    val summary: PassSummary,
+    val hadPriorLabel: Boolean,
 )
