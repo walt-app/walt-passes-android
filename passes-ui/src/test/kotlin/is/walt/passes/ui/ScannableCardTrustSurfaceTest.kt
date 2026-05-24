@@ -280,6 +280,53 @@ class ScannableCardTrustSurfaceTest {
     }
 
     @Test
+    fun fullScreenRendersPayloadCaptionVerbatim() {
+        // GH #102: the encoded payload is displayed below the barcode as a
+        // human-readable fallback for a failed POS scanner. The caption is FSI/PDI
+        // isolated as defense-in-depth on the create-boundary Cf/Cc rejection (C3
+        // in SCANNABLE_CARD_THREAT_MODEL.md); assert the isolated form so a
+        // regression that dropped the bidi fence would fail this test.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(card = qrFixture(label = "Library card"))
+            }
+        }
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun fullScreenRendersPayloadCaptionForOneDimensionalFormat() {
+        // Both encoder paths (QR and 1D) must reach the caption — the POS-scanner
+        // fallback case is more common for 1D loyalty cards than for QR.
+        composeRule.setContent {
+            ThemedHost { ScannableCardScreen(card = code128Fixture()) }
+        }
+        composeRule.onNodeWithText("⁨ABCDE12345⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun tileDoesNotRenderPayloadCaption() {
+        // The carousel tile is identification-only; rendering the payload below
+        // its small preview would crowd the chrome and is not the surface the
+        // GH #102 fallback targets. Default-off behaviour pinned here so the
+        // caption stays scoped to the detail surface.
+        composeRule.setContent {
+            ThemedHost { ScannableCardTile(card = qrFixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertDoesNotExist()
+    }
+
+    @Test
+    fun rowTileDoesNotRenderPayloadCaption() {
+        // The wallet-row register is the smallest surface of the three; same
+        // default-off rationale as the carousel tile.
+        composeRule.setContent {
+            ThemedHost { ScannableCardRowTile(card = qrFixture(), onClick = {}) }
+        }
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertDoesNotExist()
+    }
+
+    @Test
     fun rowTileLeadingSlotWithoutContentDescriptionDoesNotPolluteMergedSemantics() {
         // The slot lives inside the row's mergeDescendants block. The kernel-built
         // contentDescription on the merged node replaces (not appends to) descendant

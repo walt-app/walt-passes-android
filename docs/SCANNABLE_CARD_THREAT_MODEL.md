@@ -195,13 +195,19 @@ defense-in-depth, mirroring `B3UrlConfirmSheet` and the
 ### 4. Bidi / control-character spoofing in payload preview — Spoofing
 
 **What.** During create-time URI preview (C4), the dialog renders the raw
-`payload` so the user can see what they typed. The same bidi/control-char
-attack applies to that display.
+`payload` so the user can see what they typed. The detail surface
+(`ScannableCardScreen`) also renders the payload as a human-readable caption
+below the barcode (GH #102 — fallback for when a point-of-sale scanner cannot
+read the code; opt-in via `ScannableCardView.showPayloadCaption`). The same
+bidi/control-char attack applies to both displays.
 
 **Mitigation.** C3: `passes-core` rejects payloads containing Cf/Cc codepoints
-*before* any preview is shown. The dialog never receives a payload that could
-spoof its surrounding chrome. The fallback "looks URI-shaped but unrecognized
-scheme" path goes through the same validator.
+*before* any preview is shown or any caption is rendered. Neither the dialog
+nor the detail-surface caption ever receives a payload that could spoof its
+surrounding chrome. The fallback "looks URI-shaped but unrecognized scheme"
+path goes through the same validator. The UI layer additionally wraps the
+caption in FSI (U+2068) / PDI (U+2069) isolates as defense-in-depth, mirroring
+the label-isolation discipline in threat #3.
 
 **Status.** Mitigated.
 
