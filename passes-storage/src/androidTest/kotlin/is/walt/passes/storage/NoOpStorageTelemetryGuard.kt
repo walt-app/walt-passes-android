@@ -27,4 +27,10 @@ internal object NoOpStorageTelemetryGuard : StorageTelemetryGuard {
     override fun onScannableCardCreated(format: ScannableFormat) = Unit
     override fun onScannableCardDeleted(format: ScannableFormat) = Unit
     override fun onScannableCardRejected(kind: ScannableCardRejectedKind) = Unit
+    override fun onUserLabelUpdated(
+        type: PassType,
+        hadPriorLabel: Boolean,
+        clearing: Boolean,
+    ) = Unit
+    override fun onPassRejected(kind: PassUpdateRejectedKind) = Unit
 }

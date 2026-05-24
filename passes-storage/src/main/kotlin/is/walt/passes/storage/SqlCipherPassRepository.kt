@@ -116,6 +116,38 @@ public class SqlCipherPassRepository internal constructor(
         StorageResult.Success(Unit)
     }
 
+    override suspend fun updatePassUserLabel(
+        id: PassRecordId,
+        label: String?,
+    ): StorageResult<Unit> = runIo {
+        // Normalize: trim, then collapse blank-after-trim to null (ADR 0007 D2). The
+        // trimmed value is what the cap is measured against and what reaches the store.
+        val trimmed = label?.trim()
+        val normalized = if (trimmed.isNullOrEmpty()) null else trimmed
+        val clearing = normalized == null
+
+        if (normalized != null && normalized.length > PassUserLabelBounds.MAX_USER_LABEL_CHARS) {
+            return@runIo rejectPass(PassUpdateRejectedKind.LabelTooLong)
+        }
+
+        val outcome = writeMutex.withLock {
+            val o = store.updateUserLabel(id, normalized) ?: return@withLock null
+            // Refresh the full ordered list rather than splicing: matches the other
+            // mutating paths and avoids assuming the in-memory list and the store agree
+            // on row presence (e.g. if the row was deleted in another writer between
+            // the prior read and this write).
+            _passes.value = store.listSummaries()
+            o
+        } ?: return@runIo failure(StorageError.IntegrityViolation(id))
+
+        telemetryGuard.onUserLabelUpdated(
+            type = outcome.summary.type,
+            hadPriorLabel = outcome.hadPriorLabel,
+            clearing = clearing,
+        )
+        StorageResult.Success(Unit)
+    }
+
     override suspend fun insertDocument(
         label: String,
         pdfBytes: ByteArray,
@@ -370,6 +402,16 @@ public class SqlCipherPassRepository internal constructor(
     ): StorageResult<T> {
         telemetryGuard.onScannableCardRejected(telemetryKind)
         return StorageResult.Failure(StorageError.ScannableCardRejected(reason))
+    }
+
+    /**
+     * Single emission point for a pass-side defensive rejection (today: user_label
+     * cap). Same discipline as [rejectDocument]: skip [failure] so `onStorageFailure`
+     * does not double-fire alongside `onPassRejected`.
+     */
+    private fun <T> rejectPass(kind: PassUpdateRejectedKind): StorageResult<T> {
+        telemetryGuard.onPassRejected(kind)
+        return StorageResult.Failure(StorageError.PassRejected(kind))
     }
 
     /**

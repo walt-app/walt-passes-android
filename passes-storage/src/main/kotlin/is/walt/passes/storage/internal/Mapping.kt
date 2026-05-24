@@ -32,4 +32,5 @@ internal fun StorageError.toFailureKind(): StorageFailureKind = when (this) {
     is StorageError.Unknown -> StorageFailureKind.Unknown
     is StorageError.DocumentRejected -> StorageFailureKind.DocumentRejected
     is StorageError.ScannableCardRejected -> StorageFailureKind.ScannableCardRejected
+    is StorageError.PassRejected -> StorageFailureKind.PassRejected
 }

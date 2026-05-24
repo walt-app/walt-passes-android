@@ -51,16 +51,20 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
-    fun passFrontHasExactlyEightUserVisibleParameters() {
-        // (pass, signatureStatus, telemetry, modifier, locale, nowEpochMillis,
-        // showSignatureBadge, showExpiredOverlay). The last two are the wpass-hy2
-        // R2 host opt-outs (wpass-btz, wpass-d0k) — non-breaking defaults that
-        // preserve the original ADR 0003 D5 posture. Adding a ninth parameter
-        // (e.g. `expiredOverlay: ExpiredOverlayState` that lets a host *display*
-        // an arbitrary expiry state, or `signatureBand: SignatureBand` that lets
-        // a host override the badge band) would breach D5; review the ADR before
-        // changing this number.
-        assertUserVisibleParamCount("PassFrontKt", "PassFront", expected = 8)
+    fun passFrontHasExactlyNineUserVisibleParameters() {
+        // (pass, signatureStatus, telemetry, modifier, locale, userLabel,
+        // nowEpochMillis, showSignatureBadge, showExpiredOverlay).
+        // - userLabel (wpass-7xa / ADR 0007 D6) is the consumer-facing entry point
+        //   for the trust-caption rule; defaults to null so callers that do not
+        //   surface the rename feature see the legacy single-line eyebrow.
+        // - showSignatureBadge / showExpiredOverlay are the wpass-hy2 R2 host
+        //   opt-outs (wpass-btz, wpass-d0k) — non-breaking defaults that preserve
+        //   the original ADR 0003 D5 posture.
+        // Adding a tenth parameter (e.g. `expiredOverlay: ExpiredOverlayState`
+        // that lets a host *display* an arbitrary expiry state, or
+        // `signatureBand: SignatureBand` that lets a host override the badge band)
+        // would breach D5; review the relevant ADR before changing this number.
+        assertUserVisibleParamCount("PassFrontKt", "PassFront", expected = 9)
     }
 
     @Test

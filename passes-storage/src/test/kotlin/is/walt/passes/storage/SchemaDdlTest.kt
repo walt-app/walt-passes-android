@@ -69,6 +69,31 @@ class SchemaDdlTest {
     }
 
     @Test
+    fun passesTableHasTheExpectedColumns() {
+        applyDdl().use { conn ->
+            val columns = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA table_info(${Schema.Tables.PASSES})")
+                while (rs.next()) columns.add(rs.getString("name"))
+            }
+            assertThat(columns).containsExactly(
+                "id",
+                "type",
+                "serial_number",
+                "organization_name",
+                "description",
+                "expiration_epoch_ms",
+                "voided",
+                "signature_status_kind",
+                "pass_json",
+                "created_at_epoch_ms",
+                "updated_at_epoch_ms",
+                "user_label",
+            )
+        }
+    }
+
+    @Test
     fun scannableCardsTableHasTheExpectedColumns() {
         applyDdl().use { conn ->
             val columns = mutableSetOf<String>()

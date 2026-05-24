@@ -75,6 +75,16 @@ public sealed interface StorageError {
     ) : StorageError
 
     /**
+     * A pass mutation (today: `updatePassUserLabel`) was refused by the storage-side
+     * defensive check (ADR 0007 D2). Mirrors [DocumentRejected]'s shape: rejection is
+     * not a generic storage failure, so [onStorageFailure] does NOT fire; the
+     * `onPassRejected` event fires instead. The pass row never changes on rejection.
+     */
+    public data class PassRejected(
+        public val kind: PassUpdateRejectedKind,
+    ) : StorageError
+
+    /**
      * The schema version on disk is newer than this build of `passes-storage` understands.
      * This happens when a user downgrades the wallet app. The DB is read-only-protected
      * until a forward-compatible build runs again.
@@ -108,6 +118,16 @@ public sealed interface ScannableCardRejectionReason {
     public data class UnsupportedFormat(public val format: ScannableFormat) : ScannableCardRejectionReason
 
     public data class EncoderFailure(public val reason: EncoderFailureReason) : ScannableCardRejectionReason
+}
+
+/**
+ * Why a [PassRepository.updatePassUserLabel] call was refused. One arm today; future
+ * caps (illegal-character filters, locale-specific limits, etc.) would add arms here.
+ * Mirrors [DocumentStorageRejectedKind] in shape but lives separately so a future
+ * pass-side cap cannot silently collide with a document-side cap.
+ */
+public enum class PassUpdateRejectedKind {
+    LabelTooLong,
 }
 
 /**

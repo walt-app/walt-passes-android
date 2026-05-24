@@ -61,6 +61,12 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *   The default `PassLocale("en")` is a *fallback for tests and previews*; production
  *   callers (walt-android) MUST thread the device locale through, or the user sees
  *   English labels regardless of system language.
+ * @param userLabel Optional user-supplied display-label override (ADR 0007 D1). When
+ *   non-null, the front-of-card eyebrow renders the override as the primary identity
+ *   line with the signed `organizationName` as a sub-line beneath — the trust-caption
+ *   rule (ADR 0007 D5). When the override equals the signed `organizationName` after
+ *   pass.strings substitution (case-insensitive ASCII compare), the eyebrow renders
+ *   the signed name alone. Callers wire this from `StoredPass.userLabel`.
  * @param showSignatureBadge When `false`, the in-card `SignatureTrustBadge` pill is
  *   not rendered. Defaults to `true`. `onPassRendered` telemetry fires regardless —
  *   the band must still be derivable and recorded. Hosts that opt out MUST disclose
@@ -82,6 +88,7 @@ public fun PassFront(
     telemetry: UiTelemetryGuard,
     modifier: Modifier = Modifier,
     locale: PassLocale = PassLocale("en"),
+    userLabel: String? = null,
     nowEpochMillis: Long = System.currentTimeMillis(),
     showSignatureBadge: Boolean = true,
     showExpiredOverlay: Boolean = true,
@@ -99,7 +106,6 @@ public fun PassFront(
     // every image's contentEquals, which is megabytes of work on each recomposition
     // for a real PKPASS.
     val strings = remember(pass.locales, locale) { pass.resolveLocalizedStrings(locale) }
-    val displayOrganizationName = strings.lookupOrSelf(pass.organizationName)
     androidx.compose.runtime.LaunchedEffect(pass, band) {
         telemetry.onPassRendered(pass.type, band)
     }
@@ -113,7 +119,8 @@ public fun PassFront(
             PassFrontSurface(
                 pass = pass,
                 band = band,
-                displayOrganizationName = displayOrganizationName,
+                userLabel = userLabel,
+                locale = locale,
                 passBackground = passBackground,
                 passForeground = passForeground,
                 passLabel = passLabel,
@@ -131,7 +138,8 @@ public fun PassFront(
 private fun PassFrontSurface(
     pass: Pass,
     band: SignatureBand,
-    displayOrganizationName: String,
+    userLabel: String?,
+    locale: PassLocale,
     passBackground: Color,
     passForeground: Color,
     passLabel: Color,
@@ -153,10 +161,14 @@ private fun PassFrontSurface(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = displayOrganizationName,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = passLabel,
+                // ADR 0007 D6: the front-of-card eyebrow routes through PassIdentityBlock
+                // so the trust-caption rule is enforced by the same composable
+                // walt-android's tile / lane / detail surfaces call.
+                PassIdentityBlock(
+                    pass = pass,
+                    userLabel = userLabel,
+                    locale = locale,
+                    primaryColor = passLabel,
                     modifier = Modifier.weight(1f),
                 )
                 if (showSignatureBadge) {

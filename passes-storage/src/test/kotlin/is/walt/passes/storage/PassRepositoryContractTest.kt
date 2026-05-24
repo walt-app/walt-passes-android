@@ -30,6 +30,7 @@ import `is`.walt.passes.storage.internal.ScannableCardInsertOutcome
 import `is`.walt.passes.storage.internal.ScannableCardInsertRequest
 import `is`.walt.passes.storage.internal.ScannableCardStore
 import `is`.walt.passes.storage.internal.ScannableCardUpdateRequest
+import `is`.walt.passes.storage.internal.UpdateUserLabelOutcome
 import `is`.walt.passes.storage.internal.UpsertOutcome
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -180,6 +181,188 @@ class PassRepositoryContractTest {
     }
 
     @Test
+    fun updatePassUserLabelSetsTheLabelAndEmitsUserLabelUpdatedTelemetry() = runTest {
+        val store = FakePassStore(
+            initial = listOf(sampleSummary(id = 1L, updatedAt = 500L)),
+        )
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 9_000L },
+            keyBacking = KeyBacking.StrongBox,
+        )
+
+        val result = repo.updatePassUserLabel(PassRecordId(1L), "Mom's flight home")
+        check(result is StorageResult.Success)
+
+        assertThat(repo.passes.value.single().userLabel).isEqualTo("Mom's flight home")
+        // updated_at_epoch_ms is preserved (ADR 0007 D3): the FakePassStore's
+        // updateUserLabel does not touch the timestamp, mirroring the SQL UPDATE
+        // that does not include the column.
+        assertThat(repo.passes.value.single().updatedAt.epochMillis).isEqualTo(500L)
+        assertThat(telemetry.events).containsExactly(
+            "init:StrongBox",
+            "userlabel:BoardingPass:prior=false:clearing=false",
+        ).inOrder()
+    }
+
+    @Test
+    fun updatePassUserLabelClearsExistingOverrideAndReportsHadPrior() = runTest {
+        val store = FakePassStore(
+            initial = listOf(
+                sampleSummary(id = 1L, userLabel = "Mom's flight home"),
+            ),
+        )
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 1L },
+            keyBacking = KeyBacking.Tee,
+        )
+
+        val result = repo.updatePassUserLabel(PassRecordId(1L), null)
+        check(result is StorageResult.Success)
+        assertThat(repo.passes.value.single().userLabel).isNull()
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "userlabel:BoardingPass:prior=true:clearing=true",
+        ).inOrder()
+    }
+
+    @Test
+    fun updatePassUserLabelTreatsBlankAfterTrimAsClear() = runTest {
+        val store = FakePassStore(
+            initial = listOf(sampleSummary(id = 1L, userLabel = "Mom's flight")),
+        )
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 1L },
+            keyBacking = KeyBacking.StrongBox,
+        )
+
+        val result = repo.updatePassUserLabel(PassRecordId(1L), "   ")
+        check(result is StorageResult.Success)
+        assertThat(repo.passes.value.single().userLabel).isNull()
+        // clearing=true: defense-in-depth normalization (ADR 0007 D2) collapses
+        // whitespace-only labels to null so the surface never renders an
+        // invisible primary identity.
+        assertThat(telemetry.events).contains("userlabel:BoardingPass:prior=true:clearing=true")
+    }
+
+    @Test
+    fun updatePassUserLabelTrimsLeadingAndTrailingWhitespace() = runTest {
+        val store = FakePassStore(initial = listOf(sampleSummary(id = 1L)))
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 1L },
+            keyBacking = KeyBacking.StrongBox,
+        )
+
+        val result = repo.updatePassUserLabel(PassRecordId(1L), "  Mom's flight   ")
+        check(result is StorageResult.Success)
+        // Internal whitespace is preserved; only leading/trailing is trimmed.
+        assertThat(repo.passes.value.single().userLabel).isEqualTo("Mom's flight")
+    }
+
+    @Test
+    fun updatePassUserLabelRejectsOverCapAndDoesNotTouchRow() = runTest {
+        val store = FakePassStore(
+            initial = listOf(sampleSummary(id = 1L, userLabel = "existing")),
+        )
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 1L },
+            keyBacking = KeyBacking.Tee,
+        )
+
+        val overLong = "x".repeat(PassUserLabelBounds.MAX_USER_LABEL_CHARS + 1)
+        val result = repo.updatePassUserLabel(PassRecordId(1L), overLong)
+
+        check(result is StorageResult.Failure)
+        check(result.error is StorageError.PassRejected)
+        assertThat((result.error as StorageError.PassRejected).kind)
+            .isEqualTo(PassUpdateRejectedKind.LabelTooLong)
+        // Row is unchanged on rejection.
+        assertThat(repo.passes.value.single().userLabel).isEqualTo("existing")
+        // onPassRejected fires; onStorageFailure does NOT (rejection is not a generic
+        // failure — same discipline as DocumentRejected).
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "pass-rejected:LabelTooLong",
+        ).inOrder()
+    }
+
+    @Test
+    fun updatePassUserLabelCapPrecedesIntegrityViolationCheck() = runTest {
+        // Mirrors updateDocumentLabel's precedence: an over-long label against an
+        // unknown id surfaces as PassRejected, not IntegrityViolation. The cap is
+        // checked before the row is looked up.
+        val store = FakePassStore()
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 1L },
+            keyBacking = KeyBacking.Software,
+        )
+
+        val overLong = "x".repeat(PassUserLabelBounds.MAX_USER_LABEL_CHARS + 1)
+        val result = repo.updatePassUserLabel(PassRecordId(404L), overLong)
+
+        check(result is StorageResult.Failure)
+        check(result.error is StorageError.PassRejected)
+    }
+
+    @Test
+    fun updatePassUserLabelOfUnknownIdReturnsIntegrityViolation() = runTest {
+        val store = FakePassStore()
+        val telemetry = RecordingGuard()
+        val repo = SqlCipherPassRepository(
+            store = store,
+            documentStore = NoOpDocumentStore,
+            scannableCardStore = NoOpScannableCardStore,
+            telemetryGuard = telemetry,
+            ioDispatcher = UnconfinedTestDispatcher(),
+            clock = { 1L },
+            keyBacking = KeyBacking.StrongBox,
+        )
+
+        val result = repo.updatePassUserLabel(PassRecordId(404L), "Mom's flight")
+        check(result is StorageResult.Failure)
+        check(result.error is StorageError.IntegrityViolation)
+        assertThat(telemetry.events).containsExactly(
+            "init:StrongBox",
+            "failure:IntegrityViolation:n/a",
+        ).inOrder()
+    }
+
+    @Test
     fun deleteIsIrreversibleNoUndoArmOnPublicSurface() {
         // Compile-time lock: the only mutating method on PassRepository for an existing row
         // is `delete(id)`. No `undelete`, `restore`, `softDelete`, or `archive` arms exist.
@@ -263,6 +446,18 @@ class PassRepositoryContractTest {
             return DeleteOutcome(summary)
         }
 
+        override fun updateUserLabel(
+            id: PassRecordId,
+            label: String?,
+        ): UpdateUserLabelOutcome? {
+            val prior = summaries[id.value] ?: return null
+            val hadPriorLabel = prior.userLabel != null
+            val updated = prior.copy(userLabel = label)
+            summaries[id.value] = updated
+            rows[id.value] = rows.getValue(id.value).copy(userLabel = label)
+            return UpdateUserLabelOutcome(summary = updated, hadPriorLabel = hadPriorLabel)
+        }
+
         var closeCount: Int = 0
             private set
 
@@ -313,6 +508,16 @@ class PassRepositoryContractTest {
         override fun onScannableCardRejected(kind: ScannableCardRejectedKind) {
             events += "card-rejected:${kind.name}"
         }
+        override fun onUserLabelUpdated(
+            type: PassType,
+            hadPriorLabel: Boolean,
+            clearing: Boolean,
+        ) {
+            events += "userlabel:${type.name}:prior=$hadPriorLabel:clearing=$clearing"
+        }
+        override fun onPassRejected(kind: PassUpdateRejectedKind) {
+            events += "pass-rejected:${kind.name}"
+        }
     }
 
     /**
@@ -348,7 +553,11 @@ class PassRepositoryContractTest {
     }
 
     private companion object {
-        fun sampleSummary(id: Long): PassSummary = PassSummary(
+        fun sampleSummary(
+            id: Long,
+            userLabel: String? = null,
+            updatedAt: Long = 1L,
+        ): PassSummary = PassSummary(
             id = PassRecordId(id),
             type = PassType.BoardingPass,
             serialNumber = "S$id",
@@ -358,7 +567,8 @@ class PassRepositoryContractTest {
             voided = false,
             signatureStatus = SignatureStatus.AppleVerified,
             createdAt = PassInstant(1L),
-            updatedAt = PassInstant(1L),
+            updatedAt = PassInstant(updatedAt),
+            userLabel = userLabel,
         )
 
         fun samplePass(serial: String): Pass = Pass(

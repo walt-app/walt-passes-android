@@ -49,6 +49,33 @@ public interface StorageTelemetryGuard {
     public fun onPassDeleted(type: PassType, signatureStatus: SignatureStatusKind)
 
     /**
+     * A pass row's `user_label` override was set or cleared. Emitted after the
+     * transaction commits and after the `passes` StateFlow is updated.
+     *
+     * Carries only enums and booleans: no `String` label content, no signed-identity
+     * field. The user's typed text never reaches telemetry. [hadPriorLabel] lets
+     * aggregate metrics distinguish "first rename" from "edit existing rename";
+     * [clearing] lets them distinguish "set a new value" from "remove the override".
+     *
+     * Adding a `String` (or `Pass`, or `PassField`) parameter to this event is a
+     * security-policy change per the no-PII discipline (ADR 0002 D7, reaffirmed in
+     * ADR 0007 D7).
+     */
+    public fun onUserLabelUpdated(
+        type: PassType,
+        hadPriorLabel: Boolean,
+        clearing: Boolean,
+    )
+
+    /**
+     * A pass mutation was refused by the storage-side defense-in-depth check
+     * (ADR 0007 D2). Fires for [PassRepository.updatePassUserLabel] today; sibling
+     * mutation paths would add to this aggregate. Emitted before any row is modified;
+     * storage state is unchanged on rejection.
+     */
+    public fun onPassRejected(kind: PassUpdateRejectedKind)
+
+    /**
      * A row failed to deserialize during a load or schema migration and was dropped.
      * Carries only the failure kind; the row identity is intentionally NOT part of the
      * event because the row is gone.
@@ -172,6 +199,7 @@ public enum class StorageFailureKind {
     Unknown,
     DocumentRejected,
     ScannableCardRejected,
+    PassRejected,
 }
 
 public enum class MigrationFailureKind {

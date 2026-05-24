@@ -64,6 +64,17 @@ class SchemaMigrationTest {
         }
     }
 
+    /**
+     * Applies the v4 schema (v1 + v1 -> v2 + v2 -> v3 + v3 -> v4). The v4 -> v5
+     * migration adds the nullable `user_label` column to `passes`.
+     */
+    private fun applyV4Ddl(conn: Connection) {
+        applyV3Ddl(conn)
+        conn.createStatement().use { stmt ->
+            for (sql in Schema.MIGRATIONS.getValue(3)) stmt.execute(sql)
+        }
+    }
+
     @Test
     fun migrationFromV1IntroducesDocumentsAndDocumentThumbnailsTables() {
         openMemoryDb().use { conn ->
@@ -208,6 +219,14 @@ class SchemaMigrationTest {
             // `sql` is the DDL the engine reconstructed; comparing it catches column,
             // ordering, and constraint drift across both creation paths. Auto-named
             // sqlite_* internal indexes are excluded since their names are nondeterministic.
+            //
+            // Whitespace is normalized (runs collapsed to a single space, then trimmed)
+            // because SQLite's `ALTER TABLE ADD COLUMN` rewrites sqlite_master.sql with
+            // its own formatting (typically `..., new_col TEXT)` tacked onto the original
+            // statement). The intent of this comparison is structural equivalence —
+            // same tables, same columns, same types, same constraints — not byte-for-
+            // byte source identity. Mismatched columns / types / constraint sets still
+            // fail; only whitespace and comma placement are normalized.
             val rs = stmt.executeQuery(
                 "SELECT type, name, tbl_name, sql FROM sqlite_master " +
                     "WHERE name NOT LIKE 'sqlite_%' " +
@@ -218,12 +237,20 @@ class SchemaMigrationTest {
                     rs.getString(1),
                     rs.getString(2),
                     rs.getString(3),
-                    rs.getString(4) ?: "",
+                    normalizeSql(rs.getString(4) ?: ""),
                 ).joinToString("|")
             }
         }
         return out
     }
+
+    private fun normalizeSql(sql: String): String =
+        sql
+            .replace(Regex("\\s+"), " ")
+            .replace(" ,", ",")
+            .replace(" )", ")")
+            .replace("( ", "(")
+            .trim()
 
     @Test
     fun migrationFromV2IntroducesScannableCardsTable() {
@@ -505,6 +532,85 @@ class SchemaMigrationTest {
                     stmt.executeQuery("SELECT COUNT(*) FROM ${Schema.Tables.DOCUMENTS}")
                         .also { it.next() }.getInt(1),
                 ).isEqualTo(1)
+            }
+        }
+    }
+
+    @Test
+    fun migrationFromV4AddsTheUserLabelColumnToPasses() {
+        openMemoryDb().use { conn ->
+            applyV4Ddl(conn)
+
+            for (sql in Schema.MIGRATIONS.getValue(4)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            val columns = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA table_info(${Schema.Tables.PASSES})")
+                while (rs.next()) columns.add(rs.getString("name"))
+            }
+            assertThat(columns).contains("user_label")
+        }
+    }
+
+    @Test
+    fun migrationFromV4UserLabelColumnIsNullable() {
+        openMemoryDb().use { conn ->
+            applyV4Ddl(conn)
+            for (sql in Schema.MIGRATIONS.getValue(4)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            // A row inserted post-migration without specifying user_label must read NULL.
+            // The column has no DEFAULT clause and is nullable; SQLite stores NULL.
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASSES}" +
+                    "(id, type, serial_number, organization_name, description, voided, " +
+                    "signature_status_kind, pass_json, created_at_epoch_ms, updated_at_epoch_ms) " +
+                    "VALUES (1, 'BoardingPass', 'S1', 'AcmeAir', 'desc', 0, 'AppleVerified', " +
+                    "x'00', 1, 1)",
+            ).use { it.executeUpdate() }
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery(
+                    "SELECT user_label FROM ${Schema.Tables.PASSES} WHERE id = 1",
+                )
+                rs.next()
+                rs.getString("user_label")
+                assertThat(rs.wasNull()).isTrue()
+            }
+        }
+    }
+
+    @Test
+    fun preexistingV4PassRowSurvivesMigrationToV5WithNullUserLabel() {
+        openMemoryDb().use { conn ->
+            applyV4Ddl(conn)
+
+            // A pre-existing v4 pass row that pre-dates the user_label column.
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASSES}" +
+                    "(id, type, serial_number, organization_name, description, voided, " +
+                    "signature_status_kind, pass_json, created_at_epoch_ms, updated_at_epoch_ms) " +
+                    "VALUES (42, 'BoardingPass', 'S42', 'AcmeAir', 'desc', 0, 'AppleVerified', " +
+                    "x'00', 100, 200)",
+            ).use { it.executeUpdate() }
+
+            for (sql in Schema.MIGRATIONS.getValue(4)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            // Existing row is preserved and gets a NULL user_label after the migration.
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery(
+                    "SELECT id, organization_name, user_label FROM ${Schema.Tables.PASSES}",
+                )
+                rs.next()
+                assertThat(rs.getLong("id")).isEqualTo(42L)
+                assertThat(rs.getString("organization_name")).isEqualTo("AcmeAir")
+                rs.getString("user_label")
+                assertThat(rs.wasNull()).isTrue()
+                assertThat(rs.next()).isFalse()
             }
         }
     }

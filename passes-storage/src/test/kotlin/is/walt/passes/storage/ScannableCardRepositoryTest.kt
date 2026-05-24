@@ -496,6 +496,10 @@ class ScannableCardRepositoryTest {
             nowEpochMs: Long,
         ): UpsertOutcome = error("unused in scannable-card tests")
         override fun delete(id: PassRecordId): DeleteOutcome? = null
+        override fun updateUserLabel(
+            id: PassRecordId,
+            label: String?,
+        ): `is`.walt.passes.storage.internal.UpdateUserLabelOutcome? = null
         override fun close() = Unit
     }
 
@@ -540,5 +544,11 @@ class ScannableCardRepositoryTest {
         override fun onScannableCardRejected(kind: ScannableCardRejectedKind) {
             events += "card-rejected:${kind.name}"
         }
+        override fun onUserLabelUpdated(
+            type: PassType,
+            hadPriorLabel: Boolean,
+            clearing: Boolean,
+        ) = Unit
+        override fun onPassRejected(kind: PassUpdateRejectedKind) = Unit
     }
 }
