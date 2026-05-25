@@ -1,5 +1,6 @@
 package `is`.walt.passes.ui
 
+import `is`.walt.passes.core.LocalizedStrings
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassLocale
 import `is`.walt.passes.core.lookupOrSelf
@@ -30,32 +31,26 @@ public data class PassDisplayIdentity(
 )
 
 /**
- * Computes the resolved visible identity for [pass] + an optional [userLabel]
- * override, per ADR 0007 D5 / D6. Pure: safe to call outside any Compose runtime
- * (lifts the canonical trust-caption rule out of [PassIdentityBlock] so a consumer
- * with a fixed row shape can render the strings into its own typography without
- * re-implementing the trust contract).
+ * Computes the resolved visible identity per ADR 0007 D5 / D6. Primitive form;
+ * the single source of truth for the trust-caption rule.
  *
  * Rules, in order:
- *  1. Substitute [Pass.organizationName] through the pass's strings table for
- *     [locale] (Apple's documented `.lproj/pass.strings` lookup; misses fall
- *     through to the raw value).
+ *  1. Substitute [organizationName] through [localizedStrings] (Apple's documented
+ *     `.lproj/pass.strings` lookup; misses fall through to the raw value).
  *  2. Trim [userLabel]; treat empty as no-override.
  *  3. Case-insensitive ASCII compare the trimmed override against the trimmed
  *     substituted `organizationName`; equality suppresses the override.
  *  4. FSI/PDI-fence both surviving lines via [isolated].
  *
- * This resolver is the single source of truth for the trust-caption rule;
- * [PassIdentityBlock] is one consumer, and a list-row consumer with a fixed
- * title + subtitle shape is the second.
+ * Pass [LocalizedStrings.Empty] when no strings table is available; every lookup
+ * becomes a pass-through and the raw [organizationName] is fenced verbatim.
  */
 public fun resolvePassDisplayIdentity(
-    pass: Pass,
+    organizationName: String,
     userLabel: String?,
-    locale: PassLocale = PassLocale("en"),
+    localizedStrings: LocalizedStrings = LocalizedStrings.Empty,
 ): PassDisplayIdentity {
-    val strings = pass.resolveLocalizedStrings(locale)
-    val displayOrganizationName = strings.lookupOrSelf(pass.organizationName)
+    val displayOrganizationName = localizedStrings.lookupOrSelf(organizationName)
 
     val override = userLabel
         ?.trim()
@@ -67,3 +62,21 @@ public fun resolvePassDisplayIdentity(
         PassDisplayIdentity(primary = isolated(override), eyebrow = isolated(displayOrganizationName))
     }
 }
+
+/**
+ * The [Pass]-bearing convenience overload. Resolves the pass's strings table for
+ * [locale] via Apple's documented locale-fallback chain (see
+ * [Pass.resolveLocalizedStrings]) and delegates to the Summary-shaped primitive
+ * above. Detail-view callers holding a full [Pass] should prefer this overload;
+ * list-row callers holding only a `PassSummary` should call the primitive
+ * directly with `LocalizedStrings.Empty`.
+ */
+public fun resolvePassDisplayIdentity(
+    pass: Pass,
+    userLabel: String?,
+    locale: PassLocale = PassLocale("en"),
+): PassDisplayIdentity = resolvePassDisplayIdentity(
+    organizationName = pass.organizationName,
+    userLabel = userLabel,
+    localizedStrings = pass.resolveLocalizedStrings(locale),
+)

@@ -168,26 +168,95 @@ class PassDisplayIdentityTest {
     }
 
     @Test
+    fun summaryShapedOverloadFencesRawOrgNameWithEmptyStringsTable() {
+        // The PassSummaryRow path: consumer has no `locales` map (PassSummary
+        // deliberately drops it to avoid I/O). `LocalizedStrings.Empty` makes the
+        // lookup a no-op and the resolver fences the raw `organizationName`
+        // verbatim.
+        val identity = resolvePassDisplayIdentity(
+            organizationName = "Acme",
+            userLabel = null,
+        )
+        assertThat(identity.primary).isEqualTo("⁨Acme⁩")
+        assertThat(identity.eyebrow).isNull()
+    }
+
+    @Test
+    fun summaryShapedOverloadSubstitutesThroughExplicitStringsTable() {
+        // Detail-screen path: caller resolved the strings table elsewhere and hands
+        // it in. The resolver substitutes through it just like the Pass-bearing
+        // overload would.
+        val identity = resolvePassDisplayIdentity(
+            organizationName = "#ORGNAME#",
+            userLabel = "Mom's flight",
+            localizedStrings = LocalizedStrings(mapOf("#ORGNAME#" to "Tixly")),
+        )
+        assertThat(identity.primary).isEqualTo("⁨Mom's flight⁩")
+        assertThat(identity.eyebrow).isEqualTo("⁨Tixly⁩")
+    }
+
+    @Test
+    fun summaryShapedOverloadSuppressesOverrideEqualToSubstitutedOrgName() {
+        val identity = resolvePassDisplayIdentity(
+            organizationName = "#ORGNAME#",
+            userLabel = "tixly",
+            localizedStrings = LocalizedStrings(mapOf("#ORGNAME#" to "Tixly")),
+        )
+        assertThat(identity.primary).isEqualTo("⁨Tixly⁩")
+        assertThat(identity.eyebrow).isNull()
+    }
+
+    @Test
+    fun summaryShapedOverloadFencesUserLabelBidiCharacters() {
+        val rtl = "‮BAD"
+        val identity = resolvePassDisplayIdentity(
+            organizationName = "Acme",
+            userLabel = rtl,
+        )
+        assertThat(identity.primary).isEqualTo("⁨$rtl⁩")
+        assertThat(identity.eyebrow).isEqualTo("⁨Acme⁩")
+    }
+
+    @Test
+    fun summaryShapedOverloadWithRawKeyAndEmptyStringsTableShowsRawKey() {
+        // Honesty check: if a consumer hands in the raw `#ORGNAME#` column and
+        // does NOT supply a strings table, the resolver fences the raw key. This
+        // is the documented behavior; the kernel's job is the trust fence, not
+        // post-hoc localization. (A consumer that needs the localized name in a
+        // list row should denormalize at storage write time.)
+        val identity = resolvePassDisplayIdentity(
+            organizationName = "#ORGNAME#",
+            userLabel = null,
+        )
+        assertThat(identity.primary).isEqualTo("⁨#ORGNAME#⁩")
+    }
+
+    @Test
+    fun passOverloadAgreesWithSummaryOverloadOnIdenticalInputs() {
+        // The Pass-bearing overload is just a convenience wrapper that resolves
+        // the strings table for `locale` and delegates. Lock that equivalence so
+        // a future change to either path can't drift the trust contract.
+        val locales = mapOf(PassLocale("en") to LocalizedStrings(mapOf("#ORGNAME#" to "Tixly")))
+        val pass = localizedFixture(organizationName = "#ORGNAME#", locales = locales)
+        val viaPass = resolvePassDisplayIdentity(pass = pass, userLabel = "Mom's flight")
+        val viaSummary = resolvePassDisplayIdentity(
+            organizationName = pass.organizationName,
+            userLabel = "Mom's flight",
+            localizedStrings = locales.getValue(PassLocale("en")),
+        )
+        assertThat(viaPass).isEqualTo(viaSummary)
+    }
+
+    @Test
     fun resolverIsPureAndCallableOutsideCompose() {
-        // No @Composable annotation needed -- the signature must remain JVM-only so
-        // walt-android's PassSummaryRow can call it from a non-Compose code path.
-        // PassLocale is a value class so the JVM method name carries a mangling
-        // suffix; match by prefix (mirrors PublicApiSurfaceTest's lock for
-        // PassIdentityBlock). Skip the synthetic `$default` overload Kotlin emits
-        // for the default-arg entry point; the direct entry is the trust-contract
-        // surface.
-        //
-        // NOTE on failure mode: this lock is sensitive to Kotlin's value-class /
-        // default-arg name mangling. If a future toolchain changes the suffix
-        // shape and this test breaks, the most likely cause is mangling churn,
-        // not a regressed contract. Re-derive the prefix from `javap -p` on the
-        // compiled `PassDisplayIdentityKt` before assuming the resolver itself
-        // changed. Becoming @Composable, in contrast, would bump parameterCount
-        // by two (Composer + $changed) -- the assertion below catches that.
-        val method = Class.forName("is.walt.passes.ui.PassDisplayIdentityKt")
+        // Two 3-arg overloads, neither @Composable (would add Composer + $changed
+        // and bump parameterCount). On mangling churn, re-derive names from
+        // `javap -p` on the compiled `PassDisplayIdentityKt`.
+        val methods = Class.forName("is.walt.passes.ui.PassDisplayIdentityKt")
             .declaredMethods
-            .first { it.name.startsWith("resolvePassDisplayIdentity") && !it.name.contains("\$default") }
-        assertThat(method.parameterCount).isEqualTo(3)
+            .filter { it.name.startsWith("resolvePassDisplayIdentity") && !it.name.contains("\$default") }
+        assertThat(methods).hasSize(2)
+        methods.forEach { assertThat(it.parameterCount).isEqualTo(3) }
     }
 
     private fun passFixture(): Pass = Pass(
