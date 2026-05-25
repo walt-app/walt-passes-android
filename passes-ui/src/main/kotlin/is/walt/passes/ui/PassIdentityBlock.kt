@@ -13,16 +13,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassLocale
-import `is`.walt.passes.core.lookupOrSelf
-import `is`.walt.passes.core.resolveLocalizedStrings
-import `is`.walt.passes.ui.core.isolated
 
 /**
- * The canonical renderer of a pkpass's visible identity (ADR 0007 D6). Given the parsed
- * [pass] and an optional [userLabel] override, this composable renders:
+ * The canonical Compose renderer of a pkpass's visible identity (ADR 0007 D6). Given
+ * the parsed [pass] and an optional [userLabel] override, this composable renders:
  *
- * - [userLabel] == `null`: the substituted signed `organizationName` alone, matching the
- *   pre-override eyebrow shape PassFront has always rendered.
+ * - [userLabel] == `null` (or trimmed-empty): the substituted signed
+ *   `organizationName` alone, matching the pre-override eyebrow shape PassFront has
+ *   always rendered.
  * - [userLabel] non-null and distinct from the substituted `organizationName`: the
  *   [userLabel] as the primary line and the signed `organizationName` as a sub-line
  *   eyebrow underneath. Both on the same surface, both legible (the trust-caption
@@ -32,17 +30,21 @@ import `is`.walt.passes.ui.core.isolated
  *   eyebrow is suppressed because the primary identity already IS the signed
  *   identity; the trust rule is satisfied trivially.
  *
- * Every UI surface that presents a pkpass's primary visible identity MUST route
- * through this composable when a user-label override may be set. Bypassing it to
- * render `userLabel` as bare primary identity is a trust-claim violation (ADR 0007
- * D5). Walt-android's pkpass tile, lane row, and detail chrome are expected to call
- * this rather than reading `StoredPass.userLabel` directly.
+ * Every Compose surface that presents a pkpass's primary visible identity SHOULD
+ * route through this composable when a user-label override may be set. Consumers
+ * whose row shape is incompatible with a vertically stacked Column (single-line
+ * title + single-line subtitle in a fixed-layout list row, for example) MAY instead
+ * call [resolvePassDisplayIdentity] directly to obtain the same FSI/PDI-fenced
+ * `(primary, eyebrow)` pair and feed it into their own typography; that is the
+ * only kernel-blessed bypass. Inlining the comparison, trim, or fence on the
+ * consumer side is a trust-claim violation (ADR 0007 D5).
  *
- * Both lines are fenced with FSI/PDI via [isolated] — both the user-supplied
- * `userLabel` and the parsed-from-PKPASS `organizationName` are untrusted strings
- * that could carry bidi-override characters. The fence prevents either line from
- * reordering the other or surrounding chrome. Mirrors `ScannableCardTile` and
- * `passes-pdf-ui::DocumentTile` for the analogous display-label fields.
+ * Both lines are fenced with FSI/PDI via [resolvePassDisplayIdentity] — both the
+ * user-supplied `userLabel` and the parsed-from-PKPASS `organizationName` are
+ * untrusted strings that could carry bidi-override characters. The fence prevents
+ * either line from reordering the other or surrounding chrome. Mirrors
+ * `ScannableCardTile` and `passes-pdf-ui::DocumentTile` for the analogous
+ * display-label fields.
  */
 @Suppress("LongParameterList") // detekt functionThreshold=6; trips on six declared params.
 @Composable
@@ -54,8 +56,9 @@ public fun PassIdentityBlock(
     primaryColor: Color = Color.Unspecified,
     eyebrowColor: Color = Color.Unspecified,
 ) {
-    val strings = remember(pass.locales, locale) { pass.resolveLocalizedStrings(locale) }
-    val displayOrganizationName = strings.lookupOrSelf(pass.organizationName)
+    val identity = remember(pass, userLabel, locale) {
+        resolvePassDisplayIdentity(pass, userLabel, locale)
+    }
 
     val resolvedPrimary = if (primaryColor == Color.Unspecified) LocalContentColor.current else primaryColor
     val resolvedEyebrow = when {
@@ -63,13 +66,9 @@ public fun PassIdentityBlock(
         else -> resolvedPrimary.copy(alpha = 0.7f)
     }
 
-    val override = userLabel
-        ?.trim()
-        ?.takeIf { it.isNotEmpty() && !it.equals(displayOrganizationName.trim(), ignoreCase = true) }
-
-    if (override == null) {
+    if (identity.eyebrow == null) {
         Text(
-            text = isolated(displayOrganizationName),
+            text = identity.primary,
             style = MaterialTheme.typography.labelLarge,
             color = resolvedPrimary,
             maxLines = 1,
@@ -86,7 +85,7 @@ public fun PassIdentityBlock(
         // Primary line (user-supplied): cap at 2 lines, ellipsize. Mirrors
         // ScannableCardTile / DocumentTile for analogous user-controlled labels.
         Text(
-            text = isolated(override),
+            text = identity.primary,
             style = MaterialTheme.typography.labelLarge,
             color = resolvedPrimary,
             maxLines = 2,
@@ -96,7 +95,7 @@ public fun PassIdentityBlock(
         // "trust caption never truncates" posture so the issuer identity stays visible
         // even under bounded tile chrome.
         Text(
-            text = isolated(displayOrganizationName),
+            text = identity.eyebrow,
             style = MaterialTheme.typography.labelSmall,
             color = resolvedEyebrow,
             maxLines = 1,
