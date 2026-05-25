@@ -65,14 +65,18 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun fullScreenDocumentViewHasExactlySixUserVisibleParameters() {
-        // (doc, pdfFile, renderer, onClose, modifier, telemetry). D5: trust caption is
-        // composed inside the surface; no parameter omits it. Required onClose forces
-        // the host to provide a back path — there is no "stuck in full-screen" state.
+    fun fullScreenDocumentViewHasExactlySevenUserVisibleParameters() {
+        // (doc, pdfFile, renderer, onClose, modifier, telemetry, closeButton). D5:
+        // trust caption is composed inside the surface; no parameter omits it. Required
+        // onClose forces the host to provide a back path — there is no "stuck in
+        // full-screen" state. The seventh slot is a host-supplied close-button
+        // composable (icon vs. text, host chrome) that does not touch the trust caption
+        // or any other surface affordance, so D5 is unaffected. Bumping from 6 to 7 is
+        // the deliberate change for that slot, not a slip.
         assertUserVisibleParamCount(
             "FullScreenDocumentViewKt",
             "FullScreenDocumentView",
-            expected = 6,
+            expected = 7,
         )
     }
 

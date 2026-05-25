@@ -59,6 +59,12 @@ import `is`.walt.passes.ui.core.toComposeColor
  * Page cache: fit-resolution renders are cached per page; sub-rect renders are not
  * (cache-keying them would explode the key space and stale entries surface as a
  * sharper-but-wrong region after a pan).
+ *
+ * @param closeButton Host-supplied close affordance, rendered at [Alignment.TopStart].
+ *   The surface owns placement and [onClose] wiring; the host owns chrome, sizing, and
+ *   any inset / padding handling (the default applies its own padding, host overrides
+ *   should apply their own — e.g. `windowInsetsPadding(WindowInsets.statusBars)` on
+ *   edge-to-edge displays so the chip never slides under the system clock).
  */
 @Composable
 @Suppress("LongParameterList")
@@ -69,6 +75,9 @@ public fun FullScreenDocumentView(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    closeButton: @Composable (onClose: () -> Unit) -> Unit = { handler ->
+        CloseFullScreenButton(onClick = handler)
+    },
 ) {
     val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) { PdfThumbnailCache() }
@@ -109,7 +118,7 @@ public fun FullScreenDocumentView(
         }
 
         Box(modifier = Modifier.align(Alignment.TopStart)) {
-            CloseFullScreenButton(onClick = onClose)
+            closeButton(onClose)
         }
     }
 }

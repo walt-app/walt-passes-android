@@ -164,8 +164,9 @@ private fun rasterise(
     }
 }
 
-// FullPage keeps the legacy `null` transform (fit page to bitmap). SubRect maps the
-// sub-rect's page-point coords onto the full destination bitmap, sharp under zoom.
+// FullPage: aspect-preserving fit (letterbox bars come from the caller's eraseColor),
+// matching the consumer's pageRectInSlot letterbox assumption. SubRect maps a unit-rect
+// of the page onto the full bitmap so zoomed regions stay sharp.
 private fun matrixFor(
     sourceRect: RenderSourceRect,
     pageWidth: Int,
@@ -174,7 +175,18 @@ private fun matrixFor(
     heightPx: Int,
 ): Matrix? =
     when (sourceRect) {
-        is RenderSourceRect.FullPage -> null
+        is RenderSourceRect.FullPage -> {
+            val scale = minOf(
+                widthPx.toFloat() / pageWidth.toFloat(),
+                heightPx.toFloat() / pageHeight.toFloat(),
+            )
+            val dx = (widthPx - pageWidth * scale) / 2f
+            val dy = (heightPx - pageHeight * scale) / 2f
+            Matrix().apply {
+                setScale(scale, scale)
+                postTranslate(dx, dy)
+            }
+        }
         is RenderSourceRect.SubRect -> {
             val srcLeft = sourceRect.left * pageWidth
             val srcTop = sourceRect.top * pageHeight
