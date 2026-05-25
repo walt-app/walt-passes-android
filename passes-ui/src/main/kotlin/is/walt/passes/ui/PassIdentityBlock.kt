@@ -56,7 +56,11 @@ public fun PassIdentityBlock(
     primaryColor: Color = Color.Unspecified,
     eyebrowColor: Color = Color.Unspecified,
 ) {
-    val identity = remember(pass, userLabel, locale) {
+    // Key on the fields the resolver actually reads. `Pass`'s data-class equals walks
+    // every ImageBytes via contentEquals, which is measurable on multi-MB strip/thumb
+    // images during recomposition; substituting the load-bearing inputs keeps the
+    // remember scope correct without paying that cost.
+    val identity = remember(pass.organizationName, pass.locales, userLabel, locale) {
         resolvePassDisplayIdentity(pass, userLabel, locale)
     }
 

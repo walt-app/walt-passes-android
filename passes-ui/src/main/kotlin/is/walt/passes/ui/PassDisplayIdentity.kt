@@ -45,8 +45,9 @@ public data class PassDisplayIdentity(
  *     substituted `organizationName`; equality suppresses the override.
  *  4. FSI/PDI-fence both surviving lines via [isolated].
  *
- * Mirrors the body of [PassIdentityBlock] verbatim; that composable now consumes
- * this resolver so the trust contract has a single source of truth.
+ * This resolver is the single source of truth for the trust-caption rule;
+ * [PassIdentityBlock] is one consumer, and a list-row consumer with a fixed
+ * title + subtitle shape is the second.
  */
 public fun resolvePassDisplayIdentity(
     pass: Pass,

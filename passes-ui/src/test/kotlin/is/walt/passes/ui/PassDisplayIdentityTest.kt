@@ -12,11 +12,12 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 /**
- * JVM-pure coverage for the [resolvePassDisplayIdentity] resolver. The composable
- * surface that consumes it is exercised by `TrustClaimSurfaceTest`; these tests
- * lock the trust-caption rule (ADR 0007 D5 / D6) at the value-class boundary so a
- * consumer reading the resolver in a non-Compose context (e.g. a list-row title
- * driven by walt-android's `PassSummaryRow`) gets the same contract.
+ * JVM-pure coverage for the [resolvePassDisplayIdentity] resolver (wpass-up1).
+ * The composable surface that consumes it is exercised by `TrustClaimSurfaceTest`;
+ * these tests lock the trust-caption rule (ADR 0007 D5 / D6) at the value-class
+ * boundary so a consumer reading the resolver in a non-Compose context (e.g. a
+ * list-row title driven by walt-android's `PassSummaryRow`) gets the same
+ * contract.
  *
  * "Fenced" below means each returned line is wrapped in U+2068 / U+2069 (FSI/PDI),
  * the same isolation `PassIdentityBlock` has always applied. See
@@ -172,16 +173,20 @@ class PassDisplayIdentityTest {
         // walt-android's PassSummaryRow can call it from a non-Compose code path.
         // PassLocale is a value class so the JVM method name carries a mangling
         // suffix; match by prefix (mirrors PublicApiSurfaceTest's lock for
-        // PassIdentityBlock).
-        // Skip the synthetic `$default` overload Kotlin emits for the default-arg
-        // entry point; the direct entry is the trust-contract surface.
+        // PassIdentityBlock). Skip the synthetic `$default` overload Kotlin emits
+        // for the default-arg entry point; the direct entry is the trust-contract
+        // surface.
+        //
+        // NOTE on failure mode: this lock is sensitive to Kotlin's value-class /
+        // default-arg name mangling. If a future toolchain changes the suffix
+        // shape and this test breaks, the most likely cause is mangling churn,
+        // not a regressed contract. Re-derive the prefix from `javap -p` on the
+        // compiled `PassDisplayIdentityKt` before assuming the resolver itself
+        // changed. Becoming @Composable, in contrast, would bump parameterCount
+        // by two (Composer + $changed) -- the assertion below catches that.
         val method = Class.forName("is.walt.passes.ui.PassDisplayIdentityKt")
             .declaredMethods
             .first { it.name.startsWith("resolvePassDisplayIdentity") && !it.name.contains("\$default") }
-        // If anyone adds @Composable later the method gains a synthetic `Composer` /
-        // `\$changed` tail; the parameter count would jump. Lock to the documented
-        // (pass, userLabel, locale) shape (PassLocale erases to its underlying
-        // String at the JVM signature, so three params either way).
         assertThat(method.parameterCount).isEqualTo(3)
     }
 
