@@ -249,22 +249,9 @@ class PassDisplayIdentityTest {
 
     @Test
     fun resolverIsPureAndCallableOutsideCompose() {
-        // No @Composable annotation needed -- the signatures must remain JVM-only
-        // so walt-android's PassSummaryRow can call them from a non-Compose code
-        // path. Skip the synthetic `$default` overloads Kotlin emits for the
-        // default-arg entries; the direct entries are the trust-contract surface.
-        //
-        // NOTE on failure mode: this lock is sensitive to Kotlin's value-class /
-        // default-arg name mangling. If a future toolchain changes the suffix
-        // shape and this test breaks, the most likely cause is mangling churn,
-        // not a regressed contract. Re-derive the names from `javap -p` on the
-        // compiled `PassDisplayIdentityKt` before assuming the resolver itself
-        // changed. Becoming @Composable, in contrast, would bump parameterCount
-        // by two (Composer + $changed) -- the assertion below catches that.
-        //
-        // Two overloads are expected after wpass-aaf: the Summary-shaped
-        // primitive (organizationName, userLabel, localizedStrings) and the
-        // Pass-bearing convenience (pass, userLabel, locale). Both are 3-arg.
+        // Two 3-arg overloads, neither @Composable (would add Composer + $changed
+        // and bump parameterCount). On mangling churn, re-derive names from
+        // `javap -p` on the compiled `PassDisplayIdentityKt`.
         val methods = Class.forName("is.walt.passes.ui.PassDisplayIdentityKt")
             .declaredMethods
             .filter { it.name.startsWith("resolvePassDisplayIdentity") && !it.name.contains("\$default") }
