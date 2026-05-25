@@ -164,15 +164,9 @@ private fun rasterise(
     }
 }
 
-// FullPage builds an aspect-preserving fit matrix (scale by the smaller axis, centre the
-// page inside the request box). The page's white letterbox bars are supplied by the
-// caller's `bitmap.eraseColor(Color.WHITE)`. The legacy `null`-transform path (fit page
-// to bitmap, ignoring source aspect) stretched portrait PDFs into a phone-screen-shaped
-// request, producing a visibly squished initial render at FullScreen scale; the
-// consumer-side `pageRectInSlot` math already assumes aspect-preserving letterboxing,
-// so this aligns the bitmap with where the consumer expects the page to sit. SubRect
-// maps the sub-rect's page-point coords onto the full destination bitmap, sharp under
-// zoom (callers fence the sub-rect's aspect against the request aspect already).
+// FullPage: aspect-preserving fit (letterbox bars come from the caller's eraseColor),
+// matching the consumer's pageRectInSlot letterbox assumption. SubRect maps a unit-rect
+// of the page onto the full bitmap so zoomed regions stay sharp.
 private fun matrixFor(
     sourceRect: RenderSourceRect,
     pageWidth: Int,
