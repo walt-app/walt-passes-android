@@ -69,6 +69,13 @@ public fun FullScreenDocumentView(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    // Host-supplied close affordance; receives the same [onClose] the surface uses, so
+    // hosts can swap the default rectangular text button for an icon-only or branded
+    // chip without re-implementing the trust caption / pager scaffolding. Default
+    // preserves the original label-based render.
+    closeButton: @Composable (onClose: () -> Unit) -> Unit = { handler ->
+        CloseFullScreenButton(onClick = handler)
+    },
 ) {
     val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) { PdfThumbnailCache() }
@@ -109,7 +116,7 @@ public fun FullScreenDocumentView(
         }
 
         Box(modifier = Modifier.align(Alignment.TopStart)) {
-            CloseFullScreenButton(onClick = onClose)
+            closeButton(onClose)
         }
     }
 }

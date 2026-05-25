@@ -164,8 +164,15 @@ private fun rasterise(
     }
 }
 
-// FullPage keeps the legacy `null` transform (fit page to bitmap). SubRect maps the
-// sub-rect's page-point coords onto the full destination bitmap, sharp under zoom.
+// FullPage builds an aspect-preserving fit matrix (scale by the smaller axis, centre the
+// page inside the request box). The page's white letterbox bars are supplied by the
+// caller's `bitmap.eraseColor(Color.WHITE)`. The legacy `null`-transform path (fit page
+// to bitmap, ignoring source aspect) stretched portrait PDFs into a phone-screen-shaped
+// request, producing a visibly squished initial render at FullScreen scale; the
+// consumer-side `pageRectInSlot` math already assumes aspect-preserving letterboxing,
+// so this aligns the bitmap with where the consumer expects the page to sit. SubRect
+// maps the sub-rect's page-point coords onto the full destination bitmap, sharp under
+// zoom (callers fence the sub-rect's aspect against the request aspect already).
 private fun matrixFor(
     sourceRect: RenderSourceRect,
     pageWidth: Int,
@@ -174,7 +181,18 @@ private fun matrixFor(
     heightPx: Int,
 ): Matrix? =
     when (sourceRect) {
-        is RenderSourceRect.FullPage -> null
+        is RenderSourceRect.FullPage -> {
+            val scale = minOf(
+                widthPx.toFloat() / pageWidth.toFloat(),
+                heightPx.toFloat() / pageHeight.toFloat(),
+            )
+            val dx = (widthPx - pageWidth * scale) / 2f
+            val dy = (heightPx - pageHeight * scale) / 2f
+            Matrix().apply {
+                setScale(scale, scale)
+                postTranslate(dx, dy)
+            }
+        }
         is RenderSourceRect.SubRect -> {
             val srcLeft = sourceRect.left * pageWidth
             val srcTop = sourceRect.top * pageHeight
