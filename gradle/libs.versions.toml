@@ -2,7 +2,7 @@
 agp = "9.0.1"
 kotlin = "2.2.21"
 kotlinxSerialization = "1.7.3"
-kotlinxCoroutines = "1.10.2"
+kotlinxCoroutines = "1.11.0"
 junit = "4.13.2"
 truth = "1.4.5"
 detekt = "1.23.8"
@@ -22,7 +22,7 @@ androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
 sqlcipher = "4.6.1"
 androidxStartup = "1.2.0"
-xerial = "3.53.0.0"
+xerial = "3.53.1.0"
 
 [libraries]
 # Gradle plugins (consumed by build-logic convention plugins).
