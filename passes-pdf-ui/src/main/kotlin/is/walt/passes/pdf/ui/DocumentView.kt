@@ -59,6 +59,15 @@ import `is`.walt.passes.ui.core.toComposeColor
  *  - Inline surface is fixed 1x: no pinch-zoom, no pan, no double-tap. Zoom lives only
  *    on the full-screen detail surface (wpass-ny4 / wpass-jil).
  *
+ * @param fullScreenAffordance Host-supplied open-full-screen affordance, composed only
+ *   when [onOpenFullScreen] is non-null and floated over the bottom-centre of the page
+ *   region. Mirrors the `closeButton` slot on [FullScreenDocumentView]: the surface owns
+ *   placement and wiring (it is handed the open callback), the host owns chrome — shape,
+ *   corner radius, leading icon, label, padding (wpass-emn). The default renders the
+ *   kernel's neutral banner so existing label-and-colour-only consumers are unchanged.
+ *   This slot cannot suppress the trust caption or the page tap target; both are
+ *   structural and independent of it.
+ *
  * Bitmap ownership: the LRU cache stores native [Bitmap]s and recycles them on
  * eviction; the renderer service has already pre-recycled its source-side copy
  * before returning. On dispose the cache is cleared so every retained pixel buffer
@@ -85,6 +94,9 @@ public fun DocumentView(
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     onOpenFullScreen: (() -> Unit)? = null,
+    fullScreenAffordance: @Composable (onOpen: () -> Unit) -> Unit = { onOpen ->
+        FullScreenBanner(onClick = onOpen)
+    },
 ) {
     val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) { PdfThumbnailCache() }
@@ -103,47 +115,59 @@ public fun DocumentView(
         // `laneBackground` is painted behind the pager only — it is the document-surface
         // tone the rasterised page sits on (showing through ContentScale.Fit letterbox
         // bars). The trust caption above sits on the consumer's background, reading as
-        // host screen chrome.
-        //
-        // When the host wires `onOpenFullScreen`, a tap anywhere on the page region
-        // launches the full-screen surface — the banner below is a discoverability
-        // affordance, the page itself is the primary tap target. `.clickable` and
-        // the pager's drag handling coexist: Compose's gesture system routes quick
-        // press-and-release to the click handler and horizontal drag to the pager.
-        val pagerModifier = Modifier
-            .fillMaxWidth()
-            .weight(1f)
-            .background(semantics.laneBackground.toComposeColor())
-            .let {
-                if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
+        // host screen chrome. The page region is a Box so the open-full-screen affordance
+        // can float over its bottom edge (wpass-emn) rather than dock below it.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(semantics.laneBackground.toComposeColor()),
+        ) {
+            // When the host wires `onOpenFullScreen`, a tap anywhere on the page region
+            // launches the full-screen surface — the affordance is a discoverability
+            // hint, the page itself is the primary tap target. `.clickable` and the
+            // pager's drag handling coexist: Compose routes quick press-and-release to
+            // the click handler and horizontal drag to the pager.
+            val pagerModifier = Modifier
+                .fillMaxSize()
+                .let {
+                    if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
+                }
+                .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
+            HorizontalPager(state = pagerState, modifier = pagerModifier) { page ->
+                DocumentPage(
+                    document = doc,
+                    pageIndex = page,
+                    pdfFile = pdfFile,
+                    renderer = renderer,
+                    cache = cache,
+                    telemetry = telemetry,
+                )
             }
-            .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
-        HorizontalPager(state = pagerState, modifier = pagerModifier) { page ->
-            DocumentPage(
-                document = doc,
-                pageIndex = page,
-                pdfFile = pdfFile,
-                renderer = renderer,
-                cache = cache,
-                telemetry = telemetry,
-            )
-        }
 
-        // wpass-jil: full-screen banner. Opt-in via `onOpenFullScreen` — hosts without
-        // a full-screen route render no banner, which is a legitimate configuration
-        // (the affordance is the page tap above). When wired, the banner is a docked
-        // discoverability hint below the pager, above any other host chrome. The trust
-        // caption sits above the pager in this Column so the banner cannot push it
-        // off-screen.
-        if (onOpenFullScreen != null) {
-            FullScreenBanner(onClick = onOpenFullScreen)
+            // wpass-jil / wpass-emn: open-full-screen affordance. Opt-in via
+            // `onOpenFullScreen` — hosts without a full-screen route render nothing here
+            // (the page tap above remains the affordance). When wired, the host-supplied
+            // `fullScreenAffordance` floats over the bottom-centre of the page; the
+            // default is the kernel's neutral banner. The trust caption sits above this
+            // Box in the Column, so the affordance can never overlap or suppress it.
+            if (onOpenFullScreen != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 16.dp),
+                ) {
+                    fullScreenAffordance(onOpenFullScreen)
+                }
+            }
         }
     }
 }
 
-// wpass-jil: docked banner inside DocumentView whose tap launches the full-screen
-// detail surface. Label and colours come from DocumentSemantics so the host owns the
-// wording and styling.
+// wpass-jil: the kernel's neutral default open-full-screen affordance, floated over the
+// page bottom. Label and colours come from DocumentSemantics so the host owns wording
+// and styling; a host wanting a different register (pill, leading icon, placement)
+// supplies its own via DocumentView's `fullScreenAffordance` slot (wpass-emn).
 @Composable
 private fun FullScreenBanner(onClick: () -> Unit) {
     val semantics = LocalDocumentSemantics.current
