@@ -13,6 +13,7 @@ import android.system.OsConstants
 import `is`.walt.passes.pdf.DocumentRejectedKind
 import `is`.walt.passes.pdf.PdfImportConfig
 import java.io.IOException
+import kotlin.math.roundToInt
 
 /**
  * The isolated-process renderer service. Declared in this module's manifest with
@@ -101,6 +102,31 @@ internal suspend fun doRender(
     }
 }
 
+/**
+ * Output bitmap dimensions for a sub-rect render. The sub-rect is rasterised at a single
+ * uniform [scale] so the page region keeps its native aspect ratio; the output is the
+ * largest such bitmap fitting within the requested [maxWidthPx] x [maxHeightPx] bound
+ * (already clamped under the 4 MP cap by the caller). [widthPx] / [heightPx] therefore
+ * carry the region's own aspect, never the slot's — drawing them undistorted is what
+ * makes the wpass-fdh stretch impossible by construction.
+ */
+internal data class SubRectOutputDims(val widthPx: Int, val heightPx: Int, val scale: Float)
+
+internal fun subRectOutputDims(
+    sourceRect: RenderSourceRect.SubRect,
+    pageWidth: Int,
+    pageHeight: Int,
+    maxWidthPx: Int,
+    maxHeightPx: Int,
+): SubRectOutputDims {
+    val srcWidth = (sourceRect.right - sourceRect.left) * pageWidth
+    val srcHeight = (sourceRect.bottom - sourceRect.top) * pageHeight
+    val scale = minOf(maxWidthPx / srcWidth, maxHeightPx / srcHeight)
+    val w = (srcWidth * scale).roundToInt().coerceIn(1, maxWidthPx)
+    val h = (srcHeight * scale).roundToInt().coerceIn(1, maxHeightPx)
+    return SubRectOutputDims(w, h, scale)
+}
+
 // Strict ordering rules out zero-area rects (would produce a degenerate Matrix); the
 // unit-square bound keeps the consumer's failures visible instead of silently blank.
 internal fun isSourceRectValid(sourceRect: RenderSourceRect): Boolean =
@@ -143,20 +169,39 @@ private fun rasterise(
     heightPx: Int,
     sourceRect: RenderSourceRect,
 ): RenderResult.Ok {
-    val bitmap = Bitmap.createBitmap(widthPx, heightPx, Bitmap.Config.ARGB_8888)
+    // Output dimensions and transform both derive from the source rect. FullPage fills
+    // the requested bitmap (letterbox bars are the caller's eraseColor). SubRect sizes
+    // the bitmap to the region's own aspect ratio and scales it uniformly, so the page
+    // can never be stretched at the source (wpass-fdh).
+    val outWidth: Int
+    val outHeight: Int
+    val transform: Matrix
+    when (sourceRect) {
+        is RenderSourceRect.FullPage -> {
+            outWidth = widthPx
+            outHeight = heightPx
+            transform = fullPageMatrix(p.width, p.height, widthPx, heightPx)
+        }
+        is RenderSourceRect.SubRect -> {
+            val dims = subRectOutputDims(sourceRect, p.width, p.height, widthPx, heightPx)
+            outWidth = dims.widthPx
+            outHeight = dims.heightPx
+            transform = subRectMatrix(sourceRect, p.width, p.height, dims.scale)
+        }
+    }
+    val bitmap = Bitmap.createBitmap(outWidth, outHeight, Bitmap.Config.ARGB_8888)
     try {
         // PdfRenderer.Page.render() draws PDF content on top of existing pixels without
         // clearing them. Pages that rely on the implicit white page background otherwise
         // rasterise as content-on-transparent and compose against the host's dark surface,
         // hiding white-on-page artwork (GitHub #92: QR codes vanish in dark mode).
         bitmap.eraseColor(Color.WHITE)
-        val transform = matrixFor(sourceRect, p.width, p.height, widthPx, heightPx)
         p.render(bitmap, null, transform, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
         val pageAspect = p.width.toFloat() / p.height.toFloat()
         return RenderResult.Ok(
-            sharedMemory = packIntoSharedMemory(bitmap, widthPx, heightPx),
-            widthPx = widthPx,
-            heightPx = heightPx,
+            sharedMemory = packIntoSharedMemory(bitmap, outWidth, outHeight),
+            widthPx = outWidth,
+            heightPx = outHeight,
             pageAspect = pageAspect,
         )
     } finally {
@@ -164,40 +209,38 @@ private fun rasterise(
     }
 }
 
-// FullPage: aspect-preserving fit (letterbox bars come from the caller's eraseColor),
-// matching the consumer's pageRectInSlot letterbox assumption. SubRect maps a unit-rect
-// of the page onto the full bitmap so zoomed regions stay sharp.
-private fun matrixFor(
-    sourceRect: RenderSourceRect,
+// Aspect-preserving fit of the whole page into the requested bitmap; letterbox bars come
+// from the caller's eraseColor, matching the consumer's pageRectInSlot assumption.
+private fun fullPageMatrix(pageWidth: Int, pageHeight: Int, widthPx: Int, heightPx: Int): Matrix {
+    val scale = minOf(
+        widthPx.toFloat() / pageWidth.toFloat(),
+        heightPx.toFloat() / pageHeight.toFloat(),
+    )
+    val dx = (widthPx - pageWidth * scale) / 2f
+    val dy = (heightPx - pageHeight * scale) / 2f
+    return Matrix().apply {
+        setScale(scale, scale)
+        postTranslate(dx, dy)
+    }
+}
+
+// Single uniform scale (the same factor on both axes) maps the sub-rect onto a bitmap
+// sized to the region's aspect ratio. The pre-wpass-fdh code scaled X and Y
+// independently to fill a fixed bitmap, which stretched the page whenever the visible
+// region's aspect differed from the requested bitmap's.
+private fun subRectMatrix(
+    sourceRect: RenderSourceRect.SubRect,
     pageWidth: Int,
     pageHeight: Int,
-    widthPx: Int,
-    heightPx: Int,
-): Matrix? =
-    when (sourceRect) {
-        is RenderSourceRect.FullPage -> {
-            val scale = minOf(
-                widthPx.toFloat() / pageWidth.toFloat(),
-                heightPx.toFloat() / pageHeight.toFloat(),
-            )
-            val dx = (widthPx - pageWidth * scale) / 2f
-            val dy = (heightPx - pageHeight * scale) / 2f
-            Matrix().apply {
-                setScale(scale, scale)
-                postTranslate(dx, dy)
-            }
-        }
-        is RenderSourceRect.SubRect -> {
-            val srcLeft = sourceRect.left * pageWidth
-            val srcTop = sourceRect.top * pageHeight
-            val srcWidth = (sourceRect.right - sourceRect.left) * pageWidth
-            val srcHeight = (sourceRect.bottom - sourceRect.top) * pageHeight
-            Matrix().apply {
-                setScale(widthPx / srcWidth, heightPx / srcHeight)
-                preTranslate(-srcLeft, -srcTop)
-            }
-        }
+    scale: Float,
+): Matrix {
+    val srcLeft = sourceRect.left * pageWidth
+    val srcTop = sourceRect.top * pageHeight
+    return Matrix().apply {
+        setScale(scale, scale)
+        preTranslate(-srcLeft, -srcTop)
     }
+}
 
 private fun packIntoSharedMemory(bitmap: Bitmap, widthPx: Int, heightPx: Int): SharedMemory {
     val byteCount = widthPx * heightPx * BYTES_PER_PIXEL

@@ -33,13 +33,14 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun documentViewHasExactlySixUserVisibleParameters() {
-        // (doc, pdfFile, renderer, modifier, telemetry, onOpenFullScreen). D5: still no
-        // flag to hide the trust caption. The sixth slot is the wpass-jil full-screen
-        // navigation callback with a `null` default — when null the banner is hidden,
-        // when non-null the banner appears and invokes the callback on tap. Bumping
-        // from 5 to 6 is the deliberate change for that issue, not a slip.
-        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 6)
+    fun documentViewHasExactlySevenUserVisibleParameters() {
+        // (doc, pdfFile, renderer, modifier, telemetry, onOpenFullScreen,
+        // fullScreenAffordance). D5: still no flag to hide the trust caption. The seventh
+        // slot is the wpass-emn host-supplied open-full-screen affordance composable — it
+        // restyles/places the open hint only and cannot touch the trust caption or the
+        // page tap target, so D5/D8 are unaffected. Bumping from 6 to 7 is the deliberate
+        // change for that slot, not a slip.
+        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 7)
     }
 
     @Test

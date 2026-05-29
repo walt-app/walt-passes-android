@@ -2,10 +2,12 @@ package `is`.walt.passes.pdf.ui
 
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -295,6 +297,76 @@ class DocumentViewInstrumentedTest {
         composeRule.onNodeWithContentDescription("Page 1 of 1").assertIsDisplayed()
         composeRule.onNodeWithContentDescription("Page 1 of 1").performClick()
         assertThat(tapped).isTrue()
+    }
+
+    @Test
+    fun customFullScreenAffordanceReplacesTheDefaultAndKeepsTheKernelBehaviour() {
+        // wpass-emn: a host-supplied affordance replaces the kernel's default banner
+        // (no "Tap for full screen" text), is itself a tap target for the open callback,
+        // and does NOT consume the page tap — the page remains the primary affordance.
+        val recorder = RecordingBinder()
+        var affordanceTaps = 0
+        var pageTaps = 0
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                    onOpenFullScreen = { pageTaps++ },
+                    fullScreenAffordance = { onOpen ->
+                        Text(
+                            text = "Open it",
+                            modifier = Modifier.clickable {
+                                affordanceTaps++
+                                onOpen()
+                            },
+                        )
+                    },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onAllNodesWithText("Tap for full screen").assertCountEquals(0)
+
+        composeRule.onNodeWithText("Open it").assertIsDisplayed()
+        composeRule.onNodeWithText("Open it").performClick()
+        assertThat(affordanceTaps).isEqualTo(1)
+
+        // The page itself still opens full screen independently of the custom affordance.
+        val pageTapsBefore = pageTaps
+        composeRule.onNodeWithContentDescription("Page 1 of 1").performClick()
+        assertThat(pageTaps).isGreaterThan(pageTapsBefore)
+    }
+
+    @Test
+    fun defaultBannerDocksBelowThePageAndDoesNotOverlapIt() {
+        // wpass-emn review: with no custom affordance the neutral banner must dock below
+        // the page (original layout), never float over it — bottom-of-page content
+        // (barcodes, QR, signatures) must stay visible for default consumers.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                    onOpenFullScreen = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        val pageBottom = composeRule
+            .onNodeWithContentDescription("Page 1 of 1")
+            .getUnclippedBoundsInRoot()
+            .bottom
+        val bannerTop = composeRule
+            .onNodeWithText("Tap for full screen")
+            .getUnclippedBoundsInRoot()
+            .top
+
+        assertThat(bannerTop.value).isAtLeast(pageBottom.value)
     }
 
     @Test
