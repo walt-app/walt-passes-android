@@ -59,14 +59,16 @@ import `is`.walt.passes.ui.core.toComposeColor
  *  - Inline surface is fixed 1x: no pinch-zoom, no pan, no double-tap. Zoom lives only
  *    on the full-screen detail surface (wpass-ny4 / wpass-jil).
  *
- * @param fullScreenAffordance Host-supplied open-full-screen affordance, composed only
- *   when [onOpenFullScreen] is non-null and floated over the bottom-centre of the page
- *   region. Mirrors the `closeButton` slot on [FullScreenDocumentView]: the surface owns
- *   placement and wiring (it is handed the open callback), the host owns chrome — shape,
- *   corner radius, leading icon, label, padding (wpass-emn). The default renders the
- *   kernel's neutral banner so existing label-and-colour-only consumers are unchanged.
- *   This slot cannot suppress the trust caption or the page tap target; both are
- *   structural and independent of it.
+ * @param fullScreenAffordance Optional host-supplied open-full-screen affordance, used
+ *   only when [onOpenFullScreen] is also non-null. Mirrors the `closeButton` slot on
+ *   [FullScreenDocumentView]: the host owns chrome — shape, corner radius, leading icon,
+ *   label, padding (wpass-emn). When supplied it is **floated over the bottom-centre of
+ *   the page** (matching Walt's pill design, which overlaps the page edge); the host
+ *   accepts that overlap as part of choosing a floating affordance. When `null` (the
+ *   default) the kernel's neutral banner is **docked below the page** exactly as before,
+ *   so consumers that do not pass this slot are unchanged and the page is never obscured.
+ *   Either way this slot cannot suppress the trust caption or the page tap target; both
+ *   are structural and independent of it.
  *
  * Bitmap ownership: the LRU cache stores native [Bitmap]s and recycles them on
  * eviction; the renderer service has already pre-recycled its source-side copy
@@ -94,9 +96,7 @@ public fun DocumentView(
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     onOpenFullScreen: (() -> Unit)? = null,
-    fullScreenAffordance: @Composable (onOpen: () -> Unit) -> Unit = { onOpen ->
-        FullScreenBanner(onClick = onOpen)
-    },
+    fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
 ) {
     val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) { PdfThumbnailCache() }
@@ -112,22 +112,17 @@ public fun DocumentView(
     ) {
         DocumentTrustCaption()
 
-        // `laneBackground` is painted behind the pager only — it is the document-surface
-        // tone the rasterised page sits on (showing through ContentScale.Fit letterbox
-        // bars). The trust caption above sits on the consumer's background, reading as
-        // host screen chrome. The page region is a Box so the open-full-screen affordance
-        // can float over its bottom edge (wpass-emn) rather than dock below it.
+        // `laneBackground` paints behind the pager only — the document-surface tone the
+        // page sits on (showing through ContentScale.Fit letterbox bars). The page region
+        // is a Box so a host-supplied affordance can float over its bottom edge.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
                 .background(semantics.laneBackground.toComposeColor()),
         ) {
-            // When the host wires `onOpenFullScreen`, a tap anywhere on the page region
-            // launches the full-screen surface — the affordance is a discoverability
-            // hint, the page itself is the primary tap target. `.clickable` and the
-            // pager's drag handling coexist: Compose routes quick press-and-release to
-            // the click handler and horizontal drag to the pager.
+            // Page tap opens full screen; clickable and the pager's drag coexist (Compose
+            // routes quick press-release to the click, horizontal drag to the pager).
             val pagerModifier = Modifier
                 .fillMaxSize()
                 .let {
@@ -145,13 +140,9 @@ public fun DocumentView(
                 )
             }
 
-            // wpass-jil / wpass-emn: open-full-screen affordance. Opt-in via
-            // `onOpenFullScreen` — hosts without a full-screen route render nothing here
-            // (the page tap above remains the affordance). When wired, the host-supplied
-            // `fullScreenAffordance` floats over the bottom-centre of the page; the
-            // default is the kernel's neutral banner. The trust caption sits above this
-            // Box in the Column, so the affordance can never overlap or suppress it.
-            if (onOpenFullScreen != null) {
+            // A host-supplied affordance floats over the page bottom-centre (wpass-emn);
+            // the host accepts that overlap by choosing a floating affordance.
+            if (onOpenFullScreen != null && fullScreenAffordance != null) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -161,13 +152,20 @@ public fun DocumentView(
                 }
             }
         }
+
+        // No custom affordance: the neutral banner docks below the page (original
+        // layout), so default consumers' page content is never obscured. The trust
+        // caption above this Column cannot be pushed off-screen by it.
+        if (onOpenFullScreen != null && fullScreenAffordance == null) {
+            FullScreenBanner(onClick = onOpenFullScreen)
+        }
     }
 }
 
-// wpass-jil: the kernel's neutral default open-full-screen affordance, floated over the
-// page bottom. Label and colours come from DocumentSemantics so the host owns wording
-// and styling; a host wanting a different register (pill, leading icon, placement)
-// supplies its own via DocumentView's `fullScreenAffordance` slot (wpass-emn).
+// wpass-jil: the kernel's neutral default open-full-screen affordance, docked below the
+// page. Label and colours come from DocumentSemantics; a host wanting a different
+// register (pill, leading icon, floating placement) supplies its own via DocumentView's
+// `fullScreenAffordance` slot (wpass-emn).
 @Composable
 private fun FullScreenBanner(onClick: () -> Unit) {
     val semantics = LocalDocumentSemantics.current

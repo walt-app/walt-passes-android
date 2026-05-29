@@ -340,6 +340,36 @@ class DocumentViewInstrumentedTest {
     }
 
     @Test
+    fun defaultBannerDocksBelowThePageAndDoesNotOverlapIt() {
+        // wpass-emn review: with no custom affordance the neutral banner must dock below
+        // the page (original layout), never float over it — bottom-of-page content
+        // (barcodes, QR, signatures) must stay visible for default consumers.
+        val recorder = RecordingBinder()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = doc(pageCount = 1),
+                    pdfFile = pipeRead,
+                    renderer = recorder,
+                    onOpenFullScreen = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+
+        val pageBottom = composeRule
+            .onNodeWithContentDescription("Page 1 of 1")
+            .getUnclippedBoundsInRoot()
+            .bottom
+        val bannerTop = composeRule
+            .onNodeWithText("Tap for full screen")
+            .getUnclippedBoundsInRoot()
+            .top
+
+        assertThat(bannerTop.value).isAtLeast(pageBottom.value)
+    }
+
+    @Test
     fun fullScreenSurfaceShowsTheTrustCaption() {
         // wpass-jil / ADR 0005 Z.8: the trust caption is docked on the full-screen
         // surface and visible at first composition. The bitmap-availability path is

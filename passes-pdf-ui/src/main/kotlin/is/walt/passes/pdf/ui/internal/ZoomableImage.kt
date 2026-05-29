@@ -52,7 +52,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
  * never shown against a changed transform.
  */
 @Composable
-@Suppress("LongParameterList", "LongMethod")
+@Suppress("LongParameterList", "LongMethod", "CyclomaticComplexMethod")
 internal fun ZoomableImage(
     bitmap: ImageBitmap,
     contentDescription: String,
@@ -128,6 +128,15 @@ internal fun ZoomableImage(
                             offset = Offset.Zero
                         } else {
                             scale = doubleTapScale
+                            offset = Offset.Zero
+                            // Double-tap raises scale without a transform edge, so the
+                            // snapshotFlow never fires; request the sharp sub-rect render
+                            // explicitly to keep wpass-f4b parity with the pinch path.
+                            if (slotSize != IntSize.Zero) {
+                                onZoomedRegionChanged?.invoke(
+                                    visiblePageSubRect(doubleTapScale, Offset.Zero, slotSize, pageAspect),
+                                )
+                            }
                         }
                     },
                 )
