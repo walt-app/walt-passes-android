@@ -174,13 +174,17 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
-    fun scannableCardScreenHasExactlyTwoUserVisibleParameters() {
-        // (card, modifier). The trust caption is composed inside the surface; no
-        // parameter omits it.
+    fun scannableCardScreenHasExactlyThreeUserVisibleParameters() {
+        // (card, modifier, showLabel). `showLabel` (wpass-1wu.1 / Walt wlt-tct) gates
+        // ONLY the top label Text so a host rendering its own title avoids a duplicate;
+        // it cannot omit the barcode, the payload caption, or the bottom-docked
+        // non-suppressible ScannableCardTrustCaption (C2 in SCANNABLE_CARD_THREAT_MODEL.md).
+        // Adding a fourth parameter — anything that could hide the trust caption — would
+        // breach C2; review the threat model before changing this number.
         assertUserVisibleParamCount(
             "ScannableCardScreenKt",
             "ScannableCardScreen",
-            expected = 2,
+            expected = 3,
         )
     }
 

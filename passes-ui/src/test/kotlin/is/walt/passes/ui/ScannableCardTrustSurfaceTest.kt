@@ -174,6 +174,31 @@ class ScannableCardTrustSurfaceTest {
     }
 
     @Test
+    fun fullScreenHidesLabelWhenShowLabelFalse() {
+        // wpass-1wu.1 / Walt wlt-tct: a host that renders its own title above the kernel
+        // surface passes showLabel = false to drop the duplicate built-in label.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(card = qrFixture(label = "Library card"), showLabel = false)
+            }
+        }
+        composeRule.onNodeWithText("⁨Library card⁩").assertDoesNotExist()
+    }
+
+    @Test
+    fun fullScreenShowLabelFalseStillRendersTrustAndPayloadCaptions() {
+        // showLabel gates ONLY the top label; it must NOT be able to suppress the
+        // bottom-docked non-suppressible trust caption (C2) or the payload caption.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(card = qrFixture(label = "Library card"), showLabel = false)
+            }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+    }
+
+    @Test
     fun placeholderUnverifiedArtifactStyleStillRendersCaption() {
         // PassesSemantics ships UnverifiedArtifactStyle.Placeholder so the surfaces
         // compose under a default-constructed semantics (tests / previews). Lock that
