@@ -47,8 +47,12 @@ jobs:
           # Forks must not be able to write to the build cache.
           cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
+      # assembleDebugAndroidTest compiles the androidTest sources (no device needed) so the
+      # instrumented suites typecheck on every PR. Without it `check assemble` skips them and
+      # @Ignore'd on-device bodies (e.g. BarcodeDecodeServiceInstrumentedTest) can rot against
+      # a signature change until the managed-device leg lands.
       - name: Build, test, lint
-        run: ./gradlew check assemble --stacktrace
+        run: ./gradlew check assemble assembleDebugAndroidTest --stacktrace
 
       - name: Upload test reports
         if: always()

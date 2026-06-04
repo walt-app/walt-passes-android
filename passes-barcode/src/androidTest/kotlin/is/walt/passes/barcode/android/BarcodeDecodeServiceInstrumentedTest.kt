@@ -18,38 +18,23 @@ import org.junit.runner.RunWith
 import java.io.File
 
 /**
- * Instrumented coverage for the isolated decode service. Each scenario is the on-device half
- * of an assertion the unit suite cannot make: the actual isolated process, the actual
- * cross-process binder, the actual platform image codec, the actual permission sandbox. The
- * wire format and orchestration are covered on the JVM by [BarcodeDecodeBinderRoundTripTest]
- * and [DefaultBarcodeImageDecoderTest]; the payload-faithfulness contract by
- * [HostilePayloadFidelityTest]; the symbology allowlist by [ZxingBarcodeSymbolDecoderTest].
- * What only a device can prove is that the real codec, driven across the real bind, upholds
- * those contracts and that the decode process genuinely holds no capabilities.
+ * On-device half of the wpass-zrt.5 security suite: what only a real device can prove — that
+ * the real codec, driven across the real bind into the real isolated process, upholds the
+ * contracts the JVM suites pin (faithfulness, caps, surface lock, allowlist). Drivable
+ * scenarios go through the public [BarcodeImageDecoder] facade end-to-end with no test seam;
+ * fixtures are generated in-process (ZXing writer → [Bitmap] → PNG fd) so the corpus is
+ * auditable in source.
  *
- * The drivable scenarios go through the public [BarcodeImageDecoder] facade end-to-end, so
- * they exercise the true bind → isolated codec → ZXing → pure-result path with no test seam.
- * Fixtures are generated in-process (ZXing writer → [Bitmap] → PNG fd) rather than shipped as
- * binary assets, so the corpus is auditable in source.
+ * Two scenarios stay documented skeletons because the facade deliberately gives the caller no
+ * handle inside the sandbox: [decodeProcessCannotReachAppDataOrKeystore] needs code running in
+ * the isolated process (a test-only `isolatedProcess` probe service), and
+ * [decodeServiceReturnsNoBitmapOrSourceBytesOverBinder] needs a raw `transact` — both already
+ * guaranteed statically by [ManifestPermissionsTest] / [BarcodeDecodeBinderSurfaceTest].
  *
- * The two remaining scenarios are documented skeletons, not bodies, because the facade
- * deliberately gives the caller no handle inside the sandbox:
- *  - [decodeProcessCannotReachAppDataOrKeystore] needs code RUNNING in the isolated process
- *    to attempt a privileged call; the facade exposes only `decode`, by design. Proving it
- *    needs a test-only probe service declared `isolatedProcess` in the androidTest manifest
- *    (the runtime companion to [ManifestPermissionsTest]) — its own follow-up.
- *  - [decodeServiceReturnsNoBitmapOrSourceBytesOverBinder] is structurally guaranteed already
- *    by the type that crosses back ([BarcodeDecodeResult] carries no `Bitmap`/bytes) and the
- *    reflection lock in [BarcodeDecodeBinderSurfaceTest]; a parcel-level on-device assertion
- *    would need a raw `transact` against the service rather than the facade.
- *
- * The tests are `@Ignore`'d at check-in so `./gradlew check` stays green on a workstation with
- * no emulator — the same convention as `passes-pdf`'s `PdfImporterInstrumentedTest`. CI's
- * connected-tests matrix currently provisions only `:passes-storage` (see
- * `.github/workflows/ci.yml`); wiring a `:passes-barcode` managed-device leg and flipping the
- * Ignore via a test filter is tracked as a follow-up to this bead. Until that lands the
- * runtime isolation proof is NOT exercised in CI — only the static [ManifestPermissionsTest]
- * half is.
+ * `@Ignore`'d at check-in so `./gradlew check` stays green without an emulator (the
+ * `passes-pdf` `PdfImporterInstrumentedTest` convention). CI compiles these via
+ * `assembleDebugAndroidTest` but does not run them — the managed-device leg that does is
+ * tracked in wpass-6mg.
  */
 @RunWith(AndroidJUnit4::class)
 class BarcodeDecodeServiceInstrumentedTest {
