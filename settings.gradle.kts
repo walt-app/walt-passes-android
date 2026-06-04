@@ -31,6 +31,7 @@ rootProject.name = "walt-passes-android"
 
 include(":passes-core")
 include(":passes-pdf-core")
+include(":passes-isolation")
 include(":passes-pdf")
 include(":passes-barcode")
 include(":passes-storage")

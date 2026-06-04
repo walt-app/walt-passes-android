@@ -21,6 +21,12 @@ dependencies {
     api(project(":passes-core"))
     api(libs.kotlinx.coroutines.core)
 
+    // Shared isolated-worker plumbing (bind/teardown session). The decode service is bound
+    // through this facade rather than a barcode-private copy; PDF render is the other
+    // consumer (wpass-zrt.6). Internal seam only — no isolation type appears on this
+    // module's public surface — so implementation, not api.
+    implementation(project(":passes-isolation"))
+
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)

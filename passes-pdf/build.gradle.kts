@@ -22,6 +22,12 @@ dependencies {
     api(project(":passes-pdf-core"))
     api(libs.kotlinx.coroutines.core)
 
+    // Shared isolated-worker plumbing (memfd PfdFactory + bind/teardown session). The
+    // renderer binds its isolated service through this facade rather than a PDF-private
+    // copy; barcode decode is the other consumer (wpass-zrt.6). Internal seam only — no
+    // isolation type appears on passes-pdf's public surface — so implementation, not api.
+    implementation(project(":passes-isolation"))
+
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
