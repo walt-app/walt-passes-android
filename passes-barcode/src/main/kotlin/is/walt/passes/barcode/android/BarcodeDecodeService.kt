@@ -36,13 +36,14 @@ import kotlin.coroutines.cancellation.CancellationException
 public class BarcodeDecodeService : Service() {
     private val config: BarcodeDecodeConfig = BarcodeDecodeConfig()
     private val watchdog: DecodeWatchdog = DecodeWatchdog(config.decodeTimeoutMs)
+    private val symbolDecoder: BarcodeSymbolDecoder = ZxingBarcodeSymbolDecoder()
 
     override fun onBind(intent: Intent): IBinder = BarcodeDecodeBinderProxy(buildImpl())
 
     private fun buildImpl(): BarcodeDecodeBinder =
         object : BarcodeDecodeBinder {
             override suspend fun decode(image: ParcelFileDescriptor): BarcodeDecodeResult =
-                doDecode(image, config, watchdog, BarcodeSymbolDecoder.NotYetImplemented)
+                doDecode(image, config, watchdog, symbolDecoder)
         }
 }
 

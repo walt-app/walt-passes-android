@@ -63,7 +63,7 @@ class BarcodeDecodeServiceTest {
         val bitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
 
         val result =
-            doDecode(pfd, config, watchdog, BarcodeSymbolDecoder.NotYetImplemented) { _, _ ->
+            doDecode(pfd, config, watchdog, { BarcodeDecodeResult.NoBarcodeFound }) { _, _ ->
                 BoundedDecodeResult.Decoded(bitmap)
             }
 
