@@ -10,16 +10,17 @@ The trust claim: every security-and-privacy-critical behavior Walt makes about p
 
 ## Architecture Rules
 
-- Seven Gradle modules:
+- Eight Gradle modules:
   - `passes-core` — pure Kotlin/JVM. Parser, model, signature verifier, `.strings` parser, `TelemetryGuard` interface. NO Android framework dependencies.
   - `passes-pdf-core` — pure Kotlin/JVM. PdfDocument model, header sniffer, import config, `DocumentTelemetryGuard` interface. NO Android framework dependencies.
   - `passes-pdf` — Android-only. Isolated-process PDF renderer service (ADR 0005 D3). Wraps Android's `PdfRenderer` behind a hand-rolled binder with no extraction surface.
+  - `passes-barcode` — Android-only. Isolated-process barcode/QR-from-image decode service (wpass-zrt). `BarcodeImageDecoder` facade takes an image source over a bind, decodes inside a permissionless sandbox, and returns only `{payload, ScannableFormat}` (pure `BarcodeDecodeResult` from `passes-core`); never a Bitmap or source bytes. No classification/validation here.
   - `passes-storage` — Android-only. SQLCipher with Keystore-sourced key, Android Auto Backup exclusion, irreversible deletion logic.
   - `passes-ui-core` — Android + Compose. Tiny shared substrate for both UI modules: `ArgbColor`, `Color` conversion, the `isolated()` BiDi (FSI/PDI) helper. NO trust-claim-bearing surfaces of its own; existence is to keep `passes-ui` and `passes-pdf-ui` from depending on each other for these primitives.
   - `passes-ui` — Android + Compose. PKPASS surfaces only — pass front/back composables, B3 URL confirmation sheet, expired badge, bounded image rendering, `PassesTheme` / `PassesSemantics`. Themable via tokens passed in by the consumer.
   - `passes-pdf-ui` — Android + Compose. PDF-document surfaces only — `DocumentView`, `DocumentTile`, `DocumentsLane`, `DocumentTrustCaption`, `DocumentTheme` / `DocumentSemantics`. Depends on `passes-pdf` (for `PdfRendererBinder`) and `passes-pdf-core` (for `PdfDocument`); themed via its own sibling `LocalDocumentSemantics`, NOT through `PassesSemantics`.
 - `passes-core` and `passes-pdf-core` have NO Android framework dependencies (KMP-friendly).
-- `passes-storage`, `passes-pdf`, `passes-ui`, and `passes-pdf-ui` are independent peers (no edges among them at this level). The single permitted exception is `passes-pdf-ui → passes-pdf`, since the document-rendering surface needs `PdfRendererBinder` to take pages from.
+- `passes-storage`, `passes-pdf`, `passes-barcode`, `passes-ui`, and `passes-pdf-ui` are independent peers (no edges among them at this level). The single permitted exception is `passes-pdf-ui → passes-pdf`, since the document-rendering surface needs `PdfRendererBinder` to take pages from.
 - `passes-ui` and `passes-pdf-ui` both depend on `passes-ui-core`. Neither depends on the other.
 - DECISIVE CONSTRAINT: walt-android consumes this code directly; trust-claim-bearing logic lives ONLY here, never reimplemented in walt-android.
 
