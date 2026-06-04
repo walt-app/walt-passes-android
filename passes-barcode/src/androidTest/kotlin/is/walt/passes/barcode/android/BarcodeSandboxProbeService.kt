@@ -6,9 +6,10 @@ import android.os.Binder
 import android.os.IBinder
 import android.os.Parcel
 import android.os.Process
+import android.system.ErrnoException
+import android.system.Os
+import android.system.OsConstants
 import java.io.File
-import java.net.InetSocketAddress
-import java.net.Socket
 import java.security.KeyStore
 
 /**
@@ -53,18 +54,21 @@ class BarcodeSandboxProbeService : Service() {
                 KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.containsAlias("probe-nonexistent")
             }.isFailure
 
-        /** Opening a socket must fail: an isolated process is denied network access. */
+        // The AF_INET socket() syscall must be denied (EPERM/EACCES): it is gated on the AID_INET
+        // gid the isolated sandbox lacks. Probing the syscall tests the capability itself, unlike
+        // a connect() that would time out for an unreachable host even with network access.
         private fun networkBlocked(): Boolean =
-            runCatching {
-                Socket().use { it.connect(InetSocketAddress("10.255.255.1", 80), CONNECT_TIMEOUT_MS) }
-            }.isFailure
+            try {
+                Os.close(Os.socket(OsConstants.AF_INET, OsConstants.SOCK_STREAM, 0))
+                false
+            } catch (e: ErrnoException) {
+                e.errno == OsConstants.EPERM || e.errno == OsConstants.EACCES
+            }
 
         private fun Boolean.toWire(): Int = if (this) 1 else 0
     }
 
     companion object {
         const val CODE_PROBE: Int = IBinder.FIRST_CALL_TRANSACTION
-
-        private const val CONNECT_TIMEOUT_MS = 1_000
     }
 }

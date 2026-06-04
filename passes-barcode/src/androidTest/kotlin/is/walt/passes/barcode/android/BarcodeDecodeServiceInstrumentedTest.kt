@@ -78,11 +78,8 @@ class BarcodeDecodeServiceInstrumentedTest {
 
     @Test
     fun overAreaImageRejectsWithImageTooLarge() {
-        // The small-file/huge-canvas bomb: each side stays UNDER the per-side cap but the area
-        // (width * height) exceeds the megapixel cap, so the header listener must reject before
-        // the ~200 MB ARGB allocation. Crafted as raw PNG bytes (valid IHDR, minimal IDAT) so
-        // the fixture is tiny — generating it as a real bitmap would incur the very allocation
-        // the cap exists to prevent.
+        // Each side stays under the per-side cap but area exceeds the megapixel cap; crafted as
+        // raw PNG so the header rejects before the ~200 MB allocation a real bitmap would need.
         val side = 8_000 // 8000 * 8000 = 64 MP > 50 MP area cap; 8000 < 12000 per-side cap
         val png = hugeCanvasPng(side, side)
         assertThat(png.size).isLessThan(1_024) // genuinely a small file
@@ -139,19 +136,18 @@ class BarcodeDecodeServiceInstrumentedTest {
 
     @Test
     fun decodeProcessCannotReachAppDataOrKeystore() {
-        // The headline runtime go/no-go (walt-android wlt-58a.1): bind a test-only probe
-        // declared android:isolatedProcess="true" and, from inside that process, attempt the
-        // privileged calls the decode UID must never make — read the app's private sentinel,
-        // touch the Keystore, open a socket — asserting each is blocked. Proves at runtime what
-        // ManifestPermissionsTest pins statically. The probe also reports its UID so we confirm
-        // the checks ran in an isolated UID, not the app's.
+        // Headline runtime go/no-go (walt-android wlt-58a.1): from inside the isolated probe,
+        // app data, Keystore, and network are all blocked and the checks ran in an isolated UID
+        // — the runtime proof of what ManifestPermissionsTest pins statically.
         val sentinel = File(context.filesDir, "sandbox-sentinel.txt").apply { writeText("app-only-secret") }
         val (binder, conn) = bind(BarcodeSandboxProbeService::class.java)
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         try {
             data.writeString(sentinel.absolutePath)
-            binder.transact(BarcodeSandboxProbeService.CODE_PROBE, data, reply, 0)
+            check(binder.transact(BarcodeSandboxProbeService.CODE_PROBE, data, reply, 0)) {
+                "probe transact not handled"
+            }
             val probeUid = reply.readInt()
             val appDataBlocked = reply.readInt() == 1
             val keystoreBlocked = reply.readInt() == 1
@@ -175,18 +171,18 @@ class BarcodeDecodeServiceInstrumentedTest {
 
     @Test
     fun decodeServiceReturnsNoBitmapOrSourceBytesOverBinder() {
-        // A raw transact (not the facade) against the real BarcodeDecodeService, inspecting the
-        // reply parcel to assert only the pure {tag, payload, format} result crosses back — the
-        // runtime companion to the surface lock in BarcodeDecodeBinderSurfaceTest. A Bitmap or
-        // the source bytes would be kilobytes-to-megabytes and leave trailing parcel data; the
-        // pure result is a few tens of bytes with nothing after it.
+        // Raw transact against the real service: only the pure {tag, payload, format} crosses
+        // back with no trailing data — a Bitmap or source bytes would be orders larger. Runtime
+        // companion to the surface lock in BarcodeDecodeBinderSurfaceTest.
         val pfd = pngFd("raw-transact", qrBitmap("RAW-TRANSACT-OK"))
         val (binder, conn) = bind(BarcodeDecodeService::class.java)
         val data = Parcel.obtain()
         val reply = Parcel.obtain()
         try {
             data.writeTypedObject(pfd, 0)
-            binder.transact(BarcodeDecodeBinderProxy.CODE_DECODE, data, reply, 0)
+            check(binder.transact(BarcodeDecodeBinderProxy.CODE_DECODE, data, reply, 0)) {
+                "decode transact not handled"
+            }
 
             assertThat(reply.readInt()).isEqualTo(BarcodeDecodeBinderProxy.TAG_DECODED)
             assertThat(reply.readString()).isEqualTo("RAW-TRANSACT-OK")
