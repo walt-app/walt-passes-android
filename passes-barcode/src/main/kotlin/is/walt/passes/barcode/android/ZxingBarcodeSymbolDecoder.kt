@@ -25,9 +25,10 @@ import `is`.walt.passes.core.ScannableFormat
  * Symbology ALLOWLIST, not "decode everything": [POSSIBLE_FORMATS] pins the reader to exactly
  * the [ScannableFormat] roster Walt renders. PDF417/Aztec and the rest are deliberately not
  * enabled — restricting the reader narrows both the work and the parser surface a hostile
- * image can reach. A symbol whose format somehow falls outside the roster maps to
- * [BarcodeDecodeResult.DecodeFailed] with [DecodeFailureReason.UnsupportedBarcodeFormat]
- * rather than being forced into an ill-fitting arm.
+ * image can reach. Because the reader can only return a format already in the allowlist, the
+ * out-of-roster [DecodeFailureReason.UnsupportedBarcodeFormat] arm is a defensive guard the
+ * pinned hints make unreachable in practice; it exists so a later hint change can't silently
+ * force an unsupported symbol into an ill-fitting result.
  *
  * The payload is returned FAITHFULLY and is never interpreted here — classification and
  * validation stay downstream in the consumer (`QrPayloadClassifier` / `ScannableCardInputValidator`).
@@ -63,6 +64,7 @@ internal fun decodeLuminance(source: LuminanceSource): BarcodeDecodeResult {
     return try {
         val result = MultiFormatReader().decode(binary, DECODE_HINTS)
         val format =
+            // Defensive guard: the pinned allowlist makes a non-roster format unreachable here.
             ROSTER_BY_ZXING_FORMAT[result.barcodeFormat]
                 ?: return BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.UnsupportedBarcodeFormat)
         BarcodeDecodeResult.DecodedBarcode(result.text, format)
