@@ -12,6 +12,35 @@ android {
         unitTests.all {
             it.systemProperty("walt.passes.barcode.moduleDir", projectDir.absolutePath)
         }
+
+        // Managed-device matrix for the on-device security suite (wpass-6mg), mirroring
+        // passes-storage. API 28 is the ImageDecoder floor the bounded decode needs; 31/34/36
+        // track S, the LTS image, and head. The CI connected-tests job runs the matching
+        // apiNNgoogleDebugAndroidTest tasks.
+        managedDevices {
+            localDevices {
+                create("api28google") {
+                    device = "Pixel 2"
+                    apiLevel = 28
+                    systemImageSource = "google"
+                }
+                create("api31google") {
+                    device = "Pixel 2"
+                    apiLevel = 31
+                    systemImageSource = "google"
+                }
+                create("api34google") {
+                    device = "Pixel 2"
+                    apiLevel = 34
+                    systemImageSource = "google"
+                }
+                create("api36google") {
+                    device = "Pixel 2"
+                    apiLevel = 36
+                    systemImageSource = "google"
+                }
+            }
+        }
     }
 }
 
