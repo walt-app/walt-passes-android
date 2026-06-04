@@ -31,17 +31,17 @@ import java.io.File
  * [decodeServiceReturnsNoBitmapOrSourceBytesOverBinder] needs a raw `transact` — both already
  * guaranteed statically by [ManifestPermissionsTest] / [BarcodeDecodeBinderSurfaceTest].
  *
- * `@Ignore`'d at check-in so `./gradlew check` stays green without an emulator (the
- * `passes-pdf` `PdfImporterInstrumentedTest` convention). CI compiles these via
- * `assembleDebugAndroidTest` but does not run them — the managed-device leg that does is
- * tracked in wpass-6mg.
+ * The three drivable scenarios run in CI's connected-tests matrix (API 28/31/34/36) and
+ * verified green on a physical device. They are not `@Ignore`'d: `./gradlew check` does not
+ * run androidTest, so a workstation with no device stays green regardless; only the
+ * managed-device / `connectedAndroidTest` tasks execute them. The two skeleton scenarios stay
+ * `@Ignore`'d until their probe infrastructure lands (wpass-6mg).
  */
 @RunWith(AndroidJUnit4::class)
 class BarcodeDecodeServiceInstrumentedTest {
     private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    @Ignore("Pending :passes-barcode managed-device CI leg (wpass-zrt.5 follow-up)")
     fun benignQrDecodesToPayloadAndFormat() {
         val pfd = pngFd("benign-qr", qrBitmap("WALT-PASS-9"))
         val result = pfd.use { decode(it) }
@@ -51,7 +51,6 @@ class BarcodeDecodeServiceInstrumentedTest {
     }
 
     @Test
-    @Ignore("Pending :passes-barcode managed-device CI leg (wpass-zrt.5 follow-up)")
     fun overDimensionImageRejectsWithImageTooLarge() {
         // A canvas past the per-side dimension cap must be rejected by the header listener
         // before the full bitmap is allocated — the decompression-bomb bucket. (The
@@ -66,7 +65,6 @@ class BarcodeDecodeServiceInstrumentedTest {
     }
 
     @Test
-    @Ignore("Pending :passes-barcode managed-device CI leg (wpass-zrt.5 follow-up)")
     fun malformedContainerFailsClosedAndNextDecodeSucceeds() {
         // Bytes that are not a decodable image must fail closed, not crash the caller. Then a
         // benign decode must succeed, proving the path recovers (per-call teardown + re-bind),

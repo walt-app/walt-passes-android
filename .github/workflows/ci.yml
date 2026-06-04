@@ -66,7 +66,7 @@ jobs:
           if-no-files-found: ignore
 
   connected-tests:
-    name: Connected tests (passes-storage, API ${{ matrix.api }})
+    name: Connected tests (API ${{ matrix.api }})
     runs-on: ubuntu-latest
     strategy:
       # Each leg is independent; surfacing all failures at once is more useful than
@@ -120,11 +120,16 @@ jobs:
           # Forks must not be able to write to the build cache.
           cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
-      # Per-API task name matches the localDevices entries declared in
-      # passes-storage/build.gradle.kts. The DebugAndroidTest suffix runs the
-      # androidTest sources against the debug variant.
-      - name: Run passes-storage connected tests
-        run: ./gradlew :passes-storage:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
+      # Per-API task name matches the localDevices entries declared in each module's
+      # build.gradle.kts. The DebugAndroidTest suffix runs the androidTest sources against
+      # the debug variant. passes-barcode runs the wpass-zrt.5 on-device security suite; its
+      # @Ignore'd scenarios (sandbox probe, parcel probe) skip rather than fail.
+      - name: Run connected tests
+        run: >-
+          ./gradlew
+          :passes-storage:api${{ matrix.api }}googleDebugAndroidTest
+          :passes-barcode:api${{ matrix.api }}googleDebugAndroidTest
+          --stacktrace
 
       - name: Upload connected test reports
         if: always()
@@ -134,6 +139,8 @@ jobs:
           path: |
             passes-storage/build/reports/androidTests/
             passes-storage/build/outputs/androidTest-results/
+            passes-barcode/build/reports/androidTests/
+            passes-barcode/build/outputs/androidTest-results/
           if-no-files-found: ignore
 
   dependency-review:
