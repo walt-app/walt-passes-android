@@ -6,6 +6,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import `is`.walt.passes.core.BarcodeDecodeResult
 import `is`.walt.passes.core.DecodeFailureReason
+import kotlin.coroutines.cancellation.CancellationException
 
 /**
  * The isolated-process decode service (wpass-zrt.2) — THE security gate for hostile-image
@@ -79,6 +80,9 @@ internal suspend fun doDecode(
                     }
             }
         }
+    } catch (e: CancellationException) {
+        // Never fold cancellation into a result — let structured concurrency unwind.
+        throw e
     } catch (_: Throwable) {
         BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.ImageDecodeFailed)
     } finally {

@@ -4,7 +4,6 @@ import android.graphics.ImageDecoder
 import android.os.ParcelFileDescriptor
 import `is`.walt.passes.core.DecodeFailureReason
 import java.io.ByteArrayOutputStream
-import java.io.FileInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.nio.ByteBuffer
@@ -21,10 +20,11 @@ import java.nio.ByteBuffer
  * bitmap stays inside the sandbox; the ZXing symbol decode (wpass-zrt.4) consumes it here and
  * only `{payload, format}` ever crosses back over the binder.
  *
- * Read [pfd] into a bounded byte array and decode it under [config]. The descriptor is read
- * but not closed here — the service that owns the handed-over fd closes it. Pulling the
- * compressed bytes into the sandbox heap is fine: isolation keeps them off the *caller's*
- * heap, which is the trust claim; the file-size cap bounds how many can be read.
+ * Read [pfd] into a bounded byte array and decode it under [config]. The read goes through a
+ * `dup()` so the stream's `close()` releases only the duplicate and [pfd] survives for its
+ * single owner ([doDecode]) to close — the same idiom as the PDF importer, avoiding a
+ * double-close of the source fd. Pulling the compressed bytes into the sandbox heap is fine:
+ * isolation keeps them off the *caller's* heap; the file-size cap bounds how many can be read.
  *
  * Stays a top-level function (not a class) so its two phases are unit-testable without a live
  * service: [readBoundedBytes] against a pipe, and [headerRejection] against the cap table.
@@ -35,7 +35,7 @@ internal fun decodeBoundedFromPfd(
 ): BoundedDecodeResult {
     val read =
         runCatching {
-            FileInputStream(pfd.fileDescriptor).use { readBoundedBytes(it, config.maxBytes) }
+            ParcelFileDescriptor.AutoCloseInputStream(pfd.dup()).use { readBoundedBytes(it, config.maxBytes) }
         }
     val bytes = read.getOrNull()
     return when {
@@ -90,15 +90,10 @@ internal fun headerRejection(
     }
 
 /**
- * Decode [rawBytes] with the header-gate caps from [config]. The header listener fires before
- * the backing bitmap is allocated, so a disallowed container or an over-cap canvas is
- * rejected before the decoder commits memory. Full Throwable containment — including
- * [OutOfMemoryError] — folds every escape to a [BoundedDecodeResult.Rejected]; this function
- * never throws, so a hostile image can crash neither the sandbox cleanly nor (via the
- * service's own containment) the caller.
- *
- * Visible-for-tests so the decompression-bomb, disallowed-format, and malformed-container
- * cases assert on `BoundedDecodeResult` directly without binding the service.
+ * Decode [rawBytes] under the [headerRejection] caps, which fire before the backing bitmap is
+ * allocated. Full Throwable containment — including [OutOfMemoryError] — folds every escape to
+ * a [BoundedDecodeResult.Rejected]; this function never throws. The platform-decode integration
+ * is the instrumented half (wpass-zrt.5); the cap decision is unit-tested via [headerRejection].
  */
 internal fun decodeBoundedBitmap(
     rawBytes: ByteArray,

@@ -100,6 +100,23 @@ class BarcodeDecodeServiceTest {
         assertThat(pfd.closed).isTrue()
     }
 
+    @Test
+    fun decodeBoundedFromPfdRejectsOverSizeWithoutClosingSourcePfd() {
+        // Drives the real fd glue (dup + AutoCloseInputStream) the orchestration tests stub
+        // out. A tiny size cap trips ImageTooLarge before any ImageDecoder work, and the
+        // source PFD must survive — the read closes only its dup, leaving the single close to
+        // doDecode. Regresses the double-close footgun the dup idiom prevents.
+        val pipe = ParcelFileDescriptor.createPipe()
+        val readEnd = pipe[0]
+        ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { it.write(ByteArray(64)) }
+
+        val result = decodeBoundedFromPfd(readEnd, BarcodeDecodeConfig(maxBytes = 4))
+
+        assertThat(result).isEqualTo(BoundedDecodeResult.Rejected(DecodeFailureReason.ImageTooLarge))
+        assertThat(readEnd.fileDescriptor.valid()).isTrue()
+        readEnd.close()
+    }
+
     // --------------------------------------------------------------------- helpers
 
     private val config = BarcodeDecodeConfig()
