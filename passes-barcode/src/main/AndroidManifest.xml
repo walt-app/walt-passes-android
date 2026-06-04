@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  passes-barcode library manifest. Mirrors passes-pdf: this module hosts the kernel's
+  barcode/QR-from-image decode boundary (wpass-zrt). The isolated-process decode SERVICE
+  declaration lands with wpass-zrt.2, alongside the service class it names; declaring it
+  here before the class exists would fail manifest merging, so this skeleton manifest
+  carries only the security invariant it must never violate.
+
+  ZERO uses-permission entries by design, and it stays that way. The decode service that
+  arrives in wpass-zrt.2 runs android:isolatedProcess="true", android:exported="false",
+  inherits no app permissions, and reaches no Keystore/DPAN/card material. Adding any
+  uses-permission entry to this manifest is a security-policy change requiring re-review.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
