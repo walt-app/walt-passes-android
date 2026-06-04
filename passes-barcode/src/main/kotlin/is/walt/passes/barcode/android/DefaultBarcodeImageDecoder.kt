@@ -15,6 +15,7 @@ import `is`.walt.passes.core.DecodeFailureReason
  * here replaces this single return; the public surface above does not change.
  */
 internal class DefaultBarcodeImageDecoder(
+    // held for the wpass-zrt.2 isolated-process bind
     @Suppress("unused") private val appContext: Context,
 ) : BarcodeImageDecoder {
     override suspend fun decode(source: BarcodeImageSource): BarcodeDecodeResult =

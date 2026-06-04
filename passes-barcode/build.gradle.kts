@@ -5,6 +5,14 @@ plugins {
 
 android {
     namespace = "is.walt.passes.barcode"
+
+    // Inject the module dir so ManifestPermissionsTest can resolve src/main/AndroidManifest.xml
+    // regardless of the JVM cwd (mirrors passes-pdf).
+    testOptions {
+        unitTests.all {
+            it.systemProperty("walt.passes.barcode.moduleDir", projectDir.absolutePath)
+        }
+    }
 }
 
 dependencies {
