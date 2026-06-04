@@ -26,7 +26,13 @@ import `is`.walt.passes.core.BarcodeDecodeResult
  * PFD ownership: the caller retains ownership of the [ParcelFileDescriptor] it passed to
  * the facade. The binder duplicates the underlying fd on the way across; the decode
  * service owns and closes its received copy.
+ *
+ * `internal`, not `public`: unlike `passes-pdf`'s `PdfRendererBinder` (consumed by
+ * `passes-pdf-ui`), nothing outside `:passes-barcode` references this — [BarcodeImageDecoder]
+ * is the only intended entry point and never exposes the binder. Keeping it module-private
+ * narrows the maintained/trust surface and removes a second place to hang an extraction
+ * passthrough. [BarcodeDecodeBinderSurfaceTest] (same module) still locks the surface.
  */
-public interface BarcodeDecodeBinder {
-    public suspend fun decode(image: ParcelFileDescriptor): BarcodeDecodeResult
+internal interface BarcodeDecodeBinder {
+    suspend fun decode(image: ParcelFileDescriptor): BarcodeDecodeResult
 }

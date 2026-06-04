@@ -34,11 +34,20 @@ import kotlinx.coroutines.withContext
  *    parcel (a same-build wire-invariant violation). Folding it in avoids decoding an empty
  *    reply parcel where `readInt()` returns 0 (which equals [TAG_DECODED]) and surfacing a
  *    phantom decoded result.
- *  - Unrecognised reply tags, a missing payload on a [TAG_DECODED] reply, and unrecognised
- *    wire codes are wire-invariant assertions and fail-fast via [error]; the structural
- *    gates are [BarcodeDecodeBinderRoundTripTest] and the two wire-surface tests.
+ *  - A malformed reply parcel — unrecognised tag, missing payload on a [TAG_DECODED] reply,
+ *    or unrecognised wire code — also folds to [DecodeFailureReason.DecoderUnavailable]
+ *    rather than throwing. This is the one place the posture diverges from `passes-pdf`'s
+ *    fail-fast `PdfRendererClient`: here the reply's sender is the isolated decode process,
+ *    which this feature's threat model assumes may be compromised, so the reply shape is
+ *    attacker-controlled and must be treated like the payload string — never trusted. A
+ *    throw out of this result-returning API would be a DoS on the decode path; folding keeps
+ *    the contract. Same-build wire mismatches are still caught fast by
+ *    [BarcodeDecodeBinderRoundTripTest] and the two wire-surface tests.
+ *
+ * `internal`, not `public`, for the same reason as [BarcodeDecodeBinder]: no consumer outside
+ * this module references the client; [BarcodeImageDecoder] is the only entry point.
  */
-public class BarcodeDecodeClient(
+internal class BarcodeDecodeClient(
     private val binder: IBinder,
 ) : BarcodeDecodeBinder {
     override suspend fun decode(image: ParcelFileDescriptor): BarcodeDecodeResult =
@@ -56,20 +65,25 @@ public class BarcodeDecodeClient(
                 if (!accepted) {
                     return@withContext decoderUnavailable()
                 }
-                when (val tag = reply.readInt()) {
-                    TAG_DECODED ->
-                        BarcodeDecodeResult.DecodedBarcode(
-                            payload = reply.readString() ?: error("Decode reply missing payload"),
-                            format = ScannableFormatWire.decode(reply.readInt()),
-                        )
-                    TAG_NO_BARCODE -> BarcodeDecodeResult.NoBarcodeFound
-                    TAG_FAILED -> BarcodeDecodeResult.DecodeFailed(DecodeFailureReasonWire.decode(reply.readInt()))
-                    else -> error("Unknown decode reply tag: $tag")
-                }
+                // Untrusted reply (sender may be a compromised sandbox): any parse failure
+                // folds to DecoderUnavailable instead of throwing out of this suspend result.
+                runCatching { parseReply(reply) }.getOrElse { decoderUnavailable() }
             } finally {
                 reply.recycle()
                 data.recycle()
             }
+        }
+
+    private fun parseReply(reply: Parcel): BarcodeDecodeResult =
+        when (val tag = reply.readInt()) {
+            TAG_DECODED ->
+                BarcodeDecodeResult.DecodedBarcode(
+                    payload = reply.readString() ?: error("Decode reply missing payload"),
+                    format = ScannableFormatWire.decode(reply.readInt()),
+                )
+            TAG_NO_BARCODE -> BarcodeDecodeResult.NoBarcodeFound
+            TAG_FAILED -> BarcodeDecodeResult.DecodeFailed(DecodeFailureReasonWire.decode(reply.readInt()))
+            else -> error("Unknown decode reply tag: $tag")
         }
 
     private fun decoderUnavailable(): BarcodeDecodeResult =

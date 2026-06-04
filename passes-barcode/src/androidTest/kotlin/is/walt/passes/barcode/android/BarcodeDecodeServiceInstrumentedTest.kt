@@ -20,11 +20,13 @@ import org.junit.runner.RunWith
  * wlt-58a.1: nothing in this process may reach Keystore / DPAN / card material.
  *
  * The tests are @Ignore'd at check-in so `./gradlew check` stays green on a workstation with
- * no emulator; CI flips them on by overriding the Ignore via a test filter and runs them on
- * AGP managed devices, the same way `passes-pdf` and `passes-storage` run their
- * device-only scenarios. Image fixtures (benign QR, malformed container, decompression bomb,
- * format-outside-roster) are tracked with the decode beads (wpass-zrt.3–.5) and land with
- * the on-device CI configuration.
+ * no emulator. Note that CI's connected-tests matrix currently covers only `:passes-storage`
+ * (see `.github/workflows/ci.yml`); wiring a `:passes-barcode` device matrix, filling these
+ * bodies, and un-ignoring them is owned by wpass-zrt.5 (the security suite). Until that lands,
+ * the runtime isolation proof is NOT exercised in CI — only the static
+ * [ManifestPermissionsTest] half is — so wpass-zrt.5 must gate the epic ship. Image fixtures
+ * (benign QR, malformed container, decompression bomb, format-outside-roster) land with the
+ * decode beads (wpass-zrt.3–.5).
  */
 @RunWith(AndroidJUnit4::class)
 class BarcodeDecodeServiceInstrumentedTest {

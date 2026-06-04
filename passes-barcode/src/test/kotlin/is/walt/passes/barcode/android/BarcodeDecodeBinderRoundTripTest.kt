@@ -102,6 +102,16 @@ class BarcodeDecodeBinderRoundTripTest {
     }
 
     @Test
+    fun decodeFoldsMalformedReplyIntoDecoderUnavailable() = runTest {
+        // A compromised sandbox could return a reply with an unrecognised tag (or a garbled
+        // payload / wire code). The client treats the reply as untrusted and folds any parse
+        // failure to DecoderUnavailable rather than throwing out of the result-returning API.
+        val client = BarcodeDecodeClient(GarbageReplyBinder())
+        assertThat(client.decode(pipeRead))
+            .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
+    }
+
+    @Test
     fun transactionCodeIsPinnedToItsDocumentedValue() {
         assertThat(BarcodeDecodeBinderProxy.CODE_DECODE).isEqualTo(IBinder.FIRST_CALL_TRANSACTION)
     }
@@ -118,6 +128,14 @@ class BarcodeDecodeBinderRoundTripTest {
     /** onTransact returns false without writing a reply — the proxy's unreadable-request path. */
     private class FalseBinder : Binder() {
         override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean = false
+    }
+
+    /** Returns a well-formed transaction whose reply carries an unrecognised tag — a compromised-sandbox reply. */
+    private class GarbageReplyBinder : Binder() {
+        override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
+            reply?.writeInt(Int.MAX_VALUE)
+            return true
+        }
     }
 
     private class StaticImpl(

@@ -14,8 +14,11 @@ import org.junit.runner.RunWith
  * shared facade's contract directly so a regression in the bind dance surfaces here rather
  * than only downstream.
  *
- * @Ignore'd at check-in (no emulator on a workstation); CI flips it on, matching the
- * `passes-pdf` / `passes-barcode` instrumented convention.
+ * @Ignore'd at check-in (no emulator on a workstation). CI's connected-tests matrix currently
+ * covers only `:passes-storage` (see `.github/workflows/ci.yml`), so a `:passes-isolation`
+ * device matrix has to be added before these run; that wiring rides with wpass-zrt.5's
+ * on-device suite. The double-resume-on-rebind guard in [AndroidIsolatedWorkerSessionFactory]
+ * is the unit-untestable behaviour these would pin (see `connectSurvivesServiceRestart`).
  */
 @RunWith(AndroidJUnit4::class)
 class IsolatedWorkerSessionInstrumentedTest {
@@ -32,5 +35,14 @@ class IsolatedWorkerSessionInstrumentedTest {
     fun connectToMissingServiceYieldsBindFailed() {
         // Point the factory at a Service class absent from the manifest; bindService returns
         // false and connect() must resolve to ConnectResult.BindFailed (not hang, not throw).
+    }
+
+    @Test
+    @Ignore("Pending on-device CI wiring")
+    fun connectSurvivesServiceRestart() {
+        // The double-resume guard: bind, kill the isolated process mid-session so
+        // BIND_AUTO_CREATE recreates it and re-fires onServiceConnected, and assert the main
+        // process does NOT crash (the second resume is skipped). This is the on-device proof
+        // of the IllegalStateException-on-rebind fix the unit suite cannot reach.
     }
 }

@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import kotlinx.coroutines.suspendCancellableCoroutine
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
 /**
@@ -70,6 +71,13 @@ public class AndroidIsolatedWorkerSessionFactory<out C>(
             conn =
                 object : ServiceConnection {
                     override fun onServiceConnected(name: ComponentName?, binder: IBinder) {
+                        // BIND_AUTO_CREATE re-fires this if the isolated process dies and is
+                        // recreated while still bound — the routine hostile-input crash this
+                        // gate exists for. The continuation resumes exactly once; a second
+                        // resume would throw on the main thread and take the wallet down with
+                        // the sandbox. Skip the rebind: the in-flight transact already surfaced
+                        // the death as a RemoteException on the consumer's client.
+                        if (!cont.isActive) return
                         cont.resume(ConnectResult.Connected(AndroidSession(context, conn, wrapBinder(binder))))
                     }
 
@@ -96,7 +104,14 @@ private class AndroidSession<out C>(
     private val connection: ServiceConnection,
     override val client: C,
 ) : IsolatedWorkerSession<C> {
+    private val closed = AtomicBoolean(false)
+
+    // AtomicBoolean-idempotent: a second close() (or a `use {}` that re-runs the block) must
+    // not call unbindService twice — Android throws IllegalArgumentException on an unbalanced
+    // unbind. compareAndSet makes the first close win and every later one a no-op.
     override fun close() {
-        runCatching { context.unbindService(connection) }
+        if (closed.compareAndSet(false, true)) {
+            runCatching { context.unbindService(connection) }
+        }
     }
 }
