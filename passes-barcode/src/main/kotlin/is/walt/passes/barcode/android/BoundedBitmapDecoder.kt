@@ -104,6 +104,9 @@ internal fun decodeBoundedBitmap(
     return try {
         val bitmap =
             ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
+                // Software-backed so the symbol decode can read pixels; a hardware bitmap (the
+                // default) refuses getPixels. This bitmap is analysed, never displayed.
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
                 rejection = headerRejection(info.mimeType, info.size.width, info.size.height, config)
                 if (rejection != null) {
                     // Force a 1x1 decode so the rejected path allocates nothing of size; the

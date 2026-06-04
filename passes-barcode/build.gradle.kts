@@ -27,6 +27,12 @@ dependencies {
     // module's public surface — so implementation, not api.
     implementation(project(":passes-isolation"))
 
+    // Pure-JVM symbol decode (wpass-zrt.4). com.google.zxing:core is Apache-2.0 and carries
+    // ZERO native attack surface — it runs only inside the isolated sandbox and never on the
+    // public surface, so implementation, not api. ML Kit was rejected (telemetry + Play
+    // Services dep); zxing-cpp stays a sandboxed contingency only.
+    implementation(libs.zxing.core)
+
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
