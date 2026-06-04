@@ -44,4 +44,8 @@ dependencies {
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.truth)
     androidTestImplementation(libs.kotlinx.coroutines.test)
+    // Fixture generation for the security suite (wpass-zrt.5): encode benign + over-cap
+    // barcodes to bitmaps on-device so the corpus is built in-process, not shipped as binary
+    // assets. The decode under test uses the module's own ZXing, not this test copy.
+    androidTestImplementation(libs.zxing.core)
 }

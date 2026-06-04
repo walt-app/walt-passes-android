@@ -1,71 +1,147 @@
 package `is`.walt.passes.barcode.android
 
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import androidx.test.platform.app.InstrumentationRegistry
+import com.google.common.truth.Truth.assertThat
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.MultiFormatWriter
+import `is`.walt.passes.core.BarcodeDecodeResult
+import `is`.walt.passes.core.DecodeFailureReason
+import `is`.walt.passes.core.ScannableFormat
+import kotlinx.coroutines.runBlocking
 import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.File
 
 /**
  * Instrumented coverage for the isolated decode service. Each scenario is the on-device half
  * of an assertion the unit suite cannot make: the actual isolated process, the actual
- * cross-process binder, the actual permission sandbox. The wire format and orchestration are
- * covered on the JVM by [BarcodeDecodeBinderRoundTripTest] and [DefaultBarcodeImageDecoderTest];
- * what only a device can prove is that the decode process genuinely holds no capabilities.
+ * cross-process binder, the actual platform image codec, the actual permission sandbox. The
+ * wire format and orchestration are covered on the JVM by [BarcodeDecodeBinderRoundTripTest]
+ * and [DefaultBarcodeImageDecoderTest]; the payload-faithfulness contract by
+ * [HostilePayloadFidelityTest]; the symbology allowlist by [ZxingBarcodeSymbolDecoderTest].
+ * What only a device can prove is that the real codec, driven across the real bind, upholds
+ * those contracts and that the decode process genuinely holds no capabilities.
  *
- * The headline test is [decodeProcessCannotReachAppDataOrKeystore]: it is the runtime
- * counterpart to the manifest pin in [ManifestPermissionsTest]. A manifest can declare
- * `isolatedProcess="true"`, but only running code inside that process and watching a
- * privileged call fail with `SecurityException` proves the sandbox is real
- * (leakcanary#948-style). This is the contractual go/no-go boundary from walt-android
- * wlt-58a.1: nothing in this process may reach Keystore / DPAN / card material.
+ * The drivable scenarios go through the public [BarcodeImageDecoder] facade end-to-end, so
+ * they exercise the true bind → isolated codec → ZXing → pure-result path with no test seam.
+ * Fixtures are generated in-process (ZXing writer → [Bitmap] → PNG fd) rather than shipped as
+ * binary assets, so the corpus is auditable in source.
  *
- * The tests are @Ignore'd at check-in so `./gradlew check` stays green on a workstation with
- * no emulator. Note that CI's connected-tests matrix currently covers only `:passes-storage`
- * (see `.github/workflows/ci.yml`); wiring a `:passes-barcode` device matrix, filling these
- * bodies, and un-ignoring them is owned by wpass-zrt.5 (the security suite). Until that lands,
- * the runtime isolation proof is NOT exercised in CI — only the static
- * [ManifestPermissionsTest] half is — so wpass-zrt.5 must gate the epic ship. Image fixtures
- * (benign QR, malformed container, decompression bomb, format-outside-roster) land with the
- * decode beads (wpass-zrt.3–.5).
+ * The two remaining scenarios are documented skeletons, not bodies, because the facade
+ * deliberately gives the caller no handle inside the sandbox:
+ *  - [decodeProcessCannotReachAppDataOrKeystore] needs code RUNNING in the isolated process
+ *    to attempt a privileged call; the facade exposes only `decode`, by design. Proving it
+ *    needs a test-only probe service declared `isolatedProcess` in the androidTest manifest
+ *    (the runtime companion to [ManifestPermissionsTest]) — its own follow-up.
+ *  - [decodeServiceReturnsNoBitmapOrSourceBytesOverBinder] is structurally guaranteed already
+ *    by the type that crosses back ([BarcodeDecodeResult] carries no `Bitmap`/bytes) and the
+ *    reflection lock in [BarcodeDecodeBinderSurfaceTest]; a parcel-level on-device assertion
+ *    would need a raw `transact` against the service rather than the facade.
+ *
+ * The tests are `@Ignore`'d at check-in so `./gradlew check` stays green on a workstation with
+ * no emulator — the same convention as `passes-pdf`'s `PdfImporterInstrumentedTest`. CI's
+ * connected-tests matrix currently provisions only `:passes-storage` (see
+ * `.github/workflows/ci.yml`); wiring a `:passes-barcode` managed-device leg and flipping the
+ * Ignore via a test filter is tracked as a follow-up to this bead. Until that lands the
+ * runtime isolation proof is NOT exercised in CI — only the static [ManifestPermissionsTest]
+ * half is.
  */
 @RunWith(AndroidJUnit4::class)
 class BarcodeDecodeServiceInstrumentedTest {
-    @Test
-    @Ignore("Pending on-device CI wiring (wpass-zrt.5 follow-up)")
-    fun decodeProcessCannotReachAppDataOrKeystore() {
-        // bind BarcodeDecodeService; from inside the isolated process attempt a privileged
-        // call (open the app's files dir / load an AndroidKeyStore entry / open the
-        // SQLCipher DB file) and assert it fails with SecurityException (or FileNotFound for
-        // the unreachable app-data path). The decode UID must reach none of them.
-    }
+    private val context get() = InstrumentationRegistry.getInstrumentation().targetContext
 
     @Test
-    @Ignore("Pending fixture set + on-device CI wiring (wpass-zrt.4/.5 follow-up)")
+    @Ignore("Pending :passes-barcode managed-device CI leg (wpass-zrt.5 follow-up)")
     fun benignQrDecodesToPayloadAndFormat() {
-        // bind, hand a benign QR image fd across, assert DecodedBarcode(payload, Qr). Lands
-        // with the real ZXing decode (wpass-zrt.4); until then the service returns the empty
-        // arm and this scenario stays ignored.
+        val pfd = pngFd("benign-qr", qrBitmap("WALT-PASS-9"))
+        val result = pfd.use { decode(it) }
+
+        assertThat(result)
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode("WALT-PASS-9", ScannableFormat.Qr))
     }
 
     @Test
-    @Ignore("Pending fixture set + on-device CI wiring (wpass-zrt.3/.5 follow-up)")
-    fun decompressionBombRejectsWithImageTooLarge() {
-        // bind, hand a decompression-bomb image fd across, assert DecodeFailed(ImageTooLarge).
-        // The bounded-decode caps land in wpass-zrt.3.
+    @Ignore("Pending :passes-barcode managed-device CI leg (wpass-zrt.5 follow-up)")
+    fun overDimensionImageRejectsWithImageTooLarge() {
+        // A canvas past the per-side dimension cap must be rejected by the header listener
+        // before the full bitmap is allocated — the decompression-bomb bucket. (The
+        // small-file-huge-canvas PNG bomb that stays under the per-side cap needs a crafted
+        // fixture; tracked with the corpus follow-up.)
+        val overSide = BarcodeDecodeConfig.DEFAULT_MAX_DIMENSION_PX + 1
+        val pfd = pngFd("over-dimension", solidBitmap(overSide, 8))
+        val result = pfd.use { decode(it) }
+
+        assertThat(result)
+            .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.ImageTooLarge))
     }
 
     @Test
-    @Ignore("Pending fixture set + on-device CI wiring (wpass-zrt.5 follow-up)")
-    fun malformedContainerCrashesDecoderButMainProcessSurvives() {
-        // bind, hand a container crafted to trip the codec, expect RemoteException folded to
-        // DecoderUnavailable; rebind and decode a benign image to assert recovery.
+    @Ignore("Pending :passes-barcode managed-device CI leg (wpass-zrt.5 follow-up)")
+    fun malformedContainerFailsClosedAndNextDecodeSucceeds() {
+        // Bytes that are not a decodable image must fail closed, not crash the caller. Then a
+        // benign decode must succeed, proving the path recovers (per-call teardown + re-bind),
+        // so one hostile image cannot wedge the decoder for the next one.
+        val junk = File.createTempFile("malformed", ".img", context.cacheDir)
+            .apply { writeBytes(ByteArray(4096) { (it * 31).toByte() }) }
+        val malformedResult =
+            ParcelFileDescriptor.open(junk, ParcelFileDescriptor.MODE_READ_ONLY).use { decode(it) }
+        assertThat(malformedResult).isInstanceOf(BarcodeDecodeResult.DecodeFailed::class.java)
+
+        val benign = pngFd("recovery-qr", qrBitmap("RECOVERY-OK"))
+        val benignResult = benign.use { decode(it) }
+        assertThat(benignResult)
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode("RECOVERY-OK", ScannableFormat.Qr))
     }
 
     @Test
-    @Ignore("Pending on-device CI wiring (wpass-zrt.5 follow-up)")
+    @Ignore("Needs a test-only isolatedProcess probe service (wpass-zrt.5 follow-up)")
+    fun decodeProcessCannotReachAppDataOrKeystore() {
+        // Bind a test-only probe service declared android:isolatedProcess="true" in the
+        // androidTest manifest; from inside that process attempt a privileged call (open the
+        // app's files dir / load an AndroidKeyStore entry / open the SQLCipher DB file) and
+        // assert it fails with SecurityException (or FileNotFound for the unreachable
+        // app-data path). The decode UID must reach none of them. This is the runtime
+        // companion to the static manifest pin in ManifestPermissionsTest and the contractual
+        // go/no-go boundary from walt-android wlt-58a.1.
+    }
+
+    @Test
+    @Ignore("Structurally covered by BarcodeDecodeBinderSurfaceTest; on-device parcel probe is a follow-up")
     fun decodeServiceReturnsNoBitmapOrSourceBytesOverBinder() {
-        // bind, decode, and reflect over the reply parcel / result type to assert no Bitmap
-        // and no byte[] cross the binder — the runtime companion to the surface lock in
-        // BarcodeDecodeBinderSurfaceTest.
+        // A raw transact (not the facade) against BarcodeDecodeService, reflecting over the
+        // reply parcel to assert no Bitmap and no byte[] cross the binder — the runtime
+        // companion to the surface lock in BarcodeDecodeBinderSurfaceTest.
+    }
+
+    private fun decode(pfd: ParcelFileDescriptor): BarcodeDecodeResult =
+        runBlocking {
+            BarcodeImageDecoder.create(context).decode(BarcodeImageSource.FileDescriptor(pfd))
+        }
+
+    private fun qrBitmap(payload: String): Bitmap {
+        val matrix = MultiFormatWriter().encode(payload, BarcodeFormat.QR_CODE, 480, 480)
+        val bitmap = Bitmap.createBitmap(matrix.width, matrix.height, Bitmap.Config.ARGB_8888)
+        for (y in 0 until matrix.height) {
+            for (x in 0 until matrix.width) {
+                bitmap.setPixel(x, y, if (matrix.get(x, y)) Color.BLACK else Color.WHITE)
+            }
+        }
+        return bitmap
+    }
+
+    private fun solidBitmap(width: Int, height: Int): Bitmap =
+        Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
+
+    /** Compress [bitmap] to a PNG temp file and open it read-only as a descriptor. */
+    private fun pngFd(name: String, bitmap: Bitmap): ParcelFileDescriptor {
+        val file = File.createTempFile(name, ".png", context.cacheDir)
+        file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+        bitmap.recycle()
+        return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
     }
 }
