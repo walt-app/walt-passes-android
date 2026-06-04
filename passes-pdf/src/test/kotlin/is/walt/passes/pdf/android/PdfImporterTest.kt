@@ -13,10 +13,11 @@ import `is`.walt.passes.pdf.DocumentRejectedKind
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfImportConfig
 import `is`.walt.passes.pdf.PdfImportResult
-import `is`.walt.passes.pdf.android.internal.PdfPfdFactory
-import `is`.walt.passes.pdf.android.internal.RendererSession
-import `is`.walt.passes.pdf.android.internal.RendererSessionFactory
 import `is`.walt.passes.pdf.android.internal.ThumbnailEncoder
+import `is`.walt.passes.isolation.ConnectResult
+import `is`.walt.passes.isolation.IsolatedWorkerSession
+import `is`.walt.passes.isolation.IsolatedWorkerSessionFactory
+import `is`.walt.passes.isolation.PfdFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
@@ -38,8 +39,8 @@ import java.io.ByteArrayInputStream
  *  - Telemetry: `onImportFailed` fires on every rejection; `onImportStarted` fires only
  *    once we've cleared the SDK gate; `onImportSucceeded` fires only on success.
  *
- * Production internals are wired via the package-internal seams `PdfPfdFactory` and
- * `RendererSessionFactory`; the public surface (`PdfImporter.create`) stays untouched.
+ * Production internals are wired via the shared `passes-isolation` seams `PfdFactory` and
+ * `IsolatedWorkerSessionFactory`; the public surface (`PdfImporter.create`) stays untouched.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -463,8 +464,8 @@ class PdfImporterTest {
     private fun importer(
         config: PdfImportConfig = PdfImportConfig(),
         sdkInt: Int = 34,
-        pfdFactory: PdfPfdFactory = PipePfdFactory(),
-        sessionFactory: RendererSessionFactory = RecordingSessionFactory(),
+        pfdFactory: PfdFactory = PipePfdFactory(),
+        sessionFactory: IsolatedWorkerSessionFactory<PdfRendererBinder> = RecordingSessionFactory(),
         thumbnailEncoder: ThumbnailEncoder = StubThumbnailEncoder(),
     ): DefaultPdfImporter =
         DefaultPdfImporter(
@@ -496,7 +497,7 @@ class PdfImporterTest {
      * are written into the pipe so test paths that actually pass the PFD onward (none
      * of the unit tests today do; the binder is faked) still see plausible content.
      */
-    private class PipePfdFactory : PdfPfdFactory {
+    private class PipePfdFactory : PfdFactory {
         override fun fromBytes(bytes: ByteArray): ParcelFileDescriptor {
             val pipe = ParcelFileDescriptor.createPipe()
             runCatching {
@@ -506,7 +507,7 @@ class PdfImporterTest {
         }
     }
 
-    private class RecordingPfdFactory : PdfPfdFactory {
+    private class RecordingPfdFactory : PfdFactory {
         var calls: Int = 0
 
         override fun fromBytes(bytes: ByteArray): ParcelFileDescriptor {
@@ -519,19 +520,21 @@ class PdfImporterTest {
 
     private class RecordingSessionFactory(
         private val binder: PdfRendererBinder = StaticBinder(),
-    ) : RendererSessionFactory {
+    ) : IsolatedWorkerSessionFactory<PdfRendererBinder> {
         var connectCalls: Int = 0
         var lastSession: RecordingSession? = null
 
-        override suspend fun connect(): RendererSession {
+        override suspend fun connect(): ConnectResult<PdfRendererBinder> {
             connectCalls++
             val s = RecordingSession(binder)
             lastSession = s
-            return s
+            return ConnectResult.Connected(s)
         }
     }
 
-    private class RecordingSession(override val client: PdfRendererBinder) : RendererSession {
+    private class RecordingSession(
+        override val client: PdfRendererBinder,
+    ) : IsolatedWorkerSession<PdfRendererBinder> {
         var closed: Boolean = false
 
         override fun close() {

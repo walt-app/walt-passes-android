@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  passes-isolation library manifest. This module contributes the SHARED isolated-worker
+  plumbing (the memfd PfdFactory and the bind/teardown session facade) that :passes-pdf
+  and :passes-barcode both consume; it declares NO service of its own. Each consumer
+  module declares its own android:isolatedProcess service in its own manifest and names
+  the class it binds — this module only supplies the mechanism to bind one.
+
+  ZERO uses-permission entries by design, and it stays that way: the plumbing must add
+  nothing to the consumer app's runtime permission set.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

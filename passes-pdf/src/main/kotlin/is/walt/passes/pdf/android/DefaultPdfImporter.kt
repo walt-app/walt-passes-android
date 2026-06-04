@@ -11,13 +11,14 @@ import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.PdfDocumentId
 import `is`.walt.passes.pdf.PdfImportConfig
 import `is`.walt.passes.pdf.PdfImportResult
-import `is`.walt.passes.pdf.android.internal.AndroidRendererSessionFactory
-import `is`.walt.passes.pdf.android.internal.MemfdPfdFactory
-import `is`.walt.passes.pdf.android.internal.PdfPfdFactory
 import `is`.walt.passes.pdf.android.internal.PngThumbnailEncoder
-import `is`.walt.passes.pdf.android.internal.RendererSessionFactory
 import `is`.walt.passes.pdf.android.internal.ThumbnailEncoder
 import `is`.walt.passes.pdf.isPdfHeader
+import `is`.walt.passes.isolation.AndroidIsolatedWorkerSessionFactory
+import `is`.walt.passes.isolation.ConnectResult
+import `is`.walt.passes.isolation.IsolatedWorkerSessionFactory
+import `is`.walt.passes.isolation.MemfdPfdFactory
+import `is`.walt.passes.isolation.PfdFactory
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.UUID
@@ -73,14 +74,18 @@ internal class DefaultPdfImporter(
      * factory builds [DefaultPdfImporter] with the production-default [Deps].
      */
     internal data class Deps(
-        val pfdFactory: PdfPfdFactory = MemfdPfdFactory(),
-        val sessionFactoryFor: (Context) -> RendererSessionFactory = ::AndroidRendererSessionFactory,
+        val pfdFactory: PfdFactory = MemfdPfdFactory(MEMFD_DEBUG_NAME),
+        val sessionFactoryFor: (Context) -> IsolatedWorkerSessionFactory<PdfRendererBinder> = { ctx ->
+            AndroidIsolatedWorkerSessionFactory(ctx, PdfRendererService::class.java) { PdfRendererClient(it) }
+        },
         val thumbnailEncoder: ThumbnailEncoder = PngThumbnailEncoder,
         val now: () -> Long = { android.os.SystemClock.elapsedRealtime() },
         val idGenerator: () -> String = { UUID.randomUUID().toString() },
     )
 
-    private val sessionFactory: RendererSessionFactory by lazy { deps.sessionFactoryFor(context) }
+    private val sessionFactory: IsolatedWorkerSessionFactory<PdfRendererBinder> by lazy {
+        deps.sessionFactoryFor(context)
+    }
 
     /**
      * `@Suppress("ReturnCount")` matches the precedent set by `DefaultPassParser.runPipeline`
@@ -158,61 +163,85 @@ internal class DefaultPdfImporter(
         displayLabel: String,
         persist: suspend (String, ByteArray, Int, ByteArray) -> Unit,
         startedAt: Long,
-    ): PdfImportResult =
-        sessionFactory.connect().use { session ->
-            val pages =
-                when (val probe = session.client.probe(pfd)) {
-                    is ProbeResult.Rejected -> return@use rejectAndReport(probe.kind, startedAt)
-                    is ProbeResult.Ok -> probe.pageCount
-                }
-            val thumbnailBytes =
-                when (
-                    val render = session.client.render(
-                        pdf = pfd,
-                        page = 0,
-                        widthPx = THUMB_WIDTH_PX,
-                        heightPx = THUMB_HEIGHT_PX,
-                    )
-                ) {
-                    is RenderResult.Rejected -> return@use rejectAndReport(render.kind, startedAt)
-                    is RenderResult.Ok ->
-                        runCatching { deps.thumbnailEncoder.encode(render) }
-                            .getOrElse { t ->
-                                // CancellationException is part of structured concurrency: catching
-                                // it here would silently convert a parent-scope cancel into an
-                                // EncoderFailed rejection, breaking the parent's "import was
-                                // cancelled" signal. Rethrow lets the cancellation propagate.
-                                if (t is CancellationException) throw t
-                                return@use rejectAndReport(DocumentRejectedKind.EncoderFailed, startedAt)
-                            }
-                }
-            // Persist failure routes to StorageHandoffFailed (distinct from RendererFailed):
-            // the consumer's storage layer threw, not the isolated renderer. Splitting the
-            // arms gives the on-call a clean "SQLCipher wedged" vs "PDFium choked" signal.
-            // CancellationException is rethrown so a parent-scope cancel mid-persist
-            // surfaces as cancellation, not as an Importer rejection.
-            runCatching { persist(displayLabel, bytes, pages, thumbnailBytes) }
-                .getOrElse { t ->
-                    if (t is CancellationException) throw t
-                    return@use rejectAndReport(DocumentRejectedKind.StorageHandoffFailed, startedAt)
-                }
-            val doc =
-                PdfDocument(
-                    id = PdfDocumentId(deps.idGenerator()),
-                    displayLabel = displayLabel,
-                    byteCount = bytes.size.toLong(),
-                    pageCount = pages,
-                    importedAtEpochMs = System.currentTimeMillis(),
-                )
-            config.telemetryGuard.onImportSucceeded(
-                DocumentImportSucceededEvent(
-                    byteCount = doc.byteCount,
-                    pageCount = doc.pageCount,
-                    durationMillis = deps.now() - startedAt,
-                ),
-            )
-            PdfImportResult.Imported(doc)
+    ): PdfImportResult {
+        // Bind failure folds to RendererFailed: the same band the bind→probe→render window
+        // owns. Pre-consolidation this arrived as a rejecting session whose probe returned
+        // RendererFailed; the explicit arm is the same outcome without the placeholder
+        // session. The session is closed (unbound) in `use` regardless of outcome.
+        val session =
+            when (val conn = sessionFactory.connect()) {
+                ConnectResult.BindFailed -> return rejectAndReport(DocumentRejectedKind.RendererFailed, startedAt)
+                is ConnectResult.Connected -> conn.session
+            }
+        return session.use {
+            renderProbeAndPersist(it.client, pfd, PersistRequest(displayLabel, bytes, persist), startedAt)
         }
+    }
+
+    /**
+     * `@Suppress("ReturnCount")` matches the precedent set by `import` / `materialize`: each
+     * stage (probe, render, encode, persist) is its own short-circuit, and collapsing the
+     * early-exits hides the stage shape behind monadic plumbing whose payoff does not justify
+     * the indirection at this size.
+     */
+    @Suppress("ReturnCount")
+    private suspend fun renderProbeAndPersist(
+        client: PdfRendererBinder,
+        pfd: ParcelFileDescriptor,
+        request: PersistRequest,
+        startedAt: Long,
+    ): PdfImportResult {
+        val pages =
+            when (val probe = client.probe(pfd)) {
+                is ProbeResult.Rejected -> return rejectAndReport(probe.kind, startedAt)
+                is ProbeResult.Ok -> probe.pageCount
+            }
+        val thumbnailBytes =
+            when (val render = client.render(pfd, page = 0, widthPx = THUMB_WIDTH_PX, heightPx = THUMB_HEIGHT_PX)) {
+                is RenderResult.Rejected -> return rejectAndReport(render.kind, startedAt)
+                is RenderResult.Ok ->
+                    runCatching { deps.thumbnailEncoder.encode(render) }
+                        .getOrElse { t ->
+                            // CancellationException is part of structured concurrency: catching
+                            // it here would silently convert a parent-scope cancel into an
+                            // EncoderFailed rejection. Rethrow lets the cancellation propagate.
+                            if (t is CancellationException) throw t
+                            return rejectAndReport(DocumentRejectedKind.EncoderFailed, startedAt)
+                        }
+            }
+        // Persist failure routes to StorageHandoffFailed (distinct from RendererFailed): the
+        // consumer's storage layer threw, not the isolated renderer. Splitting the arms gives
+        // the on-call a clean "SQLCipher wedged" vs "PDFium choked" signal. CancellationException
+        // is rethrown so a parent-scope cancel mid-persist surfaces as cancellation.
+        runCatching { request.persist(request.displayLabel, request.bytes, pages, thumbnailBytes) }
+            .getOrElse { t ->
+                if (t is CancellationException) throw t
+                return rejectAndReport(DocumentRejectedKind.StorageHandoffFailed, startedAt)
+            }
+        val doc =
+            PdfDocument(
+                id = PdfDocumentId(deps.idGenerator()),
+                displayLabel = request.displayLabel,
+                byteCount = request.bytes.size.toLong(),
+                pageCount = pages,
+                importedAtEpochMs = System.currentTimeMillis(),
+            )
+        config.telemetryGuard.onImportSucceeded(
+            DocumentImportSucceededEvent(
+                byteCount = doc.byteCount,
+                pageCount = doc.pageCount,
+                durationMillis = deps.now() - startedAt,
+            ),
+        )
+        return PdfImportResult.Imported(doc)
+    }
+
+    /** Bundles the post-render storage handoff inputs so [renderProbeAndPersist] stays under detekt's parameter cap. */
+    private class PersistRequest(
+        val displayLabel: String,
+        val bytes: ByteArray,
+        val persist: suspend (String, ByteArray, Int, ByteArray) -> Unit,
+    )
 
     private fun rejectAndReport(
         kind: DocumentRejectedKind,
@@ -296,5 +325,8 @@ internal class DefaultPdfImporter(
 
         // ADR 0005 G.1 floor.
         const val ANDROID_14_API: Int = 34
+
+        // Cosmetic memfd label for the import PFD (visible in /proc/<pid>/fd).
+        const val MEMFD_DEBUG_NAME: String = "walt-pdf-import"
     }
 }

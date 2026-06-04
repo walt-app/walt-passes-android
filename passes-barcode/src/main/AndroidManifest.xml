@@ -1,14 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
   passes-barcode library manifest. Mirrors passes-pdf: this module hosts the kernel's
-  barcode/QR-from-image decode boundary (wpass-zrt). The isolated-process decode SERVICE
-  declaration lands with wpass-zrt.2, alongside the service class it names; declaring it
-  here before the class exists would fail manifest merging, so this skeleton manifest
-  carries only the security invariant it must never violate.
+  barcode/QR-from-image decode boundary (wpass-zrt). Contributes the isolated-process
+  decode service that performs all hostile-image codec + symbol-decode work (wpass-zrt.2).
 
-  ZERO uses-permission entries by design, and it stays that way. The decode service that
-  arrives in wpass-zrt.2 runs android:isolatedProcess="true", android:exported="false",
-  inherits no app permissions, and reaches no Keystore/DPAN/card material. Adding any
-  uses-permission entry to this manifest is a security-policy change requiring re-review.
+  ZERO uses-permission entries by design, and it stays that way. The decode service runs
+  in an isolated process and inherits no app permissions: no INTERNET, no storage, no
+  clipboard, no Keystore, no DPAN/card material. A codec use-after-free here brings down
+  the decode process, not the wallet, and the isolated-uid sandbox guarantees the
+  compromised process has nothing useful to reach for. Adding any uses-permission entry to
+  this manifest is a security-policy change requiring re-review; ManifestPermissionsTest
+  pins both the zero-permission and the isolated/exported invariants from a unit test.
+
+  android:isolatedProcess="true" is the load-bearing bit. android:exported="false"
+  prevents external apps from binding even if walt-android were ever to ship a debug
+  manifest tweak. android:process=":barcodeDecoder" keeps the process distinct from any
+  other isolated component the consumer might add (e.g. passes-pdf's :pdfRenderer).
 -->
-<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <service
+            android:name=".android.BarcodeDecodeService"
+            android:isolatedProcess="true"
+            android:exported="false"
+            android:process=":barcodeDecoder" />
+    </application>
+
+</manifest>
