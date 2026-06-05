@@ -56,10 +56,15 @@ dependencies {
     // module's public surface — so implementation, not api.
     implementation(project(":passes-isolation"))
 
-    // Pure-JVM symbol decode (wpass-zrt.4). com.google.zxing:core is Apache-2.0 and carries
-    // ZERO native attack surface — it runs only inside the isolated sandbox and never on the
-    // public surface, so implementation, not api. ML Kit was rejected (telemetry + Play
-    // Services dep); zxing-cpp stays a sandboxed contingency only.
+    // Pure-JVM symbol decode (wpass-7xo.2). decodeLuminance + the roster allowlist live in
+    // passes-barcode-core so ONE decode backs both this still-image path and the live-camera
+    // path; this module keeps only the Bitmap → RGBLuminanceSource adapter. Internal seam — no
+    // core type appears on this module's public surface — so implementation, not api. ML Kit was
+    // rejected (telemetry + Play Services dep); zxing-cpp stays a sandboxed contingency only.
+    implementation(project(":passes-barcode-core"))
+
+    // com.google.zxing:core is Apache-2.0 and carries ZERO native attack surface. Used directly
+    // here only for RGBLuminanceSource in the Bitmap adapter; the decode itself is in the core.
     implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
