@@ -1,4 +1,4 @@
-package `is`.walt.passes.barcode.android
+package `is`.walt.passes.barcode
 
 import com.google.common.truth.Truth.assertThat
 import com.google.zxing.BarcodeFormat
