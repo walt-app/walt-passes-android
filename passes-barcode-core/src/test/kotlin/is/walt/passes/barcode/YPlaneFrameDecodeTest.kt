@@ -305,6 +305,10 @@ class YPlaneFrameDecodeTest {
                     EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.L,
                 ),
             )
+        // Pin the version the structural-module mask hardcodes: if a content/ZXing change shifts the
+        // chosen version, the alignment-pattern coords drift and flips could land on now-structural
+        // modules, silently turning "located-but-undecodable" into "not located".
+        require(matrix.width == 33) { "fixture assumes version-4 QR (33x33); got ${matrix.width}" }
         val w = matrix.width
         val h = matrix.height
         val flipped = scatteredDataFlips(w, h)
