@@ -162,14 +162,26 @@ decoded payload through `QrPayloadClassifier` + `ScannableCardInputValidator`.
 
 ## Open follow-ups
 
-- `wpass-7xo.3`: OEM HAL `ImageAnalysis` output-format spike — confirm every
-  walt.is degoogled target delivers raw demosaiced `YUV_420_888` (not an
-  implementation-defined / differently-strided / PRIV format that could need
-  extra handling or conceivably invoke a codec). The stride-padding nuance
-  (ZXing #1387, which production code must strip before constructing the
-  source) hints at variability. This is the one open empirical question that
-  could qualify D1's "no codec" claim on a specific device; it does not
-  reopen the in-process placement for the standard raw-YUV case.
+- `wpass-7xo.3` (RESOLVED 2026-06-05): OEM HAL `ImageAnalysis` output-format
+  spike. Outcome: D1's "no codec" claim holds **structurally** across every
+  walt.is target class (Pixel/GrapheneOS `FULL`/`LEVEL_3` → degoogled
+  `LIMITED`+ → stock OEM → `LEGACY` tail). CameraX `ImageAnalysis` delivers raw
+  demosaiced `YUV_420_888` by default; the still-image codec is a *separate*
+  camera2 output format (`ImageFormat.JPEG`/HEIC) consumed only by
+  `ImageCapture`, which the live path does not bind, so no OEM HAL turns the
+  analysis stream into a codec-decoded one. `IMPLEMENTATION_DEFINED`/`PRIV` is
+  the opaque GPU/preview format, never delivered as readable bytes to an
+  `Analyzer`. The only cross-HAL variability is plane geometry (`rowStride`
+  padding, `pixelStride` interleave, ZXing #1387), which the kernel
+  `decodeYPlane(byte[] + width/height/rowStride/pixelStride/reverseHorizontal)`
+  signature already absorbs — **no contract change**. Lone residual: a
+  `LEGACY`-only 1-pixel luminance-shift in CameraX's RGB→YUV conversion
+  (Play-channel old-hardware tail only; Pixels are never `LEGACY`) — a quality
+  artifact, not a codec, within binarizer tolerance. Consumer usage constraint:
+  keep `ImageAnalysis` on the default `YUV_420_888` and feed `getPlanes()[0]`
+  (Y); never feed an `RGBA_8888` plane into `decodeYPlane`. Full device ×
+  output-format matrix in the `wpass-7xo.3` design field; on-device per-model
+  confirmation is the consumer's `wlt-mwj.6`.
 - The downstream classification / validation + user-confirmation contract for
   payloads (URL allowlisting, scheme restrictions, B3-style confirmation
   sheet) is a CONSUMER (`wlt-mwj`) responsibility, reusing `QrPayloadClassifier`
