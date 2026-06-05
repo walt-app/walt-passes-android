@@ -14,10 +14,8 @@ import `is`.walt.passes.core.ScannableFormat
 
 /**
  * The pure-JVM ZXing symbol decode (wpass-zrt.4): reads a barcode off a [LuminanceSource] and
- * returns only `{payload, format}`. com.google.zxing:core is Apache-2.0 and 100% JVM, so it adds
- * ZERO native attack surface — the deciding reason it is chosen over a native decoder (which
- * would sit outside the JVM security model with full address-space access) and over ML Kit
- * (telemetry + Play-Services dep).
+ * returns only `{payload, format}`. com.google.zxing:core is 100% JVM, so it adds ZERO native
+ * attack surface (the library-choice rationale lives on the `build.gradle.kts` dependency).
  *
  * Lives here, Bitmap-free in `passes-barcode-core`, so ONE decode implementation backs both the
  * isolated still-image path (`passes-barcode`'s `Bitmap → RGBLuminanceSource` adapter) and the
@@ -69,9 +67,9 @@ private val ROSTER_BY_ZXING_FORMAT: Map<BarcodeFormat, ScannableFormat> =
     )
 
 /**
- * POSSIBLE_FORMATS pins the reader to the roster allowlist; TRY_HARDER trades a little CPU
- * (bounded by the caller — e.g. `passes-barcode`'s `DecodeWatchdog`) for a better hit rate on
- * photographed cards.
+ * POSSIBLE_FORMATS pins the reader to the roster allowlist; TRY_HARDER trades a little CPU for a
+ * better hit rate on photographed cards. Callers are expected to bound decode time (the
+ * still-image path does so via its watchdog).
  */
 private val DECODE_HINTS: Map<DecodeHintType, Any> =
     mapOf(
