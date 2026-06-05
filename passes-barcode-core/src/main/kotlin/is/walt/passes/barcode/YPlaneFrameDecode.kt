@@ -29,13 +29,10 @@ import `is`.walt.passes.core.BarcodeDecodeResult
  *    such a plane is first repacked into a tight `width * height` buffer.
  *
  * ### Signature decision
- * The surface is kept deliberately minimal and robust to the wpass-7xo.3 HAL-variability spike,
- * whose only lever is plane *layout*: [rowStride] and [pixelStride] are exposed because real HALs
- * vary them, and `byte[] + ints` absorbs whatever the spike reports without a contract change.
- * Crop ([left]/[top]) is NOT exposed in v1 — the full supplied plane is decoded (ZXing's binarizer
- * already scans the whole frame); a consumer wanting a reticle crop hands in a pre-sliced sub-plane,
- * and a crop overload can be added later without breaking callers. [reverseHorizontal] is exposed
- * (default `false`) for the front-camera mirrored case, which the consumer cannot cheaply pre-apply.
+ * [rowStride] and [pixelStride] are exposed because real HALs vary them (wpass-7xo.3 spike); the
+ * `byte[] + ints` shape absorbs the spike outcome without a contract change. Crop is NOT exposed in
+ * v1 — the full plane is decoded and a crop overload can be added later without breaking callers.
+ * [reverseHorizontal] is exposed (default `false`) for the front-camera mirrored case.
  *
  * Geometry preconditions (positive dimensions, `rowStride >= width`, a buffer large enough for the
  * stated layout) are caller-wiring errors, not decode outcomes, so they fail fast via [require]
@@ -55,8 +52,9 @@ public fun decodeYPlane(
         "Frame dimensions must be positive (was ${width}x$height)."
     }
     require(pixelStride >= 1) { "pixelStride ($pixelStride) must be >= 1." }
-    require(rowStride >= width * pixelStride) {
-        "rowStride ($rowStride) cannot be smaller than width * pixelStride (${width * pixelStride})."
+    val rowSpan = width.toLong() * pixelStride
+    require(rowStride >= rowSpan) {
+        "rowStride ($rowStride) cannot be smaller than width * pixelStride ($rowSpan)."
     }
     // Largest byte the per-row reads reach: last row start + last pixel offset within the row.
     val maxIndex = (height - 1).toLong() * rowStride + (width - 1).toLong() * pixelStride
