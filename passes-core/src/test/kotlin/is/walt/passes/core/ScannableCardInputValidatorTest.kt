@@ -28,8 +28,16 @@ class ScannableCardInputValidatorTest {
 
     @Test
     fun ean13HappyPathWithValidCheckDigit() {
-        val result = validate("1234567890120", ScannableFormat.Ean13)
-        assertSuccessWithPayload(result, "1234567890120")
+        // Check digit 8 for data 123456789012 (weights from right: 3,1,3,1...).
+        val result = validate("1234567890128", ScannableFormat.Ean13)
+        assertSuccessWithPayload(result, "1234567890128")
+    }
+
+    @Test
+    fun ean13HappyPathRealWorldBarcode() {
+        // Real EAN-13 (check digit 1); guards against the flipped-weights regression in #135.
+        val result = validate("4006381333931", ScannableFormat.Ean13)
+        assertSuccessWithPayload(result, "4006381333931")
     }
 
     @Test
@@ -179,6 +187,14 @@ class ScannableCardInputValidatorTest {
         assertThat(rejection).isInstanceOf(PayloadRejection.InvalidCheckDigit::class.java)
         rejection as PayloadRejection.InvalidCheckDigit
         assertThat(rejection.format).isEqualTo(ScannableFormat.Ean13)
+    }
+
+    @Test
+    fun ean13FlippedWeightCheckDigitRejected() {
+        // #135 regression: 1234567890120 validates only under the old, flipped weights
+        // (rightmost data digit weighted 1 instead of 3). It must now be rejected.
+        val rejection = expectPayloadRejection("1234567890120", ScannableFormat.Ean13)
+        assertThat(rejection).isInstanceOf(PayloadRejection.InvalidCheckDigit::class.java)
     }
 
     // ---- UPC-A structural ----

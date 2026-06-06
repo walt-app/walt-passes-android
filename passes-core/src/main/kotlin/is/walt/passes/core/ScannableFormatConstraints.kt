@@ -66,7 +66,7 @@ internal object ScannableFormatConstraints {
     // a correctly-sized payload and only verifies the check digit.
     private fun validateEan13(payload: String): PayloadRejection? {
         // EAN-13: rightmost digit is the check digit. Weights from right (excluding check
-        // digit) alternate 1, 3, 1, 3 ...; sum mod 10, then (10 - sum mod 10) mod 10.
+        // digit) alternate 3, 1, 3, 1 ...; sum mod 10, then (10 - sum mod 10) mod 10.
         val digits = payload.map { it.digitToInt() }
         val expected = ean13CheckDigit(digits.dropLast(1))
         return if (expected == digits.last()) null else PayloadRejection.InvalidCheckDigit(ScannableFormat.Ean13)
@@ -82,9 +82,9 @@ internal object ScannableFormatConstraints {
 
     private fun ean13CheckDigit(twelveDigits: List<Int>): Int {
         var sum = 0
-        // Index from the right: position 0 = weight 1, position 1 = weight 3, alternating.
+        // Index from the right: position 0 = weight 3, position 1 = weight 1, alternating.
         for ((indexFromRight, digit) in twelveDigits.asReversed().withIndex()) {
-            sum += digit * if (indexFromRight % 2 == 0) 1 else 3
+            sum += digit * if (indexFromRight % 2 == 0) 3 else 1
         }
         return (10 - sum % 10) % 10
     }
