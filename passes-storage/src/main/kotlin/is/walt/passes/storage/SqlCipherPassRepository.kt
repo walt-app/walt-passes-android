@@ -355,6 +355,15 @@ public class SqlCipherPassRepository internal constructor(
         StorageResult.Success(Unit)
     }
 
+    override suspend fun readAllForExport(): StorageResult<ExportSnapshot> = runIo {
+        val passes = store.listSummaries().mapNotNull { store.loadById(it.id) }
+        val cards = scannableCardStore.listAll()
+        val docs = documentStore.listRows().mapNotNull { row ->
+            documentStore.loadBytes(row.id)?.let { bytes -> DocumentExportEntry(row, bytes) }
+        }
+        StorageResult.Success(ExportSnapshot(passes = passes, scannableCards = cards, documents = docs))
+    }
+
     override fun close() {
         if (closed.compareAndSet(false, true)) {
             scannableCardStore.close()

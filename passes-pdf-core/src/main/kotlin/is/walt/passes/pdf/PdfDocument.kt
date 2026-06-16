@@ -1,5 +1,9 @@
 package `is`.walt.passes.pdf
 
+import `is`.walt.passes.export.ArtifactKind
+import `is`.walt.passes.export.ExportableArtifact
+import java.time.Instant
+
 /**
  * Opaque identifier for a stored [PdfDocument]. Wrapped in a value class so calling code
  * cannot accidentally substitute a `String` from another domain (a pass id, a filename, a
@@ -26,7 +30,11 @@ public data class PdfDocument(
     public val pageCount: Int,
     public val importedAtEpochMs: Long,
     public val provenance: Provenance = Provenance.UserProvided,
-)
+) : ExportableArtifact {
+    override val exportKind: String get() = ArtifactKind.PDF_DOCUMENT
+    override val exportId: String get() = id.value
+    override val exportCreatedAt: String get() = Instant.ofEpochMilli(importedAtEpochMs).toString()
+}
 
 /**
  * Where a [PdfDocument] came from. Single arm by design: the only legitimate source today

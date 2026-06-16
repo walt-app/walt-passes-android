@@ -5,11 +5,14 @@ plugins {
 }
 
 dependencies {
+    // ExportableArtifact, ArtifactKind — the shared contract this module implements.
     api(project(":passes-export-core"))
+    // Pass, ScannableCard, PassInstant, SignatureStatus — all on the public export surface.
+    api(project(":passes-core"))
+    // PdfDocument — on the public export surface.
+    api(project(":passes-pdf-core"))
+
     implementation(libs.kotlinx.serialization.json)
-    implementation(libs.bouncycastle.bcprov)
-    implementation(libs.bouncycastle.bcpkix)
-    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.truth)

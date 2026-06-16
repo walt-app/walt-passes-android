@@ -1,5 +1,9 @@
 package `is`.walt.passes.core
 
+import `is`.walt.passes.export.ArtifactKind
+import `is`.walt.passes.export.ExportableArtifact
+import java.time.Instant
+
 /**
  * A user-generated, unsigned scannable artifact. Sibling of [Pass], NOT a subtype: existence
  * of a [ScannableCard] value asserts that the wrapped payload has cleared the kernel's
@@ -20,7 +24,11 @@ public data class ScannableCard internal constructor(
     public val format: ScannableFormat,
     public val label: String,
     public val createdAt: PassInstant,
-)
+) : ExportableArtifact {
+    override val exportKind: String get() = ArtifactKind.SCANNABLE_CARD
+    override val exportId: String get() = id.value
+    override val exportCreatedAt: String get() = Instant.ofEpochMilli(createdAt.epochMillis).toString()
+}
 
 /**
  * Type-safe identifier for a [ScannableCard]. passes-core does not mint IDs; the storage

@@ -4,7 +4,6 @@ plugins {
 }
 
 dependencies {
-    api(project(":passes-export-core"))
     testImplementation(libs.junit)
     testImplementation(libs.truth)
 }
