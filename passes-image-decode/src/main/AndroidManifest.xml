@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  passes-image-decode library manifest. This module contributes the SINGLE bounded
+  ImageDecoder primitive (the containment-hardened compressed-bytes -> Bitmap decode) that
+  :passes-barcode (isolated still-image symbol decode) and :passes-ui (in-process pkpass
+  display) both consume, and that the wpass-i9x isolated image-document service will reuse.
+  It declares NO component of its own and holds NO decode policy — the caps, format
+  allowlist, and rejection taxonomy stay with each consumer.
+
+  ZERO uses-permission entries by design, and it stays that way: a shared decode helper must
+  add nothing to the consumer app's runtime permission set.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />

@@ -56,6 +56,13 @@ dependencies {
     // module's public surface — so implementation, not api.
     implementation(project(":passes-isolation"))
 
+    // The bounded ImageDecoder mechanism (containment-hardened compressed-bytes -> Bitmap)
+    // is shared with passes-ui and the wpass-i9x image-document service. This module keeps
+    // its own decode policy (BarcodeDecodeConfig caps, format allowlist, the
+    // BoundedDecodeResult/DecodeFailureReason taxonomy) and delegates only the mechanism.
+    // Internal seam — no passes-image-decode type appears on this module's public surface.
+    implementation(project(":passes-image-decode"))
+
     // Pure-JVM symbol decode (wpass-7xo.2). decodeLuminance + the roster allowlist live in
     // passes-barcode-core so ONE decode backs both this still-image path and the live-camera
     // path; this module keeps only the Bitmap → RGBLuminanceSource adapter. Internal seam — no

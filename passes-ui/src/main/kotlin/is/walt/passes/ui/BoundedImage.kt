@@ -15,10 +15,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import `is`.walt.passes.core.ImageBytes
 import `is`.walt.passes.core.ImageRole
+import `is`.walt.passes.image.decode.BoundedBitmap
+import `is`.walt.passes.image.decode.BoundedDecodePolicy
+import `is`.walt.passes.image.decode.decodeBounded
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.IOException
-import java.nio.ByteBuffer
 
 /**
  * Decodes [bytes] using Android `ImageDecoder` with explicit dimension caps applied via
@@ -86,40 +87,32 @@ public fun BoundedImage(
 internal fun decodeBoundedBitmap(
     rawBytes: ByteArray,
     bounds: ImageRenderBounds,
-): Pair<Bitmap?, ImageDecodeRejection?> {
-    val source = ImageDecoder.createSource(ByteBuffer.wrap(rawBytes))
-    var rejection: ImageDecodeRejection? = null
-    return try {
-        val bitmap = ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-            val w = info.size.width
-            val h = info.size.height
-            rejection = when {
-                w > bounds.maxWidthPx -> ImageDecodeRejection.ExceedsWidth
-                h > bounds.maxHeightPx -> ImageDecodeRejection.ExceedsHeight
-                w.toLong() * h.toLong() > bounds.maxAreaPx -> ImageDecodeRejection.ExceedsArea
-                else -> null
-            }
-            if (rejection != null) {
-                // Force a 1x1 decode so the underlying allocation stays trivially small.
-                // The composable discards the bitmap below.
-                decoder.setTargetSize(1, 1)
-            }
-        }
-        if (rejection != null) {
-            null to rejection
-        } else {
-            bitmap to null
-        }
-    } catch (e: IOException) {
-        // Genuine I/O / parse failure with no bounds rejection in flight.
-        null to (rejection ?: ImageDecodeRejection.Malformed)
-    } catch (e: IllegalArgumentException) {
-        // setTargetSize(1, 1) inside the listener can throw IAE for formats that
-        // refuse arbitrary sizing (e.g. some strip-encoded variants). When that
-        // happens, bounds rejection ALREADY fired in the listener — preserve that
-        // reason rather than reclassifying as Malformed.
-        null to (rejection ?: ImageDecodeRejection.Malformed)
-    } catch (e: RuntimeException) {
-        null to (rejection ?: ImageDecodeRejection.Other)
+): Pair<Bitmap?, ImageDecodeRejection?> =
+    when (
+        val decoded =
+            decodeBounded(
+                rawBytes = rawBytes,
+                policy =
+                    BoundedDecodePolicy(
+                        // Platform default: a hardware bitmap is fine here — this path is
+                        // display-only and never reads pixels back, unlike the symbol decoder.
+                        allocator = ImageDecoder.ALLOCATOR_DEFAULT,
+                        gate = { _, w, h ->
+                            when {
+                                w > bounds.maxWidthPx -> ImageDecodeRejection.ExceedsWidth
+                                h > bounds.maxHeightPx -> ImageDecodeRejection.ExceedsHeight
+                                w.toLong() * h.toLong() > bounds.maxAreaPx -> ImageDecodeRejection.ExceedsArea
+                                else -> null
+                            }
+                        },
+                        onMalformed = { ImageDecodeRejection.Malformed },
+                        onRuntimeFailure = { ImageDecodeRejection.Other },
+                        // In-process display: no rejection bucket for an OOM, so let it
+                        // propagate rather than silently swallow it (preserves prior posture).
+                        onOutOfMemory = null,
+                    ),
+            )
+    ) {
+        is BoundedBitmap.Decoded -> decoded.bitmap to null
+        is BoundedBitmap.Rejected -> null to decoded.reason
     }
-}
