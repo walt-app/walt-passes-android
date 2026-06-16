@@ -366,6 +366,80 @@ class DocumentRepositoryTest {
         assertThat(docs.closeCount).isEqualTo(1)
     }
 
+    @Test
+    fun insertImageDocumentPersistsFormatAndDimensionsAndSkipsThePageCap() = runTest {
+        val docs = FakeDocumentStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(docs, telemetry)
+
+        val image = ByteArray(4096) { 0x42 }
+        val thumb = ByteArray(128) { 0x11 }
+        val result = repo.insertDocument(
+            DocumentInsert.Image(
+                label = "ticket.png",
+                bytes = image,
+                thumbnailBytes = thumb,
+                format = DocumentFormat.Png,
+                widthPx = 1080,
+                heightPx = 1920,
+            ),
+        )
+
+        check(result is StorageResult.Success)
+        val row = repo.observeDocuments().first().single()
+        assertThat(row.displayLabel).isEqualTo("ticket.png")
+        assertThat(row.byteCount).isEqualTo(4096)
+        assertThat(row.format).isEqualTo(DocumentFormat.Png)
+        assertThat(row.widthPx).isEqualTo(1080)
+        assertThat(row.heightPx).isEqualTo(1920)
+        // An image is a single page; the page cap (10) does not gate it.
+        assertThat(row.pageCount).isEqualTo(1)
+        // Telemetry reports the single page for images, mirroring the PDF event shape.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "doc-imported:4096:1",
+        ).inOrder()
+    }
+
+    @Test
+    fun insertImageDocumentStillEnforcesTheByteCap() = runTest {
+        val repo = repo(FakeDocumentStore(), RecordingGuard())
+        val rejected = repo.insertDocument(
+            DocumentInsert.Image(
+                label = "huge.jpg",
+                bytes = ByteArray(DocumentBounds.MAX_BYTES.toInt() + 1),
+                thumbnailBytes = ByteArray(0),
+                format = DocumentFormat.Jpeg,
+                widthPx = 8000,
+                heightPx = 8000,
+            ),
+        )
+        check(rejected is StorageResult.Failure)
+        assertThat((rejected.error as StorageError.DocumentRejected).kind)
+            .isEqualTo(DocumentStorageRejectedKind.OversizedAtStorage)
+    }
+
+    /**
+     * PDF-shaped convenience wrapper. The production `insertDocument` takes the sealed
+     * [DocumentInsert]; the PDF tests predate the image arm and read more clearly with the
+     * flat parameters they were written against. Forwards to [DocumentInsert.Pdf] so the
+     * call sites stay focused on the behavior under test, not the wrapper shape.
+     */
+    private suspend fun SqlCipherPassRepository.insertDocument(
+        label: String,
+        pdfBytes: ByteArray,
+        pageCount: Int,
+        thumbnailBytes: ByteArray,
+    ): StorageResult<DocumentRecordId> =
+        insertDocument(
+            DocumentInsert.Pdf(
+                label = label,
+                bytes = pdfBytes,
+                thumbnailBytes = thumbnailBytes,
+                pageCount = pageCount,
+            ),
+        )
+
     private fun repo(docs: FakeDocumentStore, telemetry: StorageTelemetryGuard): SqlCipherPassRepository =
         SqlCipherPassRepository(
             store = NoOpPassStore,
@@ -386,7 +460,7 @@ class DocumentRepositoryTest {
     private class FakeDocumentStore : DocumentStore {
         private data class Entry(
             val row: DocumentRow,
-            val pdfBytes: ByteArray,
+            val bytes: ByteArray,
             val thumbnailBytes: ByteArray,
         )
 
@@ -409,16 +483,19 @@ class DocumentRepositoryTest {
             val row = DocumentRow(
                 id = id,
                 displayLabel = request.displayLabel,
-                byteCount = request.pdfBytes.size.toLong(),
+                byteCount = request.bytes.size.toLong(),
+                format = request.format,
                 pageCount = request.pageCount,
+                widthPx = request.widthPx,
+                heightPx = request.heightPx,
                 importedAtEpochMs = request.nowEpochMs,
             )
-            entries[id.value] = Entry(row, request.pdfBytes.copyOf(), request.thumbnailBytes.copyOf())
+            entries[id.value] = Entry(row, request.bytes.copyOf(), request.thumbnailBytes.copyOf())
             return DocumentInsertOutcome(id = id, row = row)
         }
 
         override fun loadBytes(id: DocumentRecordId): ByteArray? =
-            entries[id.value]?.pdfBytes?.copyOf()
+            entries[id.value]?.bytes?.copyOf()
 
         override fun loadThumbnail(id: DocumentRecordId): ByteArray? =
             entries[id.value]?.thumbnailBytes?.copyOf()

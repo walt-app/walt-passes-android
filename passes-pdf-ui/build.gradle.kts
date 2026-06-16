@@ -21,6 +21,10 @@ dependencies {
     // DocumentView; consumers must construct one and the binder type has to be on
     // their compile classpath.
     api(project(":passes-pdf"))
+    // The reserved passes-pdf-ui -> passes-image edge (CLAUDE.md): the image-document
+    // display arm of DocumentView takes an `ImageDecodeBinder` the consumer constructs,
+    // exactly as the PDF arm takes a `PdfRendererBinder`, so api (not implementation).
+    api(project(":passes-image"))
     api(project(":passes-ui-core"))
     api(libs.kotlinx.coroutines.core)
 

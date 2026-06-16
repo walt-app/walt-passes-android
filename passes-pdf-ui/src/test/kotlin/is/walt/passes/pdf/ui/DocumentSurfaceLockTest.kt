@@ -33,14 +33,30 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun documentViewHasExactlySevenUserVisibleParameters() {
-        // (doc, pdfFile, renderer, modifier, telemetry, onOpenFullScreen,
-        // fullScreenAffordance). D5: still no flag to hide the trust caption. The seventh
-        // slot is the wpass-emn host-supplied open-full-screen affordance composable — it
-        // restyles/places the open hint only and cannot touch the trust caption or the
-        // page tap target, so D5/D8 are unaffected. Bumping from 6 to 7 is the deliberate
-        // change for that slot, not a slip.
-        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 7)
+    fun documentViewHasExactlyNineUserVisibleParameters() {
+        // (doc, pdfFile, renderer, imageFile, imageDecoder, modifier, telemetry,
+        // onOpenFullScreen, fullScreenAffordance). D5: still no flag to hide the trust
+        // caption — the caption is composed inside each arm and gated by no parameter.
+        // Bumping from 7 to 9 is the deliberate wpass-i9x change: the image arm (step 4)
+        // adds the kind-specific (imageFile, imageDecoder) backend pair, mirroring the
+        // (pdfFile, renderer) PDF pair. Neither pair can touch the trust caption or the
+        // tap target, so D5/D8 are unaffected.
+        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 9)
+    }
+
+    @Test
+    fun documentViewConsumesImageDecodeBinderInterfaceNotConcreteClient() {
+        // The image arm's contract takes the binder interface so test fakes inject cleanly,
+        // exactly as the PDF arm takes PdfRendererBinder. A regression to the concrete
+        // ImageDecodeClient would make every hosting test bind a real decode service.
+        val method = findComposable("DocumentViewKt", "DocumentView")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("DocumentView must accept the ImageDecodeBinder interface")
+            .that(typeNames)
+            .contains("ImageDecodeBinder")
+        assertWithMessage("DocumentView must NOT bind to the concrete ImageDecodeClient")
+            .that(typeNames)
+            .doesNotContain("ImageDecodeClient")
     }
 
     @Test

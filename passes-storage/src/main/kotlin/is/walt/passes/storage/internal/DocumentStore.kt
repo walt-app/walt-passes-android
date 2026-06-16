@@ -1,5 +1,6 @@
 package `is`.walt.passes.storage.internal
 
+import `is`.walt.passes.storage.DocumentFormat
 import `is`.walt.passes.storage.DocumentRecordId
 import `is`.walt.passes.storage.DocumentRow
 
@@ -31,10 +32,21 @@ internal interface DocumentStore {
     fun close()
 }
 
+/**
+ * A resolved insert for the `documents` table, kind-discriminated by [format]. The
+ * repository flattens the public [DocumentInsert][`is`.walt.passes.storage.DocumentInsert]
+ * sealed arms into this single row shape: [pageCount] carries the PDF page count (or `1` for
+ * an image, a single page), and [widthPx] / [heightPx] carry the image dimensions (or `null`
+ * for a PDF). [bytes] is the original document bytes; the store writes them to the reused
+ * `pdf_bytes` BLOB column verbatim.
+ */
 internal data class DocumentInsertRequest(
     val displayLabel: String,
-    val pdfBytes: ByteArray,
+    val bytes: ByteArray,
+    val format: DocumentFormat,
     val pageCount: Int,
+    val widthPx: Int?,
+    val heightPx: Int?,
     val thumbnailBytes: ByteArray,
     val nowEpochMs: Long,
 )
