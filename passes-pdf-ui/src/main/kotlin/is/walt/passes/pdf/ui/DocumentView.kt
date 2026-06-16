@@ -24,6 +24,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import `is`.walt.passes.pdf.Document
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
@@ -31,8 +32,41 @@ import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
 
 /**
+ * Presentation of a [Document] — the public entry point the consumer composes. This is a
+ * dispatcher on the sealed [Document] type: it selects the surface for the concrete arm and
+ * forwards the consumer's parameters unchanged. [PdfDocument] is the sole arm today and
+ * routes to [PdfDocumentView]; a future image arm adds its own branch here without touching
+ * the PDF render path. The trust caption is non-suppressible inside every arm — this
+ * dispatcher adds no parameter that could omit it, so the [DocumentSurfaceLockTest] shape
+ * lock and [DocumentTrustSurfaceTest] visible-text lock hold across the seam.
+ */
+@Composable
+@Suppress("LongParameterList")
+public fun DocumentView(
+    doc: Document,
+    pdfFile: ParcelFileDescriptor,
+    renderer: PdfRendererBinder,
+    modifier: Modifier = Modifier,
+    telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    onOpenFullScreen: (() -> Unit)? = null,
+    fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
+) {
+    when (doc) {
+        is PdfDocument -> PdfDocumentView(
+            doc = doc,
+            pdfFile = pdfFile,
+            renderer = renderer,
+            modifier = modifier,
+            telemetry = telemetry,
+            onOpenFullScreen = onOpenFullScreen,
+            fullScreenAffordance = fullScreenAffordance,
+        )
+    }
+}
+
+/**
  * Presentation of a [PdfDocument] — a non-suppressible trust caption above a swipeable
- * pager of rasterised pages. `DocumentView` fills the bounds the consumer gives it and
+ * pager of rasterised pages. `PdfDocumentView` fills the bounds the consumer gives it and
  * does NOT assume a full screen: the caption takes its natural height, the pager takes
  * the rest, and each page is letterboxed into the pager slot rather than sized from a
  * fixed aspect ratio — so a short consumer slot can never make a page overflow upward
@@ -89,7 +123,7 @@ import `is`.walt.passes.ui.core.toComposeColor
  */
 @Composable
 @Suppress("LongParameterList")
-public fun DocumentView(
+private fun PdfDocumentView(
     doc: PdfDocument,
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
