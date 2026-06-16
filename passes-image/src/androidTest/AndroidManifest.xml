@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  androidTest-only manifest for passes-image. Declares a test-only isolated probe service used
+  by ImageDecodeServiceInstrumentedTest.decodeProcessCannotReachAppDataOrKeystore to run code
+  INSIDE an isolated process and prove the sandbox cannot reach app data, the Keystore, or the
+  network (the runtime companion to ManifestPermissionsTest's static pin).
+
+  This service exists ONLY in the test APK; it ships no decode logic and never touches the main
+  manifest. It mirrors ImageDecodeService's sandbox declaration exactly — isolated, not
+  exported, in its own process — so the privileges it probes are the same ones the real
+  :imageDecoder process runs under.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <service
+            android:name="is.walt.passes.image.android.ImageSandboxProbeService"
+            android:isolatedProcess="true"
+            android:exported="false"
+            android:process=":probe" />
+    </application>
+
+</manifest>
