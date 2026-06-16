@@ -3,16 +3,18 @@ package `is`.walt.passes.pdf
 /**
  * Opaque identifier for a stored [PdfDocument]. Wrapped in a value class so calling code
  * cannot accidentally substitute a `String` from another domain (a pass id, a filename, a
- * user input) into APIs that expect a document id.
+ * user input) into APIs that expect a document id. The [DocumentId] arm for PDFs.
  */
 @JvmInline
-public value class PdfDocumentId(public val value: String)
+public value class PdfDocumentId(public override val value: String) : DocumentId
 
 /**
- * The pure-Kotlin model for a successfully-imported PDF. Mirrors the role [Pass] plays in
- * `passes-core` for pkpass archives, but is deliberately a *sibling* concept (per ADR 0005
- * D1) — `PdfDocument` and `Pass` share no superclass. Documents are not signature-verified
- * (D5); their trust caption is sourced from [provenance], which has a single arm by design.
+ * The pure-Kotlin model for a successfully-imported PDF — the sole [Document] arm today.
+ * Mirrors the role [Pass] plays in `passes-core` for pkpass archives, but is deliberately
+ * a *sibling* concept (per ADR 0005 D1) — `PdfDocument` and `Pass` share no superclass.
+ * Documents are not signature-verified (D5); their trust caption is sourced from
+ * [provenance], which has a single arm by design. [pageCount] is the PDF-specific field
+ * that lives on this arm rather than on the [Document] supertype.
  *
  * The displayed [displayLabel] is supplied at import time by the consumer; the model layer
  * never derives it from PDF metadata, because metadata is part of the
@@ -20,16 +22,16 @@ public value class PdfDocumentId(public val value: String)
  * one and a date-based fallback ("PDF, added <date>") otherwise.
  */
 public data class PdfDocument(
-    public val id: PdfDocumentId,
-    public val displayLabel: String,
-    public val byteCount: Long,
+    public override val id: PdfDocumentId,
+    public override val displayLabel: String,
+    public override val byteCount: Long,
     public val pageCount: Int,
-    public val importedAtEpochMs: Long,
-    public val provenance: Provenance = Provenance.UserProvided,
-)
+    public override val importedAtEpochMs: Long,
+    public override val provenance: Provenance = Provenance.UserProvided,
+) : Document
 
 /**
- * Where a [PdfDocument] came from. Single arm by design: the only legitimate source today
+ * Where a [Document] came from. Single arm by design: the only legitimate source today
  * is the user importing a file from their device. The arm exists not because there are
  * alternatives but because *not having* this enum would let a future contributor add a
  * silent "downloaded by Walt" provenance without a code-review trail.
