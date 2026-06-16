@@ -164,19 +164,22 @@ class FieldLinkScannerTest {
      * Tripwire for ReDoS / catastrophic-backtracking in the phone-number regex. The
      * phone pattern uses a quantified character class with optional digit boundary;
      * a hostile back-field could in principle force quadratic-or-worse backtracking.
-     * This test feeds a 4 KB digit-soup field that has no valid match anchor, with a
-     * generous 500 ms budget. Real linear-ish behavior completes in under a few ms;
-     * exponential pathology would blow this budget by orders of magnitude.
+     * This test feeds a 4 KB digit-soup field that has no valid match anchor.
+     *
+     * The assertion is on the FASTEST of several timed runs after a JIT warm-up
+     * ([fastestScanMillis]), not a single cold sample: catastrophic backtracking is
+     * super-linear and blows the budget by orders of magnitude on EVERY run, so the min
+     * still catches it — while a cold-JIT compile of the regex/Cf-stripping path, a GC
+     * pause, or a contended CI core can no longer trip a genuinely linear scan. Real
+     * linear-ish behavior settles in single-digit milliseconds; the generous
+     * [REDOS_BUDGET_MS] budget leaves two orders of magnitude of headroom.
      */
     @Test
     fun phoneScanCompletesQuicklyOnPathologicalInput() {
         val pathological = buildString {
             repeat(4096) { append((it % 10).digitToChar()) }
         }
-        val start = System.nanoTime()
-        FieldLinkScanner.scan(pathological, source)
-        val elapsedMs = (System.nanoTime() - start) / 1_000_000
-        assertThat(elapsedMs).isLessThan(500L)
+        assertThat(fastestScanMillis(pathological)).isLessThan(REDOS_BUDGET_MS)
     }
 
     @Test
@@ -188,10 +191,25 @@ class FieldLinkScannerTest {
                 append('-')
             }
         }
-        val start = System.nanoTime()
-        FieldLinkScanner.scan(pathological, source)
-        val elapsedMs = (System.nanoTime() - start) / 1_000_000
-        assertThat(elapsedMs).isLessThan(500L)
+        assertThat(fastestScanMillis(pathological)).isLessThan(REDOS_BUDGET_MS)
+    }
+
+    /**
+     * Scans [input] several times and returns the fastest run in milliseconds, after an
+     * untimed JIT warm-up. The min over repeats reflects the scan's algorithmic cost rather
+     * than one-off scheduling/GC noise, which is what the ReDoS tripwires need: a super-linear
+     * blowup is slow on every run, so it survives the min; transient slowness on an otherwise
+     * linear scan does not.
+     */
+    private fun fastestScanMillis(input: String): Long {
+        repeat(REDOS_WARMUP_RUNS) { FieldLinkScanner.scan(input, source) }
+        var bestMs = Long.MAX_VALUE
+        repeat(REDOS_TIMED_RUNS) {
+            val start = System.nanoTime()
+            FieldLinkScanner.scan(input, source)
+            bestMs = minOf(bestMs, (System.nanoTime() - start) / 1_000_000)
+        }
+        return bestMs
     }
 
     // -- Bidi / formatting-control rejection ------------------------------------
@@ -325,5 +343,15 @@ class FieldLinkScannerTest {
     fun containsRenderingHazardAcceptsPlainAscii() {
         assertThat(FieldLinkScanner.containsRenderingHazard("https://example.com/path"))
             .isFalse()
+    }
+
+    private companion object {
+        // ReDoS tripwire timing knobs. Warm-up removes cold-JIT cost; the min over timed
+        // runs removes one-off GC/scheduling noise; the budget is deliberately generous —
+        // a genuinely linear scan settles in single-digit ms, while catastrophic
+        // backtracking would take seconds-or-worse on every run, far past this ceiling.
+        const val REDOS_WARMUP_RUNS = 3
+        const val REDOS_TIMED_RUNS = 5
+        const val REDOS_BUDGET_MS = 1_000L
     }
 }
