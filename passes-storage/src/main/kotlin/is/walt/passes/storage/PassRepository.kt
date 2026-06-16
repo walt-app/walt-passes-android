@@ -95,32 +95,32 @@ public interface PassRepository {
     ): StorageResult<Unit>
 
     /**
-     * Insert a stored PDF document. Bytes and thumbnail bytes are written into the
-     * `documents` and `document_thumbnails` tables in the same transaction; the assigned
-     * row id is returned. The repository never decodes [pdfBytes] or [thumbnailBytes];
-     * they round-trip as opaque BLOBs. The persisted `byte_count` is `pdfBytes.size` —
-     * derived rather than caller-asserted, so a stale or zero size header from a future
-     * caller cannot bypass the cap.
+     * Insert a stored document — PDF or image, discriminated by the [DocumentInsert] arm.
+     * Original bytes and thumbnail bytes are written into the `documents` and
+     * `document_thumbnails` tables in the same transaction; the assigned row id is returned.
+     * The repository never decodes [DocumentInsert.bytes] or [DocumentInsert.thumbnailBytes];
+     * they round-trip as opaque BLOBs. The persisted `byte_count` is `bytes.size` — derived
+     * rather than caller-asserted, so a stale or zero size header from a future caller cannot
+     * bypass the cap. The `format` column records the kind ('pdf' / 'png' / 'jpeg' / 'webp');
+     * image rows additionally persist `width_px` / `height_px`.
      *
-     * Defense in depth (ADR 0005 D7): rejects PDFs whose size exceeds
-     * [DocumentBounds.MAX_BYTES] with [DocumentStorageRejectedKind.OversizedAtStorage],
-     * page counts exceeding [DocumentBounds.MAX_PAGES] with
-     * [DocumentStorageRejectedKind.TooManyPagesAtStorage], and labels longer than
-     * [DocumentBounds.MAX_LABEL_CHARS] with
-     * [DocumentStorageRejectedKind.LabelTooLongAtStorage]. The renderer service in
-     * `passes-pdf-core` already enforces the size and page caps; storage carries them
-     * again so a future caller bug cannot land an oversized row. The label cap exists
-     * only at this layer: nothing upstream bounds the consumer-supplied display label.
+     * Defense in depth (ADR 0005 D7): rejects documents whose size exceeds
+     * [DocumentBounds.MAX_BYTES] with [DocumentStorageRejectedKind.OversizedAtStorage], and
+     * labels longer than [DocumentBounds.MAX_LABEL_CHARS] with
+     * [DocumentStorageRejectedKind.LabelTooLongAtStorage]. For a [DocumentInsert.Pdf] it
+     * additionally rejects page counts exceeding [DocumentBounds.MAX_PAGES] with
+     * [DocumentStorageRejectedKind.TooManyPagesAtStorage]; the page cap does not apply to
+     * images, which are a single page. The upstream import path already enforces the size
+     * and (for PDFs) page caps; storage carries them again so a future caller bug cannot land
+     * an oversized row. The label cap exists only at this layer: nothing upstream bounds the
+     * consumer-supplied display label.
      *
      * Returns [StorageError.DocumentRejected] when any cap is violated; the typed arm
      * lets callers distinguish a defensive-rejection from a transient infra failure
      * without listening to telemetry.
      */
     public suspend fun insertDocument(
-        label: String,
-        pdfBytes: ByteArray,
-        pageCount: Int,
-        thumbnailBytes: ByteArray,
+        insert: DocumentInsert,
     ): StorageResult<DocumentRecordId>
 
     /**

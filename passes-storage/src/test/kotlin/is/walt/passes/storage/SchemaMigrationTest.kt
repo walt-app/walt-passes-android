@@ -75,6 +75,76 @@ class SchemaMigrationTest {
         }
     }
 
+    /**
+     * Applies the v5 schema (v1 + v1 -> v2 + v2 -> v3 + v3 -> v4 + v4 -> v5). The v5 -> v6
+     * migration generalizes `documents` from PDF-only to PDF + image.
+     */
+    private fun applyV5Ddl(conn: Connection) {
+        applyV4Ddl(conn)
+        conn.createStatement().use { stmt ->
+            for (sql in Schema.MIGRATIONS.getValue(4)) stmt.execute(sql)
+        }
+    }
+
+    @Test
+    fun migrationFromV5AddsDocumentFormatAndDimensionColumns() {
+        openMemoryDb().use { conn ->
+            applyV5Ddl(conn)
+            for (sql in Schema.MIGRATIONS.getValue(5)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            val columns = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA table_info(${Schema.Tables.DOCUMENTS})")
+                while (rs.next()) columns.add(rs.getString("name"))
+            }
+            assertThat(columns).containsExactly(
+                "id",
+                "display_label",
+                "pdf_bytes",
+                "byte_count",
+                "page_count",
+                "imported_at_epoch_ms",
+                "format",
+                "width_px",
+                "height_px",
+            )
+        }
+    }
+
+    @Test
+    fun migrationFromV5DefaultsExistingDocumentsToPdfFormatWithNullDimensions() {
+        openMemoryDb().use { conn ->
+            applyV5Ddl(conn)
+
+            // A pre-existing v5 document row (PDF-only era; no format/dimension columns yet).
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.DOCUMENTS}" +
+                    "(id, display_label, pdf_bytes, byte_count, page_count, imported_at_epoch_ms) " +
+                    "VALUES (1, 'old.pdf', x'00', 1, 3, 1)",
+            ).use { it.executeUpdate() }
+
+            for (sql in Schema.MIGRATIONS.getValue(5)) {
+                conn.createStatement().use { it.execute(sql) }
+            }
+
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery(
+                    "SELECT format, page_count, width_px, height_px " +
+                        "FROM ${Schema.Tables.DOCUMENTS} WHERE id = 1",
+                )
+                rs.next()
+                assertThat(rs.getString("format")).isEqualTo("pdf")
+                assertThat(rs.getInt("page_count")).isEqualTo(3)
+                rs.getInt("width_px")
+                assertThat(rs.wasNull()).isTrue()
+                rs.getInt("height_px")
+                assertThat(rs.wasNull()).isTrue()
+            }
+        }
+    }
+
     @Test
     fun migrationFromV1IntroducesDocumentsAndDocumentThumbnailsTables() {
         openMemoryDb().use { conn ->

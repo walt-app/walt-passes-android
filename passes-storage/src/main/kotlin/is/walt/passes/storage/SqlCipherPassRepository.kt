@@ -149,26 +149,36 @@ public class SqlCipherPassRepository internal constructor(
     }
 
     override suspend fun insertDocument(
-        label: String,
-        pdfBytes: ByteArray,
-        pageCount: Int,
-        thumbnailBytes: ByteArray,
+        insert: DocumentInsert,
     ): StorageResult<DocumentRecordId> = runIo {
         // byteCount is derived, not caller-asserted, so a stale size header cannot
         // bypass the cap. The cost is a single property read.
-        val byteCount = pdfBytes.size.toLong()
+        val byteCount = insert.bytes.size.toLong()
+        // page_count is the PDF page count; an image is a single page (1). The page cap
+        // applies only to the PDF arm — images cannot exceed it by construction.
+        val pageCount = when (insert) {
+            is DocumentInsert.Pdf -> insert.pageCount
+            is DocumentInsert.Image -> IMAGE_PAGE_COUNT
+        }
+        val (format, widthPx, heightPx) = when (insert) {
+            is DocumentInsert.Pdf -> Triple(DocumentFormat.Pdf, null, null)
+            is DocumentInsert.Image -> Triple(insert.format, insert.widthPx, insert.heightPx)
+        }
 
-        rejectionKindOrNull(label, byteCount, pageCount)?.let { kind ->
+        rejectionKindOrNull(insert, byteCount)?.let { kind ->
             return@runIo rejectDocument(kind)
         }
 
         val outcome = writeMutex.withLock {
             val o = documentStore.insert(
                 DocumentInsertRequest(
-                    displayLabel = label,
-                    pdfBytes = pdfBytes,
+                    displayLabel = insert.label,
+                    bytes = insert.bytes,
+                    format = format,
                     pageCount = pageCount,
-                    thumbnailBytes = thumbnailBytes,
+                    widthPx = widthPx,
+                    heightPx = heightPx,
+                    thumbnailBytes = insert.thumbnailBytes,
                     nowEpochMs = clock(),
                 ),
             )
@@ -365,16 +375,17 @@ public class SqlCipherPassRepository internal constructor(
 
     /**
      * Returns the storage-side rejection kind for an insert, or null if all caps pass.
-     * Checked in order: size, page count, label length.
+     * Checked in order: size, page count (PDF only), label length. The page cap is skipped
+     * for the image arm, which is a single page and cannot exceed it.
      */
     private fun rejectionKindOrNull(
-        label: String,
+        insert: DocumentInsert,
         byteCount: Long,
-        pageCount: Int,
     ): DocumentStorageRejectedKind? = when {
         byteCount > DocumentBounds.MAX_BYTES -> DocumentStorageRejectedKind.OversizedAtStorage
-        pageCount > DocumentBounds.MAX_PAGES -> DocumentStorageRejectedKind.TooManyPagesAtStorage
-        label.length > DocumentBounds.MAX_LABEL_CHARS ->
+        insert is DocumentInsert.Pdf && insert.pageCount > DocumentBounds.MAX_PAGES ->
+            DocumentStorageRejectedKind.TooManyPagesAtStorage
+        insert.label.length > DocumentBounds.MAX_LABEL_CHARS ->
             DocumentStorageRejectedKind.LabelTooLongAtStorage
         else -> null
     }
@@ -447,6 +458,10 @@ public class SqlCipherPassRepository internal constructor(
         }
 
     public companion object {
+        // page_count value persisted for image rows: an image is a single page. The column
+        // stays NOT NULL (its historical v2 shape); `format` is the real discriminator.
+        private const val IMAGE_PAGE_COUNT: Int = 1
+
         /**
          * Provisions SQLCipher with the `keyProvider`'s database key, runs [Schema.DDL] on
          * first open, and returns a [PassRepository] ready for use.

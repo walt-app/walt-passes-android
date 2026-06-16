@@ -621,3 +621,104 @@ inline surface used.
 | Z.2      | existing `PdfRendererService.MAX_PIXELS` pin — value unchanged.                                       |
 | Z.3      | existing `PublicApiSurfaceTest` reflection check on `PdfRendererBinder` — still exactly two methods.  |
 | Z.5      | existing classpath-scan test for `Intent.ACTION_SEND` — surface unchanged.                            |
+
+## Addendum 2026-06-16: Documents generalize to PDF + image (`Document = PDF | image`)
+
+Tracks: parent epic `wpass-i9x` (generalize Document to cover images); steps
+`wpass-gnp` (bounded `decodeBounded` primitive), `wpass-gyn` (sealed `Document` +
+`DocumentView` dispatcher, PDF-only arm), `wpass-6yp` (isolated image-decode
+service), `wpass-bsf` (this addendum — the image arm end-to-end). Cross-repo
+consumer wiring: walt-android `wlt-4pg`.
+
+### Context
+
+The original ADR scoped "documents" to PDFs. The same trust posture — a
+user-supplied file Walt renders but never signature-verifies, behind a
+non-suppressible caption, in an isolated process, with no share-out — applies
+verbatim to still images (PNG / JPEG / WebP). Users receive event tickets and
+transit passes as screenshots and photos at least as often as PDFs. Rather than
+stand up a parallel "image" concept, the document model is generalized so an
+image is a second kind of `Document`, reusing the storage, trust-caption, and
+display machinery the PDF arm already established.
+
+This addendum blesses that generalization. D1's "sibling of `Pass`" framing, the
+isolation posture (D2/D3), no-extraction (D4), no-signature-verification (D5),
+the hard caps as defense-in-depth (D7), and no-share-out (D8) all extend to the
+image arm unchanged. The decisions below record only what is **new or different**
+for images.
+
+### I1. `Document` is a sealed type with two arms: `PdfDocument | ImageDocument`
+
+`passes-pdf-core` promotes `Document` to the sealed supertype (it already held the
+common fields). `PdfDocument` keeps `pageCount`; the new `ImageDocument` carries
+`widthPx` / `heightPx` instead — the kind-specific field lives on its arm, never on
+the supertype. `ImageDocument` shares no superclass with `Pass` (D1 unchanged) and
+has no `SignatureStatus` (D5 unchanged). The dimensions are the bounded raster Walt
+decoded **inside the sandbox**, never derived from an in-process decode of the
+untrusted source bytes, and never upscaled beyond source. `ImageDocument` carries
+no container format — that is a persistence detail, kept off the model.
+
+### I2. The image reject taxonomy is NOT merged into `DocumentRejectedKind`
+
+Images fail in different ways than PDFs (a PDF is `Encrypted` or has `TooManyPages`;
+an image is `NotAnImage` or a `DimensionsTooLarge` decompression bomb). Folding both
+into one enum would force every consumer to branch on arms that cannot occur for its
+kind. The image taxonomy is `passes-image`'s existing `ImageDecodeRejectedKind`
+(`NotAnImage` / `OversizedAtImport` / `DimensionsTooLarge` / `DecodeFailed` /
+`DecoderUnavailable`), reused verbatim. There is **no new "document reject" enum**:
+the importer-facing result (`DocumentImportResult`, in `passes-document`) carries the
+PDF taxonomy on its `PdfRejected` arm and the image taxonomy on its `ImageRejected`
+arm, plus two kind-agnostic arms (`Unrecognized`, `StorageHandoffFailed`).
+
+### I3. A new `passes-document` module owns the sniff-and-branch orchestration
+
+`DocumentImporter` magic-byte-sniffs PDF vs image and branches to the right isolated
+backend: `passes-pdf`'s renderer service for PDFs, `passes-image`'s decode sandbox
+for images. It is a new Android module that sits ABOVE both backends (the way
+`passes-pdf-ui` sits above `passes-pdf`) and is the **single** place the two
+otherwise-independent peers meet — a peer-to-peer `passes-pdf → passes-image` edge is
+deliberately avoided. The module declares no service of its own; every byte of
+decode/render work still happens inside the isolated backends. Per the DECISIVE
+CONSTRAINT, this orchestration lives here, not reassembled in walt-android.
+
+The importer reads the source ONCE into a bounded buffer, sniffs, then materializes
+the bytes into a single sealed `memfd` PFD (via `passes-isolation`) handed to the
+winning backend — so a one-shot fd source is never read twice (no offset corruption),
+and the original bytes are what get persisted ("persist original").
+
+### I4. Storage: `documents` schema v5 → v6 (forward-only)
+
+The `documents` table gains a `format` discriminator column
+(`'pdf' / 'png' / 'jpeg' / 'webp'`, `NOT NULL DEFAULT 'pdf'` so existing PDF rows
+migrate untouched) and nullable `width_px` / `height_px`. The `pdf_bytes` BLOB column
+is reused verbatim to hold the original bytes of either kind — renaming it would force
+a table rewrite for no audit gain, and `loadDocumentBytes` / `loadDocumentThumbnail`
+are already kind-agnostic. `insertDocument` takes a sealed `DocumentInsert`
+(`Pdf(pageCount)` | `Image(format, widthPx, heightPx)`). The D7 size and label caps
+apply to both kinds; the page cap is PDF-only (an image is a single page). Migration is
+forward-only per ADR 0002.
+
+### I5. The image arm reuses the trust caption and `DocumentView` verbatim; full-screen is out of scope
+
+`DocumentView` dispatches on the sealed `Document`: the PDF arm is the existing
+swipeable pager; the image arm is a single, fixed-fit, no-pager image decoded once in
+the sandbox. The non-suppressible `DocumentTrustCaption` (D5) is composed inside BOTH
+arms from the same verbatim composable — there is no parameter on `DocumentView` that
+can hide it. The dispatcher gains the kind-specific `imageFile` / `imageDecoder`
+backend pair alongside the existing `pdfFile` / `renderer` pair (its user-visible
+parameter count moves 7 → 9; `DocumentSurfaceLockTest` is updated deliberately, as it
+was for the wpass-emn slot). `passes-pdf-ui → passes-image` is the reserved edge this
+step lands. Zoom / full-screen for images is intentionally NOT in this step: the
+PDF-only `FullScreenDocumentView` is unchanged; the inline fixed-1x image is the
+presentation shipped here. D8 (no share-out) holds — the `passes-pdf-ui` bytecode scan
+for `Intent.ACTION_SEND` / `application/pdf` stays green across both arms.
+
+### Tests pinning this addendum
+
+| Decision | Test                                                                                                  |
+|----------|-------------------------------------------------------------------------------------------------------|
+| I1       | `passes-pdf-core` `PublicApiSurfaceTest`: `Document` has exactly the `PdfDocument` + `ImageDocument` arms; `ImageDocument` shape is exercised. |
+| I2       | `DocumentImportResult` reuses `ImageDecodeRejectedKind` verbatim; `passes-document` `DocumentImporterTest` maps each backend outcome onto the right arm. |
+| I3       | `DocumentImporterTest`: PDF magic routes to the PDF backend, image magic to the image backend, unrecognized bytes touch neither; original bytes reach `persist`. |
+| I4       | `passes-storage` `SchemaMigrationTest.migrationFromV5AddsDocumentFormatAndDimensionColumns` + `...DefaultsExistingDocumentsToPdfFormat...`; `DocumentRepositoryTest` image-insert tests. |
+| I5       | `DocumentSurfaceLockTest` (9-param lock + `ImageDecodeBinder`-interface lock); `DocumentTrustSurfaceTest.imageDocumentViewRendersTheNonSuppressibleTrustCaption`; existing `application/pdf` / `ACTION_SEND` bytecode scan. |

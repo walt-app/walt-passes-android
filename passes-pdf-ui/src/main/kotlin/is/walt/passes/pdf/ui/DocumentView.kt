@@ -24,8 +24,10 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import `is`.walt.passes.image.android.ImageDecodeBinder
 import `is`.walt.passes.pdf.Document
 import `is`.walt.passes.pdf.DocumentTelemetryGuard
+import `is`.walt.passes.pdf.ImageDocument
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.ui.theme.LocalDocumentSemantics
@@ -34,18 +36,27 @@ import `is`.walt.passes.ui.core.toComposeColor
 /**
  * Presentation of a [Document] — the public entry point the consumer composes. This is a
  * dispatcher on the sealed [Document] type: it selects the surface for the concrete arm and
- * forwards the consumer's parameters unchanged. [PdfDocument] is the sole arm today and
- * routes to [PdfDocumentView]; a future image arm adds its own branch here without touching
- * the PDF render path. The trust caption is non-suppressible inside every arm — this
- * dispatcher adds no parameter that could omit it, so the [DocumentSurfaceLockTest] shape
- * lock and [DocumentTrustSurfaceTest] visible-text lock hold across the seam.
+ * forwards the consumer's parameters. [PdfDocument] routes to [PdfDocumentView] (a swipeable
+ * pager over the isolated PDF renderer); [ImageDocument] routes to [ImageDocumentView] (a
+ * single, no-pager image over the isolated image-decode sandbox). The trust caption is
+ * non-suppressible inside every arm — this dispatcher adds no parameter that could omit it, so
+ * the [DocumentSurfaceLockTest] shape lock and [DocumentTrustSurfaceTest] visible-text lock
+ * hold across the seam.
+ *
+ * The backend handles are kind-specific and nullable: a consumer supplies the [pdfFile] /
+ * [renderer] pair for a [PdfDocument] and the [imageFile] / [imageDecoder] pair for an
+ * [ImageDocument]. The dispatcher requires the pair that matches the arm; passing a document
+ * without its backend pair is a programming error and fails fast. This keeps a consumer that
+ * only ever shows one kind from having to fabricate the other backend.
  */
 @Composable
 @Suppress("LongParameterList")
 public fun DocumentView(
     doc: Document,
-    pdfFile: ParcelFileDescriptor,
-    renderer: PdfRendererBinder,
+    pdfFile: ParcelFileDescriptor? = null,
+    renderer: PdfRendererBinder? = null,
+    imageFile: ParcelFileDescriptor? = null,
+    imageDecoder: ImageDecodeBinder? = null,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     onOpenFullScreen: (() -> Unit)? = null,
@@ -54,12 +65,19 @@ public fun DocumentView(
     when (doc) {
         is PdfDocument -> PdfDocumentView(
             doc = doc,
-            pdfFile = pdfFile,
-            renderer = renderer,
+            pdfFile = requireNotNull(pdfFile) { "DocumentView(PdfDocument) requires a non-null pdfFile" },
+            renderer = requireNotNull(renderer) { "DocumentView(PdfDocument) requires a non-null renderer" },
             modifier = modifier,
             telemetry = telemetry,
             onOpenFullScreen = onOpenFullScreen,
             fullScreenAffordance = fullScreenAffordance,
+        )
+        is ImageDocument -> ImageDocumentView(
+            doc = doc,
+            imageFile = requireNotNull(imageFile) { "DocumentView(ImageDocument) requires a non-null imageFile" },
+            decoder = requireNotNull(imageDecoder) { "DocumentView(ImageDocument) requires a non-null imageDecoder" },
+            modifier = modifier,
+            telemetry = telemetry,
         )
     }
 }
@@ -192,6 +210,87 @@ private fun PdfDocumentView(
         // caption above this Column cannot be pushed off-screen by it.
         if (onOpenFullScreen != null && fullScreenAffordance == null) {
             FullScreenBanner(onClick = onOpenFullScreen)
+        }
+    }
+}
+
+/**
+ * Presentation of an [ImageDocument] — the non-suppressible trust caption above a single,
+ * fixed-fit image (wpass-i9x step 4). The image-arm analogue of [PdfDocumentView], minus the
+ * pager: an image is a single page, so there is no [HorizontalPager] and no per-page cache.
+ * The original image is decoded once inside the `passes-image` sandbox (reached through the
+ * caller-supplied [decoder], the `ImageDecodeBinder` interface, never the concrete client) and
+ * the bounded ARGB_8888 raster is letterboxed into the slot with [ContentScale.Fit].
+ *
+ * Trust contract (identical to the PDF arm):
+ *
+ *  - The non-suppressible [DocumentTrustCaption] is composed inside this view and gated by no
+ *    parameter. There is no overload that omits it. `DocumentSurfaceLockTest` /
+ *    `DocumentTrustSurfaceTest` pin the shape and the visible text across both arms.
+ *  - The view displays only the decoded raster and the caption. ADR 0005 D4: no image
+ *    metadata, no EXIF, no extracted text — the content description is a fixed neutral string.
+ *  - No share / export / open-with affordance (ADR 0005 D8); the bytecode scan in
+ *    `DocumentPublicApiSurfaceTest` keeps it that way.
+ *  - Fixed 1x: no pinch-zoom or pan inline, matching the PDF inline surface.
+ *
+ * [imageFile] is the ORIGINAL image bytes, owned by the caller; it MUST stay open while this
+ * view is composed. Close after `DocumentView` leaves composition. Full-screen zoom for images
+ * is intentionally out of scope here (the PDF `FullScreenDocumentView` is unchanged); the inline
+ * surface is the image-document presentation this step ships.
+ */
+@Composable
+private fun ImageDocumentView(
+    doc: ImageDocument,
+    imageFile: ParcelFileDescriptor,
+    decoder: ImageDecodeBinder,
+    modifier: Modifier = Modifier,
+    telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+) {
+    val semantics = LocalDocumentSemantics.current
+    Column(
+        modifier = modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DocumentTrustCaption()
+
+        // `laneBackground` paints behind the image only — the document-surface tone the image
+        // sits on (showing through the ContentScale.Fit letterbox bars), so the caption above
+        // reads as host chrome rather than part of the document surface, matching the PDF arm.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .background(semantics.laneBackground.toComposeColor()),
+        ) {
+            val density = LocalDensity.current
+            val requestWidthPx = with(density) {
+                TARGET_PAGE_WIDTH_DP.dp.toPx().toInt().coerceAtLeast(1)
+            }
+            val requestHeightPx = with(density) {
+                TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1)
+            }
+            val state = rememberDocumentImage(
+                document = doc,
+                imageFile = imageFile,
+                decoder = decoder,
+                targetSizePx = IntSize(requestWidthPx, requestHeightPx),
+                telemetry = telemetry,
+            )
+            // Loading / Failed render nothing inline; the lane tone is the placeholder, matching
+            // DocumentPage. A future retry affordance belongs on DocumentTile, not here.
+            when (state) {
+                is DocumentImageState.Loading, is DocumentImageState.Failed -> Unit
+                is DocumentImageState.Rendered -> Image(
+                    bitmap = state.image,
+                    // ADR 0005 D4 forbids extracting text/metadata from the image; a fixed
+                    // neutral description is the only safe TalkBack fallback.
+                    contentDescription = "Image document",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp)),
+                )
+            }
         }
     }
 }

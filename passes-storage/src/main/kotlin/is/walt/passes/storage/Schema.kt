@@ -14,7 +14,7 @@ package `is`.walt.passes.storage
 public object Schema {
     public const val DATABASE_NAME: String = "walt_passes.db"
 
-    public const val VERSION: Int = 5
+    public const val VERSION: Int = 6
 
     public object Tables {
         public const val SCHEMA_META: String = "schema_meta"
@@ -143,9 +143,37 @@ public object Schema {
     )
 
     /**
+     * v5 -> v6 migration. Generalizes the `documents` table from PDF-only to PDF + image
+     * (wpass-i9x step 4 / wpass-bsf). Adds:
+     *
+     *  - `format` — the document kind/container discriminator ('pdf' / 'png' / 'jpeg' /
+     *    'webp'). `NOT NULL DEFAULT 'pdf'` so every pre-existing row (all PDFs before this
+     *    version) reads back as a PDF without a data rewrite.
+     *  - `width_px` / `height_px` — the decoded pixel dimensions of an image document
+     *    (the bounded raster Walt produced in the `passes-image` sandbox). Nullable: NULL
+     *    for PDF rows, where page count rather than dimensions is the kind-specific field.
+     *
+     * Pure additive ALTERs; no data transformation, so no row can fail the migration. The
+     * `pdf_bytes` blob column is reused verbatim to hold the original document bytes
+     * regardless of kind (PDF bytes or original image bytes) — renaming it would force a
+     * table rewrite for no audit gain; `loadDocumentBytes` is already kind-agnostic.
+     */
+    private val V5_TO_V6_ADD_DOCUMENT_FORMAT: List<String> = listOf(
+        "ALTER TABLE documents ADD COLUMN format TEXT NOT NULL DEFAULT 'pdf'",
+        "ALTER TABLE documents ADD COLUMN width_px INTEGER",
+        "ALTER TABLE documents ADD COLUMN height_px INTEGER",
+    )
+
+    /**
      * The DDL block that brings a fresh database to [VERSION]. Statements are listed in
      * dependency order (parent tables before child tables); they are executed in a single
      * transaction by the implementation.
+     *
+     * The `documents` table is created in its historical v2 6-column shape and then brought
+     * to the v6 shape by appending [V5_TO_V6_ADD_DOCUMENT_FORMAT]'s ALTERs, exactly as the
+     * migration chain does. Baking the new columns into the CREATE instead would diverge the
+     * fresh-install `sqlite_master.sql` from the migrated one and break the
+     * `freshInstallAndFullMigrationChainLandAtTheSameSchema` parity guard.
      */
     public val DDL: List<String> = listOf(
         """
@@ -192,7 +220,7 @@ public object Schema {
             PRIMARY KEY (pass_id, locale_tag)
         )
         """.trimIndent(),
-    ) + V2_DOCUMENT_TABLES + V4_SCANNABLE_CARD_TABLES
+    ) + V2_DOCUMENT_TABLES + V4_SCANNABLE_CARD_TABLES + V5_TO_V6_ADD_DOCUMENT_FORMAT
 
     /**
      * Schema migrations, keyed by `fromVersion`. Forward-only per ADR 0002. Each entry's
@@ -214,11 +242,16 @@ public object Schema {
      * v4 -> v5 adds the nullable `user_label` column to `passes` for the side-channel
      * rename override (ADR 0007). Pure additive change; existing rows default to NULL
      * (no override) so display behavior is unchanged for pre-migration data.
+     *
+     * v5 -> v6 generalizes `documents` from PDF-only to PDF + image (ADR 0005, amended for
+     * wpass-i9x): adds the `format` discriminator and nullable `width_px` / `height_px`.
+     * Pure additive; existing rows default to `format = 'pdf'`.
      */
     public val MIGRATIONS: Map<Int, List<String>> = mapOf(
         1 to V2_DOCUMENT_TABLES,
         2 to V3_SCANNABLE_CARD_TABLES,
         3 to V3_TO_V4_DROP_COLOR_COLUMN,
         4 to V4_TO_V5_ADD_USER_LABEL,
+        5 to V5_TO_V6_ADD_DOCUMENT_FORMAT,
     )
 }

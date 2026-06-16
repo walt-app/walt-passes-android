@@ -92,6 +92,72 @@ class PublicApiSurfaceTest {
     }
 
     @Test
+    fun imageDocumentConstructorIsExercisedWithEveryShape() {
+        val doc =
+            ImageDocument(
+                id = ImageDocumentId("img-1"),
+                displayLabel = "ticket.jpg",
+                byteCount = 2_345_678L,
+                widthPx = 1080,
+                heightPx = 1920,
+                importedAtEpochMs = 1_800_000_000_000L,
+                provenance = Provenance.UserProvided,
+            )
+        assertThat(doc.id).isEqualTo(ImageDocumentId("img-1"))
+        assertThat(doc.widthPx).isEqualTo(1080)
+        assertThat(doc.heightPx).isEqualTo(1920)
+        assertThat(doc.provenance).isEqualTo(Provenance.UserProvided)
+    }
+
+    @Test
+    fun imageDocumentDefaultProvenanceIsUserProvided() {
+        val doc =
+            ImageDocument(
+                id = ImageDocumentId("img-1"),
+                displayLabel = "x",
+                byteCount = 0,
+                widthPx = 1,
+                heightPx = 1,
+                importedAtEpochMs = 0L,
+            )
+        assertThat(doc.provenance).isEqualTo(Provenance.UserProvided)
+    }
+
+    @Test
+    fun documentSealedHierarchyHasExactlyThePdfAndImageArms() {
+        // Document is the sealed supertype; both arms are assignable to it, and each id to
+        // DocumentId. Adding a third arm is a deliberate, test-breaking edit here (and a
+        // security review, since each arm is an untrusted-content surface — ADR 0005).
+        val pdf: Document =
+            PdfDocument(
+                id = PdfDocumentId("p"),
+                displayLabel = "p",
+                byteCount = 0,
+                pageCount = 1,
+                importedAtEpochMs = 0L,
+            )
+        val image: Document =
+            ImageDocument(
+                id = ImageDocumentId("i"),
+                displayLabel = "i",
+                byteCount = 0,
+                widthPx = 1,
+                heightPx = 1,
+                importedAtEpochMs = 0L,
+            )
+        val arms =
+            listOf(pdf, image).map { doc ->
+                when (doc) {
+                    is PdfDocument -> "pdf"
+                    is ImageDocument -> "image"
+                }
+            }
+        assertThat(arms).containsExactly("pdf", "image").inOrder()
+        assertThat(pdf.id).isInstanceOf(PdfDocumentId::class.java)
+        assertThat(image.id).isInstanceOf(ImageDocumentId::class.java)
+    }
+
+    @Test
     fun documentTelemetryGuardNoOpAcceptsAllEventShapes() {
         val guard: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp
         guard.onImportStarted()

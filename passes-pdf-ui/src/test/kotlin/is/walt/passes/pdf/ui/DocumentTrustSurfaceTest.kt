@@ -6,8 +6,14 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.image.android.ImageDecodeBinder
+import `is`.walt.passes.image.android.ImageDecodeRejectedKind
+import `is`.walt.passes.image.android.ImageDecodeResult
+import `is`.walt.passes.pdf.ImageDocument
+import `is`.walt.passes.pdf.ImageDocumentId
 import `is`.walt.passes.pdf.PdfDocument
 import `is`.walt.passes.pdf.PdfDocumentId
 import `is`.walt.passes.pdf.ui.theme.DocumentSemantics
@@ -17,6 +23,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * Robolectric-backed Compose smoke tests for the trust-claim-bearing document
@@ -144,6 +151,44 @@ class DocumentTrustSurfaceTest {
             "User-provided document. Walt has not verified the source.",
         ).fetchSemanticsNodes().let { nodes ->
             assertThat(nodes).isEmpty()
+        }
+    }
+
+    @Test
+    fun imageDocumentViewRendersTheNonSuppressibleTrustCaption() {
+        // The image arm (wpass-i9x step 4) reuses DocumentTrustCaption verbatim, so the same
+        // non-suppressible caption that anchors the PDF surface anchors the image surface — and
+        // it shows regardless of decode outcome. A fake decoder that rejects keeps the image
+        // region empty; the caption must still display, which is the trust claim under test.
+        val doc = ImageDocument(
+            id = ImageDocumentId("img-1"),
+            displayLabel = "ticket.png",
+            byteCount = 2048L,
+            widthPx = 1080,
+            heightPx = 1920,
+            importedAtEpochMs = 0L,
+        )
+        val rejectingDecoder = object : ImageDecodeBinder {
+            override suspend fun decode(
+                image: ParcelFileDescriptor,
+                maxWidthPx: Int,
+                maxHeightPx: Int,
+            ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
+        }
+        val file = File.createTempFile("walt-image-doc", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            composeRule.setContent {
+                ThemedHost {
+                    DocumentView(doc = doc, imageFile = pfd, imageDecoder = rejectingDecoder)
+                }
+            }
+            composeRule.onNodeWithText(
+                "User-provided document. Walt has not verified the source.",
+            ).assertIsDisplayed()
+        } finally {
+            pfd.close()
+            file.delete()
         }
     }
 

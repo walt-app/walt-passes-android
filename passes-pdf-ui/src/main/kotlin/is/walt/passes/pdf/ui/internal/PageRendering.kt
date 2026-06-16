@@ -41,8 +41,16 @@ internal fun decodePage(
         val mapped = ok.sharedMemory.mapReadOnly()
         try {
             val bitmap = Bitmap.createBitmap(ok.widthPx, ok.heightPx, Bitmap.Config.ARGB_8888)
-            bitmap.copyPixelsFromBuffer(mapped)
-            DecodedPage(bitmap, bitmap.asImageBitmap(), ok.pageAspect)
+            // Recycle the bitmap only if the pixel copy fails; on success its ownership
+            // transfers to the caller (cache eviction / dispose). Without this the bitmap
+            // leaks on the failure path until GC.
+            runCatching {
+                bitmap.copyPixelsFromBuffer(mapped)
+                DecodedPage(bitmap, bitmap.asImageBitmap(), ok.pageAspect)
+            }.getOrElse { t ->
+                bitmap.recycle()
+                throw t
+            }
         } finally {
             SharedMemory.unmap(mapped)
             ok.sharedMemory.close()

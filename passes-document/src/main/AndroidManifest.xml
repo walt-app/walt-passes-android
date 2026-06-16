@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  passes-document library manifest. Deliberately empty: this module declares NO component of
+  its own. It is pure orchestration that binds the isolated services contributed by passes-pdf
+  (:pdfRenderer) and passes-image (:imageDecoder), whose manifests merge in transitively. No
+  service, no permission, no provider lives here — a reviewer auditing the isolated-process
+  surface reads passes-pdf and passes-image, not this module.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" />
