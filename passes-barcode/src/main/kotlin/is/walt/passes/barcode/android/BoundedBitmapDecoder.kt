@@ -3,10 +3,11 @@ package `is`.walt.passes.barcode.android
 import android.graphics.ImageDecoder
 import android.os.ParcelFileDescriptor
 import `is`.walt.passes.core.DecodeFailureReason
+import `is`.walt.passes.image.decode.BoundedBitmap
+import `is`.walt.passes.image.decode.BoundedDecodePolicy
+import `is`.walt.passes.image.decode.decodeBounded
 import java.io.ByteArrayOutputStream
-import java.io.IOException
 import java.io.InputStream
-import java.nio.ByteBuffer
 
 /**
  * Decodes a candidate image to a [Bitmap] *inside* the `:barcodeDecoder` sandbox with the
@@ -90,48 +91,34 @@ internal fun headerRejection(
     }
 
 /**
- * Decode [rawBytes] under the [headerRejection] caps, which fire before the backing bitmap is
- * allocated. Full Throwable containment — including [OutOfMemoryError] — folds every escape to
- * a [BoundedDecodeResult.Rejected]; this function never throws. The platform-decode integration
- * is the instrumented half (wpass-zrt.5); the cap decision is unit-tested via [headerRejection].
+ * Decode [rawBytes] under the [headerRejection] caps via the shared [decodeBounded] mechanism,
+ * which fires the gate before the backing bitmap is allocated. This module's posture: a
+ * software allocator so the symbol decode can read pixels (a hardware bitmap refuses
+ * getPixels; this bitmap is analysed, never displayed), and full Throwable containment —
+ * including [OutOfMemoryError], bucketed as too-large — so this function never throws. The
+ * platform-decode integration is the instrumented half (wpass-zrt.5); the cap decision is
+ * unit-tested via [headerRejection].
  */
 internal fun decodeBoundedBitmap(
     rawBytes: ByteArray,
     config: BarcodeDecodeConfig,
-): BoundedDecodeResult {
-    val source = ImageDecoder.createSource(ByteBuffer.wrap(rawBytes))
-    var rejection: DecodeFailureReason? = null
-    return try {
-        val bitmap =
-            ImageDecoder.decodeBitmap(source) { decoder, info, _ ->
-                // Software-backed so the symbol decode can read pixels; a hardware bitmap (the
-                // default) refuses getPixels. This bitmap is analysed, never displayed.
-                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
-                rejection = headerRejection(info.mimeType, info.size.width, info.size.height, config)
-                if (rejection != null) {
-                    // Force a 1x1 decode so the rejected path allocates nothing of size; the
-                    // bitmap is discarded below.
-                    decoder.setTargetSize(1, 1)
-                }
-            }
-        rejection?.let {
-            bitmap.recycle()
-            BoundedDecodeResult.Rejected(it)
-        } ?: BoundedDecodeResult.Decoded(bitmap)
-    } catch (_: IOException) {
-        // Genuine parse failure, unless a bounds/format rejection was already in flight.
-        BoundedDecodeResult.Rejected(rejection ?: DecodeFailureReason.ImageDecodeFailed)
-    } catch (_: IllegalArgumentException) {
-        // setTargetSize(1, 1) can throw for formats that refuse arbitrary sizing; the
-        // rejection that triggered it already fired in the listener, so preserve it.
-        BoundedDecodeResult.Rejected(rejection ?: DecodeFailureReason.ImageDecodeFailed)
-    } catch (_: OutOfMemoryError) {
-        // A canvas that slipped the header caps (or a pathological parse) must not take the
-        // process down uncontained; bucket it as too-large.
-        BoundedDecodeResult.Rejected(rejection ?: DecodeFailureReason.ImageTooLarge)
-    } catch (_: RuntimeException) {
-        BoundedDecodeResult.Rejected(rejection ?: DecodeFailureReason.ImageDecodeFailed)
+): BoundedDecodeResult =
+    when (
+        val decoded =
+            decodeBounded(
+                rawBytes = rawBytes,
+                policy =
+                    BoundedDecodePolicy(
+                        allocator = ImageDecoder.ALLOCATOR_SOFTWARE,
+                        gate = { mimeType, width, height -> headerRejection(mimeType, width, height, config) },
+                        onMalformed = { DecodeFailureReason.ImageDecodeFailed },
+                        onRuntimeFailure = { DecodeFailureReason.ImageDecodeFailed },
+                        onOutOfMemory = { DecodeFailureReason.ImageTooLarge },
+                    ),
+            )
+    ) {
+        is BoundedBitmap.Decoded -> BoundedDecodeResult.Decoded(decoded.bitmap)
+        is BoundedBitmap.Rejected -> BoundedDecodeResult.Rejected(decoded.reason)
     }
-}
 
 private const val DEFAULT_READ_CHUNK = 64 * 1024

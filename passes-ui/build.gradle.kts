@@ -19,6 +19,13 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
+
+    // The bounded ImageDecoder mechanism (containment-hardened compressed-bytes -> Bitmap),
+    // shared with passes-barcode and the wpass-i9x image-document service. This module keeps
+    // its own decode policy (ImageRenderBounds caps, the ImageDecodeRejection taxonomy, and
+    // the in-process display posture that lets an OOM propagate) and delegates only the
+    // mechanism. Internal seam — no passes-image-decode type appears on this module's surface.
+    implementation(project(":passes-image-decode"))
     // androidx.activity.compose pulls in BackHandler, which the trust-claim-bearing
     // PassImportConfirm uses so system back-press routes through the same dismiss
     // telemetry as the Cancel button (no silent escape hatch).
