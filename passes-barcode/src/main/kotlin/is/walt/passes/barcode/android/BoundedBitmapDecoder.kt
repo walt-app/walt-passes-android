@@ -94,10 +94,10 @@ internal fun headerRejection(
  * Decode [rawBytes] under the [headerRejection] caps via the shared [decodeBounded] mechanism,
  * which fires the gate before the backing bitmap is allocated. This module's posture: a
  * software allocator so the symbol decode can read pixels (a hardware bitmap refuses
- * getPixels; this bitmap is analysed, never displayed), and full Throwable containment —
- * including [OutOfMemoryError], bucketed as too-large — so this function never throws. The
- * platform-decode integration is the instrumented half (wpass-zrt.5); the cap decision is
- * unit-tested via [headerRejection].
+ * getPixels; this bitmap is analysed, never displayed), and containment of the decode
+ * failures the platform raises ([OutOfMemoryError] bucketed as too-large), so this function
+ * never throws for them. The platform-decode integration is the instrumented half
+ * (wpass-zrt.5); the cap decision is unit-tested via [headerRejection].
  */
 internal fun decodeBoundedBitmap(
     rawBytes: ByteArray,

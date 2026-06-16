@@ -11,15 +11,18 @@ import java.nio.ByteBuffer
  * (`passes-ui`'s `BoundedImage`), the isolated still-image symbol decode
  * (`passes-barcode`), and the wpass-i9x isolated image-document service. The
  * `ImageDecoder` + `OnHeaderDecodedListener` lever, the pre-allocation header gate, the
- * 1x1-on-reject downsize, and the full `Throwable` containment all live here ONCE, so that
+ * 1x1-on-reject downsize, and the decode-failure containment all live here ONCE, so that
  * security property is audited in one place instead of re-proven per call site.
  *
  * Mechanism only; the caller's [policy] carries the allocator, the header gate, and the
  * thrown-failure folds. A rejection already raised by the gate always wins over a fold,
  * matching the `rejection ?: fallback` idiom both original call sites used.
  *
- * Never throws except a propagated [OutOfMemoryError] when [BoundedDecodePolicy.onOutOfMemory]
- * is null.
+ * Containment is bounded to the failures the platform decode realistically raises:
+ * [IOException], [IllegalArgumentException], [OutOfMemoryError], and other
+ * [RuntimeException]s are folded to a [BoundedBitmap.Rejected]. Anything else (e.g.
+ * [StackOverflowError]) propagates, as does an [OutOfMemoryError] when
+ * [BoundedDecodePolicy.onOutOfMemory] is null.
  */
 public fun <R : Any> decodeBounded(
     rawBytes: ByteArray,
@@ -51,14 +54,23 @@ public fun <R : Any> decodeBounded(
         BoundedBitmap.Rejected(rejection ?: policy.onMalformed())
     } catch (oom: OutOfMemoryError) {
         // A canvas that slipped the header caps must not take the process down uncontained —
-        // unless the caller has no bucket for it (onOutOfMemory == null), in which case the
-        // caller's posture is to let it propagate.
-        val fold = policy.onOutOfMemory ?: throw oom
-        BoundedBitmap.Rejected(rejection ?: fold())
+        // unless the caller has no bucket for it, in which case its posture is to propagate.
+        containOutOfMemory(rejection, policy) ?: throw oom
     } catch (_: RuntimeException) {
         BoundedBitmap.Rejected(rejection ?: policy.onRuntimeFailure())
     }
 }
+
+/**
+ * The OOM-containment decision, pure so the propagate-vs-contain split is testable without
+ * forcing a real [OutOfMemoryError]. Returns the contained [BoundedBitmap.Rejected] when the
+ * [policy] supplies an [BoundedDecodePolicy.onOutOfMemory] fold (a [pendingRejection] from the
+ * gate still wins), or null to signal the caller should let the error propagate.
+ */
+internal fun <R : Any> containOutOfMemory(
+    pendingRejection: R?,
+    policy: BoundedDecodePolicy<R>,
+): BoundedBitmap<R>? = policy.onOutOfMemory?.let { BoundedBitmap.Rejected(pendingRejection ?: it()) }
 
 /**
  * A call site's bounded-decode posture, passed once to [decodeBounded]. Groups the levers
@@ -99,7 +111,9 @@ public fun interface ImageHeaderGate<out R> {
  * release the [Bitmap].
  */
 public sealed interface BoundedBitmap<out R> {
-    public data class Decoded(val bitmap: Bitmap) : BoundedBitmap<Nothing>
+    // Plain class, not data: a Bitmap is a mutable native resource, so identity equals/hashCode
+    // are the only honest semantics — value equality over it would be meaningless.
+    public class Decoded(public val bitmap: Bitmap) : BoundedBitmap<Nothing>
 
     public data class Rejected<out R>(val reason: R) : BoundedBitmap<R>
 }
