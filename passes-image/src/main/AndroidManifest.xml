@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  passes-image library manifest. Contributes the isolated-process image-decode service that
+  turns an original user image into a bounded, Walt-produced raster, per wpass-i9x (step 3,
+  wpass-6yp). It mirrors passes-pdf's renderer service and passes-barcode's decode service:
+  all hostile-image codec work happens here, in a permissionless sandbox, never in the host.
+
+  ZERO uses-permission entries by design. The service runs in an isolated process and inherits
+  no app permissions: no INTERNET, no storage, no clipboard, no Keystore, no card material. A
+  codec use-after-free here brings down the decode process, not the wallet, and the
+  isolated-uid sandbox guarantees the compromised process has nothing useful to reach for.
+  Adding a uses-permission entry to this manifest is a security-policy change requiring
+  re-review; ManifestPermissionsTest pins the invariant from a unit test.
+
+  android:isolatedProcess="true" is the load-bearing bit. android:exported="false" prevents
+  external apps from binding even if walt-android were ever to ship a debug manifest tweak.
+  android:process=":imageDecoder" keeps the process distinct from the :pdfRenderer and
+  :barcodeDecoder isolated components the consumer also runs.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <service
+            android:name=".android.ImageDecodeService"
+            android:isolatedProcess="true"
+            android:exported="false"
+            android:process=":imageDecoder" />
+    </application>
+
+</manifest>
