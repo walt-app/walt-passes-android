@@ -161,18 +161,9 @@ class FieldLinkScannerTest {
     }
 
     /**
-     * Tripwire for ReDoS / catastrophic-backtracking in the phone-number regex. The
-     * phone pattern uses a quantified character class with optional digit boundary;
-     * a hostile back-field could in principle force quadratic-or-worse backtracking.
-     * This test feeds a 4 KB digit-soup field that has no valid match anchor.
-     *
-     * The assertion is on the FASTEST of several timed runs after a JIT warm-up
-     * ([fastestScanMillis]), not a single cold sample: catastrophic backtracking is
-     * super-linear and blows the budget by orders of magnitude on EVERY run, so the min
-     * still catches it — while a cold-JIT compile of the regex/Cf-stripping path, a GC
-     * pause, or a contended CI core can no longer trip a genuinely linear scan. Real
-     * linear-ish behavior settles in single-digit milliseconds; the generous
-     * [REDOS_BUDGET_MS] budget leaves two orders of magnitude of headroom.
+     * Tripwire for ReDoS / catastrophic backtracking in the phone-number regex: a 4 KB
+     * digit-soup field with no valid match anchor. See [fastestScanMillis] for the timing
+     * method.
      */
     @Test
     fun phoneScanCompletesQuicklyOnPathologicalInput() {
@@ -195,11 +186,12 @@ class FieldLinkScannerTest {
     }
 
     /**
-     * Scans [input] several times and returns the fastest run in milliseconds, after an
-     * untimed JIT warm-up. The min over repeats reflects the scan's algorithmic cost rather
-     * than one-off scheduling/GC noise, which is what the ReDoS tripwires need: a super-linear
-     * blowup is slow on every run, so it survives the min; transient slowness on an otherwise
-     * linear scan does not.
+     * Scans [input] several times and returns the FASTEST run in milliseconds — the timing
+     * method the ReDoS tripwires assert on. The untimed warm-up absorbs the cold-JIT compile
+     * of the regex / Cf-stripping path, and the min over timed runs absorbs one-off GC /
+     * scheduling noise, so a genuinely linear scan stays in single-digit milliseconds even on
+     * a contended CI core. Catastrophic backtracking is super-linear — slow on every run — so
+     * it survives the min and still blows [REDOS_BUDGET_MS] by orders of magnitude.
      */
     private fun fastestScanMillis(input: String): Long {
         repeat(REDOS_WARMUP_RUNS) { FieldLinkScanner.scan(input, source) }
@@ -346,10 +338,7 @@ class FieldLinkScannerTest {
     }
 
     private companion object {
-        // ReDoS tripwire timing knobs. Warm-up removes cold-JIT cost; the min over timed
-        // runs removes one-off GC/scheduling noise; the budget is deliberately generous —
-        // a genuinely linear scan settles in single-digit ms, while catastrophic
-        // backtracking would take seconds-or-worse on every run, far past this ceiling.
+        // ReDoS tripwire timing knobs (warm-up runs, timed runs, budget); see [fastestScanMillis].
         const val REDOS_WARMUP_RUNS = 3
         const val REDOS_TIMED_RUNS = 5
         const val REDOS_BUDGET_MS = 1_000L
