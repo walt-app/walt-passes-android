@@ -36,8 +36,16 @@ internal fun decodeImage(
         val mapped = ok.sharedMemory.mapReadOnly()
         try {
             val bitmap = Bitmap.createBitmap(ok.widthPx, ok.heightPx, Bitmap.Config.ARGB_8888)
-            bitmap.copyPixelsFromBuffer(mapped)
-            DecodedImage(bitmap, bitmap.asImageBitmap(), ok.sourceAspect)
+            // Recycle the bitmap only if the pixel copy fails; on success its ownership
+            // transfers to the caller (recycled on dispose). Without this the bitmap leaks
+            // on the failure path until GC.
+            runCatching {
+                bitmap.copyPixelsFromBuffer(mapped)
+                DecodedImage(bitmap, bitmap.asImageBitmap(), ok.sourceAspect)
+            }.getOrElse { t ->
+                bitmap.recycle()
+                throw t
+            }
         } finally {
             SharedMemory.unmap(mapped)
             ok.sharedMemory.close()
