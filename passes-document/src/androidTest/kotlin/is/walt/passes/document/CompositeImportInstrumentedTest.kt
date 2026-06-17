@@ -158,6 +158,10 @@ class CompositeImportInstrumentedTest {
         val file = File.createTempFile(name, ".png", context.cacheDir)
         file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
         bitmap.recycle()
-        return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        // Unlink immediately: the open descriptor keeps the inode alive for the importer's read,
+        // so nothing accumulates in cacheDir across repeated device/CI runs (review rec 1).
+        file.delete()
+        return pfd
     }
 }
