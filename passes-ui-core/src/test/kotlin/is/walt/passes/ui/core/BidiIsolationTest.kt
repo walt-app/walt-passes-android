@@ -5,7 +5,7 @@ import org.junit.Test
 
 /**
  * Pins the FSI/PDI fence shape. Both `passes-ui::SecuritySheets` (verbatim URL,
- * phone, email, organization name) and `passes-pdf-ui::DocumentTile` (user-controlled
+ * phone, email, organization name) and `passes-document-ui::DocumentTile` (user-controlled
  * displayLabel) depend on `isolated(s)` returning exactly `FSI + s + PDI`; a future
  * "polish" that drops or reorders the marks would silently weaken every consumer at
  * once. Locking the property here means the failure surfaces in this module's tests

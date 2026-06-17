@@ -168,7 +168,7 @@ public data class DocumentImportedEvent(
  * Why a storage-side document insert was rejected. The two arms mirror the renderer
  * service's import-time checks; storage refuses to land out-of-bounds rows so a future
  * caller bug cannot bypass the cap. The arms are deliberately suffixed `AtStorage` so
- * they cannot be confused with `passes-pdf-core`'s import-time `DocumentRejectedKind`,
+ * they cannot be confused with `passes-document-core`'s import-time `DocumentRejectedKind`,
  * which fires before bytes ever reach the storage layer.
  */
 public enum class DocumentStorageRejectedKind {

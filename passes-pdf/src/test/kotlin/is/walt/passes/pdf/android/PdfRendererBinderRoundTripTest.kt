@@ -8,7 +8,7 @@ import android.os.RemoteException
 import android.os.SharedMemory
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
-import `is`.walt.passes.pdf.DocumentRejectedKind
+import `is`.walt.passes.document.DocumentRejectedKind
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Before

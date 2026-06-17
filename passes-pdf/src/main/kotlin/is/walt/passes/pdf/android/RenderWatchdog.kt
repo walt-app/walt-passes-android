@@ -12,7 +12,7 @@ import kotlinx.coroutines.withContext
  * hold the binder thread forever and starve the main process, the watchdog enforces a
  * hard wall-clock budget and, on expiry, terminates the renderer process. The main
  * process then observes the dropped binder as a [android.os.RemoteException] and surfaces
- * [is.walt.passes.pdf.DocumentRejectedKind.RendererFailed].
+ * [is.walt.passes.document.DocumentRejectedKind.RendererFailed].
  *
  * Killing the renderer (rather than just cancelling the coroutine) is deliberate: the
  * coroutine cancellation is cooperative, and a JNI render call cannot be cooperatively

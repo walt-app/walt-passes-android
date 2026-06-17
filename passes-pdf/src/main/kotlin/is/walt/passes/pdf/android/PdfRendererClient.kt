@@ -5,7 +5,7 @@ import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import android.os.SharedMemory
-import `is`.walt.passes.pdf.DocumentRejectedKind
+import `is`.walt.passes.document.DocumentRejectedKind
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_PROBE
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_RENDER
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.TAG_OK

@@ -10,8 +10,8 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
 import android.system.OsConstants
-import `is`.walt.passes.pdf.DocumentRejectedKind
-import `is`.walt.passes.pdf.PdfImportConfig
+import `is`.walt.passes.document.DocumentRejectedKind
+import `is`.walt.passes.document.PdfImportConfig
 import java.io.IOException
 import kotlin.math.roundToInt
 
@@ -53,10 +53,10 @@ public class PdfRendererService : Service() {
         }
 
     public companion object {
-        /** Mirrors [is.walt.passes.pdf.PdfImportConfig.DEFAULT_MAX_BYTES] and storage's `DocumentBounds.MAX_BYTES`. */
+        /** Mirrors [PdfImportConfig.DEFAULT_MAX_BYTES] and storage's `DocumentBounds.MAX_BYTES`. */
         public const val MAX_BYTES: Long = PdfImportConfig.DEFAULT_MAX_BYTES
 
-        /** Mirrors [is.walt.passes.pdf.PdfImportConfig.DEFAULT_MAX_PAGES] and storage's `DocumentBounds.MAX_PAGES`. */
+        /** Mirrors [PdfImportConfig.DEFAULT_MAX_PAGES] and storage's `DocumentBounds.MAX_PAGES`. */
         public const val MAX_PAGES: Int = PdfImportConfig.DEFAULT_MAX_PAGES
 
         /**

@@ -7,7 +7,7 @@ import android.content.Context
  * through `passes-isolation`, decode one [ImageSource] to a bounded raster, and tear the
  * session down before returning. The wpass-i9x import path uses this directly (decode once,
  * persist the raster); the display path instead takes the [ImageDecodeBinder] interface and
- * holds a session open across re-renders, the way `passes-pdf-ui`'s `DocumentView` takes
+ * holds a session open across re-renders, the way `passes-document-ui`'s `DocumentView` takes
  * `PdfRendererBinder`.
  *
  * Mirrors `passes-barcode`'s `BarcodeImageDecoder`: the facade is the convenient bind-per-call

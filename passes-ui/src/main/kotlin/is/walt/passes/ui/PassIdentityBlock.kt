@@ -43,7 +43,7 @@ import `is`.walt.passes.core.PassLocale
  * user-supplied `userLabel` and the parsed-from-PKPASS `organizationName` are
  * untrusted strings that could carry bidi-override characters. The fence prevents
  * either line from reordering the other or surrounding chrome. Mirrors
- * `ScannableCardTile` and `passes-pdf-ui::DocumentTile` for the analogous
+ * `ScannableCardTile` and `passes-document-ui::DocumentTile` for the analogous
  * display-label fields.
  */
 @Suppress("LongParameterList") // detekt functionThreshold=6; trips on six declared params.

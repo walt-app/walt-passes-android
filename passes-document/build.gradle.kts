@@ -11,7 +11,7 @@ android {
 // branches to the right isolated backend — passes-pdf's renderer service for PDFs,
 // passes-image's decode sandbox for images. It is the ONE place the two otherwise-independent
 // peers meet (CLAUDE.md: passes-pdf and passes-image are independent peers with no edge
-// between them); this module sits ABOVE both, the way passes-pdf-ui sits above passes-pdf.
+// between them); this module sits ABOVE both, the way passes-document-ui sits above passes-pdf.
 //
 // Trust posture: this module exists so the sniff-and-branch orchestration is a single audited
 // surface in this repository rather than reassembled in walt-android, honouring the DECISIVE
@@ -19,7 +19,7 @@ android {
 dependencies {
     // PdfDocument / ImageDocument / DocumentRejectedKind / isPdfHeader / PdfImportConfig all
     // appear on this module's public result + config surface, so api (not implementation).
-    api(project(":passes-pdf-core"))
+    api(project(":passes-document-core"))
     // ImageDecodeRejectedKind is carried on DocumentImportResult.ImageRejected (public), so api.
     api(project(":passes-image"))
     api(libs.kotlinx.coroutines.core)

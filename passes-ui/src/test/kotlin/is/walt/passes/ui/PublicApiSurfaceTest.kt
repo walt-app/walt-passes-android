@@ -466,7 +466,7 @@ class PublicApiSurfaceTest {
         )
         // Reading every nested field forces them to remain in the public-API shape;
         // a rename or removal breaks the test. Document tokens (caption / tile / lane
-        // / document badge) live on `passes-pdf-ui::DocumentSemantics` and are
+        // / document badge) live on `passes-document-ui::DocumentSemantics` and are
         // covered by `DocumentPublicApiSurfaceTest` over there (wpass-r4z).
         assertThat(semantics.signatureBadge.appleVerifiedBackground).isEqualTo(argb)
         assertThat(semantics.expiredBadge.scrimAlpha).isEqualTo(96)
@@ -558,8 +558,8 @@ class PublicApiSurfaceTest {
         }
     }
 
-    // The equivalent scan for passes-pdf-ui (the Document* surfaces and the
-    // DocumentSemantics theme) lives in passes-pdf-ui::DocumentPublicApiSurfaceTest
+    // The equivalent scan for passes-document-ui (the Document* surfaces and the
+    // DocumentSemantics theme) lives in passes-document-ui::DocumentPublicApiSurfaceTest
     // (wpass-r4z). The renderer service module (passes-pdf) is no longer on this
     // test's classpath after the dep restructure; the scan-for-passes-pdf logic
     // would always early-out and provided no real coverage anyway since

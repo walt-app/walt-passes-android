@@ -2,14 +2,14 @@ package `is`.walt.passes.document
 
 /**
  * Hook for emitting image-import observability events from [DocumentImporter]'s image arm.
- * The PDF arm reports through `passes-pdf-core`'s `DocumentTelemetryGuard` (carried on
+ * The PDF arm reports through `passes-document-core`'s `DocumentTelemetryGuard` (carried on
  * [DocumentImportConfig.pdfConfig]); this is its image-side counterpart, salvaged from PR
  * #146's `ImageTelemetryGuard`.
  *
  * The shape of the event types is the load-bearing security control: every parameter is an
  * enum, a count, or a duration. There is no [String] carrying a filename, no [ByteArray]
  * carrying file contents, no map of free-form attributes. That structural restriction is the
- * trust claim mirroring `passes-core`'s `TelemetryGuard` and `passes-pdf-core`'s
+ * trust claim mirroring `passes-core`'s `TelemetryGuard` and `passes-document-core`'s
  * `DocumentTelemetryGuard`: image content and identifying metadata never appear in logs or
  * telemetry, by interface construction. Reviewers should treat any future addition of a
  * `String` / `CharSequence` / `ByteArray` / `Map` parameter as a security-policy change.

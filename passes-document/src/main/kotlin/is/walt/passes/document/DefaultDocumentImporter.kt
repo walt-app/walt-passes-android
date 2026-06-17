@@ -11,13 +11,8 @@ import `is`.walt.passes.image.android.ImageDecodeRejectedKind
 import `is`.walt.passes.image.android.ImageDecodeResult
 import `is`.walt.passes.image.android.ImageSource
 import `is`.walt.passes.isolation.MemfdPfdFactory
-import `is`.walt.passes.pdf.DocumentRejectedKind
-import `is`.walt.passes.pdf.ImageDocument
-import `is`.walt.passes.pdf.ImageDocumentId
-import `is`.walt.passes.pdf.PdfImportResult
 import `is`.walt.passes.pdf.android.PdfImportSource
 import `is`.walt.passes.pdf.android.PdfImporter
-import `is`.walt.passes.pdf.isPdfHeader
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
 import java.util.UUID

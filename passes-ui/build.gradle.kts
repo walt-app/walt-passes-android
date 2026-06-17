@@ -10,10 +10,10 @@ android {
 
 dependencies {
     api(project(":passes-core"))
-    // PKPASS-only module. Document-rendering surfaces live in :passes-pdf-ui (which
+    // PKPASS-only module. Document-rendering surfaces live in :passes-document-ui (which
     // takes the passes-pdf dep). passes-ui-core hosts the BiDi (FSI/PDI) helper and
     // the ArgbColor value class that both UI modules consume; isolating those there
-    // keeps passes-ui and passes-pdf-ui from depending on each other.
+    // keeps passes-ui and passes-document-ui from depending on each other.
     api(project(":passes-ui-core"))
     api(libs.kotlinx.coroutines.core)
 

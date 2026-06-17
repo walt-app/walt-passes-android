@@ -5,10 +5,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.document.DefaultDocumentImporter.ImageDecodeOutcome
 import `is`.walt.passes.image.android.ImageDecodeRejectedKind
-import `is`.walt.passes.pdf.DocumentRejectedKind
-import `is`.walt.passes.pdf.PdfDocument
-import `is`.walt.passes.pdf.PdfDocumentId
-import `is`.walt.passes.pdf.PdfImportResult
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule

@@ -3,7 +3,7 @@ package `is`.walt.passes.storage
 /**
  * Defensive caps `passes-storage` re-checks before inserting a document row. The
  * authoritative source for size and page count is ADR 0005 D7; the renderer-service in
- * `passes-pdf-core` enforces the same numbers at import time. Storage carries them a
+ * `passes-document-core` enforces the same numbers at import time. Storage carries them a
  * second time so a future caller bug, a misconfigured renderer, or a new entry path
  * cannot land an oversized blob in the encrypted database.
  *
@@ -11,11 +11,11 @@ package `is`.walt.passes.storage
  * display label, and the column is used to render the indexed list view, so a multi-MB
  * string would inflate every list-view query.
  *
- * Hardcoded here (rather than imported from `passes-pdf-core`) because `passes-storage`
- * does not depend on `passes-pdf-core`: the `PdfDocument <-> documents-table` mapping is
+ * Hardcoded here (rather than imported from `passes-document-core`) because `passes-storage`
+ * does not depend on `passes-document-core`: the `PdfDocument <-> documents-table` mapping is
  * a consumer-defined seam. `PublicApiSurfaceTest` locks the storage-side values only;
  * a cross-module parity test asserting `RendererService.MAX_BYTES == DocumentBounds.MAX_BYTES`
- * is tracked separately (`wpass-kej`) so a future cap change in `passes-pdf-core` cannot
+ * is tracked separately (`wpass-kej`) so a future cap change in `passes-document-core` cannot
  * silently diverge from this module.
  */
 public object DocumentBounds {
@@ -26,11 +26,11 @@ public object DocumentBounds {
 
 /**
  * The container kind of a stored document — the `documents.format` discriminator. The
- * storage layer keeps its own enum (rather than importing `passes-pdf-core`'s `Document`
+ * storage layer keeps its own enum (rather than importing `passes-document-core`'s `Document`
  * arms or the importer's `ImageFormat`) because `passes-storage` is an independent peer of
  * both: the `Document <-> documents-table` mapping is a consumer-defined seam. [Pdf] maps to
- * a [PdfDocument][`is`.walt.passes.pdf.PdfDocument]; the image arms map to an
- * [ImageDocument][`is`.walt.passes.pdf.ImageDocument]. Persisted as the lowercased name
+ * a [PdfDocument][`is`.walt.passes.document.PdfDocument]; the image arms map to an
+ * [ImageDocument][`is`.walt.passes.document.ImageDocument]. Persisted as the lowercased name
  * ('pdf' / 'png' / 'jpeg' / 'webp'); reordering arms is safe because the column stores the
  * name, not the ordinal.
  */
@@ -90,7 +90,7 @@ public sealed interface DocumentInsert {
  * [PassRepository.loadDocumentThumbnail].
  *
  * [format] is the discriminator a consumer branches on to rebuild the right
- * [Document][`is`.walt.passes.pdf.Document] arm: [DocumentFormat.Pdf] uses [pageCount];
+ * [Document][`is`.walt.passes.document.Document] arm: [DocumentFormat.Pdf] uses [pageCount];
  * the image formats use [widthPx] / [heightPx]. The fields not relevant to a row's kind are
  * the column defaults — [pageCount] is `1` for image rows (an image is a single page),
  * [widthPx] / [heightPx] are `null` for PDF rows.

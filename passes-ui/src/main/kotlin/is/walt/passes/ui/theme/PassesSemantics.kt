@@ -24,12 +24,12 @@ package `is`.walt.passes.ui.theme
  *   actual hex values come from the host theme, not from this contract.
  *
  * Document-rendering tokens (caption, tile, lane chrome) are NOT on this contract — they
- * live in `passes-pdf-ui::DocumentSemantics`, supplied via that module's sibling
- * `LocalDocumentSemantics`. The split exists because `passes-ui` and `passes-pdf-ui` are
+ * live in `passes-document-ui::DocumentSemantics`, supplied via that module's sibling
+ * `LocalDocumentSemantics`. The split exists because `passes-ui` and `passes-document-ui` are
  * independent peers; nesting one's tokens inside the other's data class would force
  * either module to depend on the other.
  *
- * Color values are packed ARGB integers (`0xAARRGGBB`), shared with `passes-pdf-ui` via
+ * Color values are packed ARGB integers (`0xAARRGGBB`), shared with `passes-document-ui` via
  * the [ArgbColor] value class re-exported from `passes-ui-core`. Consumers built on
  * Compose convert via [toComposeColor] at the API boundary; consumers on other UI
  * toolkits unpack directly. See `passes-ui/COMPOSABLE_SIGNATURES.md` for how this maps to

@@ -14,7 +14,7 @@ import androidx.compose.ui.unit.dp
  * Kept in-module on purpose: `passes-ui` does NOT depend on
  * `androidx.compose.material:material-icons-extended` (a multi-megabyte artifact for a
  * single 24dp path). Mirrors the same dependency-light stance as
- * `passes-pdf-ui::InfoOutlineIcon`. Geometry is the standard Material "edit" pencil on
+ * `passes-document-ui::InfoOutlineIcon`. Geometry is the standard Material "edit" pencil on
  * a 24×24 viewport.
  *
  * The [SolidColor] fill is `Color.Black` only because the builder requires a fill; the

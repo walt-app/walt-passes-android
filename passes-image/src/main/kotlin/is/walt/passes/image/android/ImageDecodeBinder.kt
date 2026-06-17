@@ -24,7 +24,7 @@ import android.os.SharedMemory
  * mirroring the `PdfRendererBinder` / `BarcodeDecodeBinder` discipline.
  *
  * `public` (unlike `passes-barcode`'s module-private binder): the wpass-i9x image-document
- * display surface consumes this contract the way `passes-pdf-ui`'s `DocumentView` consumes
+ * display surface consumes this contract the way `passes-document-ui`'s `DocumentView` consumes
  * `PdfRendererBinder`. Hosting code takes the [ImageDecodeBinder] interface — never the
  * concrete [ImageDecodeClient] — so test fakes substitute cleanly.
  *
@@ -70,7 +70,7 @@ public sealed interface ImageDecodeResult {
 
 /**
  * The reasons an image decode can be rejected, as its OWN closed taxonomy — deliberately NOT
- * flattened into `passes-pdf-core`'s `DocumentRejectedKind`. The two document kinds fail in
+ * flattened into `passes-document-core`'s `DocumentRejectedKind`. The two document kinds fail in
  * different ways (a PDF is encrypted or has too many pages; an image is not-an-image or a
  * decompression bomb), and folding them into one enum would force each consumer to branch on
  * arms that cannot occur for its kind. The wpass-i9x ImageDocument arm (step 4) maps these to

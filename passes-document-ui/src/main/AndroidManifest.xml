@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Empty library manifest. passes-document-ui is a UI library; it declares no permissions,
+  no components, and contributes no manifest-merged metadata to the consumer. The
+  isolated-process renderer service that backs DocumentView is contributed by
+  passes-pdf, not here. The namespace is set in passes-document-ui/build.gradle.kts.
+-->
+<manifest />

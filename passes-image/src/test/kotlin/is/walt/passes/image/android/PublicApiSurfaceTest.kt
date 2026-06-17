@@ -12,7 +12,7 @@ import org.junit.Test
  * `lastImage`, a raw-bytes accessor) without tripping a test before review.
  *
  * Also pins that the reject taxonomy is its OWN type, deliberately NOT
- * `passes-pdf-core`'s `DocumentRejectedKind` (the wpass-i9x acceptance criterion).
+ * `passes-document-core`'s `DocumentRejectedKind` (the wpass-i9x acceptance criterion).
  *
  * Pure-JVM by construction: it reflects on shapes and exercises the pure result arms, and
  * never constructs the Android-typed [ImageSource] arms, so it needs no Robolectric.
@@ -119,6 +119,6 @@ class PublicApiSurfaceTest {
         assertThat(ImageDecodeRejectedKind::class.java.name)
             .isEqualTo("is.walt.passes.image.android.ImageDecodeRejectedKind")
         assertThat(ImageDecodeRejectedKind::class.java.name)
-            .isNotEqualTo("is.walt.passes.pdf.DocumentRejectedKind")
+            .isNotEqualTo("is.walt.passes.document.DocumentRejectedKind")
     }
 }

@@ -671,7 +671,7 @@ class TrustClaimSurfaceTest {
     )
 
     // Document-surface trust assertions (caption, tile bidi-isolation, lane wiring)
-    // moved to passes-pdf-ui::DocumentTrustSurfaceTest with the composables (wpass-r4z).
+    // moved to passes-document-ui::DocumentTrustSurfaceTest with the composables (wpass-r4z).
 
     // wpass-7xa / ADR 0007 D5+D6: PassIdentityBlock is the canonical renderer of the
     // user-label trust-caption rule. The cases below lock the documented render paths.

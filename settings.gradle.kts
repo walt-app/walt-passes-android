@@ -30,7 +30,7 @@ dependencyResolutionManagement {
 rootProject.name = "walt-passes-android"
 
 include(":passes-core")
-include(":passes-pdf-core")
+include(":passes-document-core")
 include(":passes-isolation")
 include(":passes-image-decode")
 include(":passes-pdf")
@@ -41,4 +41,4 @@ include(":passes-document")
 include(":passes-storage")
 include(":passes-ui-core")
 include(":passes-ui")
-include(":passes-pdf-ui")
+include(":passes-document-ui")

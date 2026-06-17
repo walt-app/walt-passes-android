@@ -19,7 +19,7 @@ android {
 }
 
 dependencies {
-    api(project(":passes-pdf-core"))
+    api(project(":passes-document-core"))
     api(libs.kotlinx.coroutines.core)
 
     // Shared isolated-worker plumbing (memfd PfdFactory + bind/teardown session). The

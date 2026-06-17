@@ -1,13 +1,13 @@
 package `is`.walt.passes.pdf.android
 
-import `is`.walt.passes.pdf.DocumentRejectedKind
+import `is`.walt.passes.document.DocumentRejectedKind
 
 /**
  * Stable Int <-> [DocumentRejectedKind] mapping for the binder wire format.
  *
  * The previous wire encoding used [DocumentRejectedKind.ordinal] directly; that left
  * the wire silently coupled to the source-order of the enum. Reordering or inserting an
- * arm in `passes-pdf-core` would have shifted every subsequent code on the wire and
+ * arm in `passes-document-core` would have shifted every subsequent code on the wire and
  * mis-decoded rejections without a compile error. Today the renderer service and its
  * client live in the same process from the same build, so the on-the-wire fragility is
  * latent rather than active, but the kernel-vs-consumer coupling already requires the
@@ -15,7 +15,7 @@ import `is`.walt.passes.pdf.DocumentRejectedKind
  * a contributor reordering the enum in this repository must not silently break decoding
  * downstream.
  *
- * Add a new arm: extend [DocumentRejectedKind] in passes-pdf-core, append a new code
+ * Add a new arm: extend [DocumentRejectedKind] in passes-document-core, append a new code
  * here, and update [encode] / [decode]. [RejectedKindWireSurfaceTest] fails closed if
  * the mapping table drifts from the enum; that gates the change behind a structural
  * test rather than a code-review judgement call.

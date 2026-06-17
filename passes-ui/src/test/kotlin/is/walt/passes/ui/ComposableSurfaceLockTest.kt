@@ -93,7 +93,7 @@ class ComposableSurfaceLockTest {
 
     // Document-surface shape locks (DocumentTrustCaption / DocumentTile / DocumentView
     // / DocumentsLane and the no-overload + PdfRendererBinder-not-Client assertions)
-    // moved to passes-pdf-ui::DocumentSurfaceLockTest with the composables (wpass-r4z).
+    // moved to passes-document-ui::DocumentSurfaceLockTest with the composables (wpass-r4z).
 
     @Test
     fun securitySheetsAllAcceptUiTelemetryGuard() {

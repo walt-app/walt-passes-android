@@ -2,7 +2,7 @@ package `is`.walt.passes.pdf.android
 
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
-import `is`.walt.passes.pdf.DocumentRejectedKind
+import `is`.walt.passes.document.DocumentRejectedKind
 
 /**
  * The internal binder contract for the isolated-process PDF renderer service. Two
@@ -70,7 +70,7 @@ public sealed interface RenderSourceRect {
 
 /**
  * Outcome of the page-count probe. Modelled with the same enum-based rejection vocabulary
- * as the rest of `passes-pdf-core` so a consumer can fold probe and render rejections
+ * as the rest of `passes-document-core` so a consumer can fold probe and render rejections
  * into a single `when` over [DocumentRejectedKind] without a translation layer.
  */
 public sealed interface ProbeResult {

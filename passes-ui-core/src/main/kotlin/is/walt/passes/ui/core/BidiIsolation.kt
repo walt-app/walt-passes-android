@@ -9,13 +9,13 @@ package `is`.walt.passes.ui.core
  * §3.4 isolate formatting characters).
  *
  * Used in `passes-ui` (security sheets — verbatim URL / phone / email / org name)
- * and in `passes-pdf-ui` (document tile — user-controlled `displayLabel` / filename).
+ * and in `passes-document-ui` (document tile — user-controlled `displayLabel` / filename).
  * Both surfaces combine this with consumer-side `Cf`/`Cc` rejection so the displayed
  * string is rendered as-typed; an attacker can no longer craft a value that looks
  * visually like a trusted string while parsing as a hostile one.
  *
  * Lives in `passes-ui-core` so it does not have to be duplicated between
- * `passes-ui` and `passes-pdf-ui`; a duplicated bidi fence is exactly the kind of
+ * `passes-ui` and `passes-document-ui`; a duplicated bidi fence is exactly the kind of
  * trust-claim-bearing logic the kernel commits NOT to parallel-implement.
  */
 public fun isolated(s: String): String = "$FSI$s$PDI"
