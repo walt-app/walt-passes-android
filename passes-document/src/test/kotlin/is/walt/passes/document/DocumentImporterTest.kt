@@ -100,6 +100,8 @@ class DocumentImporterTest {
         assertThat(imported.doc.widthPx).isEqualTo(800)
         assertThat(imported.doc.heightPx).isEqualTo(600)
         assertThat(imported.doc.byteCount).isEqualTo(pngBytes.size.toLong())
+        // importedAt is stamped from the injected wall clock, not System.currentTimeMillis().
+        assertThat(imported.doc.importedAtEpochMs).isEqualTo(FIXED_WALL_CLOCK_MS)
         assertThat(maxPxRequested).isEqualTo(DocumentImportConfig.DEFAULT_MAX_IMAGE_DECODE_PX)
         val image = persisted.single() as DocumentPersist.Image
         assertThat(image.bytes).isEqualTo(pngBytes)
@@ -162,12 +164,14 @@ class DocumentImporterTest {
         imageDecode: suspend (ByteArray, Int) -> ImageDecodeOutcome =
             { _, _ -> ImageDecodeOutcome.Rejected(ImageDecodeRejectedKind.NotAnImage) },
         imageTelemetry: ImageImportTelemetryGuard = ImageImportTelemetryGuard.NoOp,
+        wallClock: () -> Long = { FIXED_WALL_CLOCK_MS },
     ): DefaultDocumentImporter =
         DefaultDocumentImporter(
             config = DocumentImportConfig(imageTelemetryGuard = imageTelemetry),
             pdfImport = pdfImport,
             imageDecode = imageDecode,
             now = { 0L },
+            wallClock = wallClock,
             idGenerator = { "fixed-id" },
         )
 
@@ -196,5 +200,10 @@ class DocumentImporterTest {
         override fun onImportFailed(event: ImageImportFailedEvent) {
             events += "failed:${event.outcome.name}"
         }
+    }
+
+    private companion object {
+        // Arbitrary fixed epoch-ms the injected wall clock returns, so importedAt is pinnable.
+        const val FIXED_WALL_CLOCK_MS: Long = 1_700_000_000_000L
     }
 }
