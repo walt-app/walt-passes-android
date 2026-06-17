@@ -83,7 +83,7 @@ class DocumentPublicApiSurfaceTest {
      * in the test, making the security-policy edit auditable.
      */
     @Test
-    fun passesPdfUiCompiledClassesContainNoForbiddenStrings() {
+    fun passesDocumentUiCompiledClassesContainNoForbiddenStrings() {
         val classFiles = classFilesUnder("is/walt/passes/document/ui")
         assertThat(classFiles).isNotEmpty()
 

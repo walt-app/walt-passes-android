@@ -105,7 +105,7 @@ public fun DocumentView(
  *  - The view displays only the rasterised page bitmaps and the caption. ADR 0005 D4:
  *    no PDF metadata, no extracted text, no annotation list, no attachment list.
  *  - The view exposes no share, export, print, or open-with affordance. ADR 0005 D8.
- *    `DocumentPublicApiSurfaceTest.passesPdfUiCompiledClassesContainNoForbiddenStrings`
+ *    `DocumentPublicApiSurfaceTest.passesDocumentUiCompiledClassesContainNoForbiddenStrings`
  *    enforces by scanning compiled bytecode for `android.intent.action.SEND` and the
  *    `application/pdf` MIME literal so a future contributor cannot quietly add either.
  *  - Inline surface is fixed 1x: no pinch-zoom, no pan, no double-tap. Zoom lives only

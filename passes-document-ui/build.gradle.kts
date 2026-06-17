@@ -12,9 +12,9 @@ android {
 // PKPASS-only passes-ui no longer transitively pulls in the Android-only
 // PdfRendererBinder / SharedMemory machinery for every consumer that just renders
 // passes. CLAUDE.md's "passes-storage / passes-pdf / passes-ui are independent"
-// rule extends naturally to passes-document-ui as a fourth peer; the only edge it has
-// to its peers is the deliberate `api(passes-pdf)` here, which is what gives a
-// consumer of this module the binder type to construct.
+// rule extends naturally to passes-document-ui as a fourth peer; the edges it has
+// to its peers are the deliberate `api(passes-pdf)` / `api(passes-image)` here, which
+// give a consumer of this module the binder types to construct.
 dependencies {
     api(project(":passes-document-core"))
     // api (not implementation) because PdfRendererBinder is a parameter type on

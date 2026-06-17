@@ -1,6 +1,5 @@
 package `is`.walt.passes.document
 
-
 /**
  * Configuration for [DocumentImporter]. Bundles the shared sniff-stage byte cap, the PDF
  * backend's existing [PdfImportConfig] (which carries the PDF caps and PDF telemetry guard),
