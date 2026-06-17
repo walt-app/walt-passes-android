@@ -74,7 +74,7 @@ internal class DefaultDocumentImporter(
     override suspend fun import(
         source: DocumentImportSource,
         displayLabel: String,
-        confirmBarcode: suspend (payload: String, format: ScannableFormat) -> Boolean,
+        confirmBarcode: (suspend (payload: String, format: ScannableFormat) -> Boolean)?,
         persist: suspend (DocumentPersist) -> Unit,
     ): DocumentImportResult {
         val bytes = readBounded(source) ?: return DocumentImportResult.Unrecognized
@@ -126,7 +126,7 @@ internal class DefaultDocumentImporter(
         format: ImageFormat,
         displayLabel: String,
         persist: suspend (DocumentPersist) -> Unit,
-        confirmBarcode: suspend (String, ScannableFormat) -> Boolean,
+        confirmBarcode: (suspend (String, ScannableFormat) -> Boolean)?,
     ): DocumentImportResult {
         val startedAt = now()
         val guard = config.imageTelemetryGuard
@@ -209,17 +209,24 @@ internal class DefaultDocumentImporter(
     }
 
     /**
-     * Runs the isolated barcode extraction and the consumer's confirm gate. Returns the
-     * `(payload, format)` to persist as a composite, or `null` to degrade to a plain image —
+     * Opts into and runs the isolated barcode extraction plus the consumer's confirm gate. When
+     * [confirmBarcode] is `null` the caller has not opted into composites: extraction does NOT run
+     * (no isolated barcode-decode cost) and the result is always a plain image. Otherwise returns
+     * the `(payload, format)` to persist as a composite, or `null` to degrade to a plain image —
      * for no detected code, an extraction failure, OR a declined/failed confirmation. A
      * `CancellationException` from the confirm hook propagates (structured concurrency); any
      * other throw is swallowed to a declined confirmation so a confirm-UI bug cannot fail the
      * whole import.
      */
+    // ReturnCount: three guard-style early exits (not-opted-in, no code, declined) each read as a
+    // distinct reason to stay a plain image; collapsing them behind one expression would obscure
+    // which condition degraded the artifact. Same precedent as importImage above.
+    @Suppress("ReturnCount")
     private suspend fun extractConfirmedBarcode(
         bytes: ByteArray,
-        confirmBarcode: suspend (String, ScannableFormat) -> Boolean,
+        confirmBarcode: (suspend (String, ScannableFormat) -> Boolean)?,
     ): DecodedBarcode? {
+        if (confirmBarcode == null) return null
         val decoded = barcodeExtract(bytes) as? BarcodeDecodeResult.DecodedBarcode ?: return null
         val confirmed = try {
             confirmBarcode(decoded.payload, decoded.format)

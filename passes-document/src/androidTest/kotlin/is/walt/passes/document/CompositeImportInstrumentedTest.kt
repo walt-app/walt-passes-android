@@ -53,6 +53,7 @@ class CompositeImportInstrumentedTest {
                 importer().import(
                     source = DocumentImportSource.FileDescriptor(it),
                     displayLabel = "membership.png",
+                    confirmBarcode = { _, _ -> true },
                     persist = { p -> persisted += p },
                 )
             }
@@ -106,6 +107,7 @@ class CompositeImportInstrumentedTest {
                 importer().import(
                     source = DocumentImportSource.FileDescriptor(it),
                     displayLabel = "photo.png",
+                    confirmBarcode = { _, _ -> true },
                     persist = { p -> persisted += p },
                 )
             }

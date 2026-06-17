@@ -782,11 +782,16 @@ compressed bytes in a host `ByteArray` is not a decode and is not the RCE surfac
 ### C3. Confirm-before-persist; first code wins; graceful degradation
 
 A misread barcode that only surfaces at a checkout terminal is a real failure mode.
-`DocumentImporter.import` therefore gains a `confirmBarcode: suspend (payload, format) ->
-Boolean` hook, invoked with the decoded value **before anything is persisted**, so the
+`DocumentImporter.import` therefore gains a `confirmBarcode: (suspend (payload, format) ->
+Boolean)?` hook, invoked with the decoded value **before anything is persisted**, so the
 consumer can gate on its `BarcodeCreateConfirmSheet` (the decoded payload is the value
 shown for verification). Returning `true` persists a composite; returning `false`
-degrades to a plain image. The default accepts every read. When an image yields no code,
+degrades to a plain image. The hook is **`null` by default, and that default means the
+composite path is opt-in: with no hook the isolated barcode extraction does NOT run at
+all** — the import is a plain image at zero extra cost, identical to the wpass-i9x
+behavior, and an incidental barcode in a photo the user only wanted to store is never
+silently turned into a composite. A consumer wanting composites without a confirm UX can
+pass `{ _, _ -> true }` explicitly. When (with the hook supplied) an image yields no code,
 the extraction fails, or confirmation is declined, the import lands on `ImportedImage`
 (plain `Document.Image`) — extraction failure NEVER fails the whole import. When an
 image contains several codes, the kernel returns the **first** detected code (consumer

@@ -8,6 +8,7 @@ import `is`.walt.passes.core.DecodeFailureReason
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.document.DefaultDocumentImporter.ImageDecodeOutcome
 import `is`.walt.passes.image.android.ImageDecodeRejectedKind
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
@@ -169,7 +170,12 @@ class DocumentImporterTest {
             },
         )
 
-        val result = importer.import(source(pngBytes), "card.png") { persisted += it }
+        val result = importer.import(
+            source = source(pngBytes),
+            displayLabel = "card.png",
+            confirmBarcode = { _, _ -> true },
+            persist = { persisted += it },
+        )
 
         val imported = result as DocumentImportResult.ImportedBarcodedImage
         assertThat(imported.doc.widthPx).isEqualTo(640)
@@ -195,7 +201,12 @@ class DocumentImporterTest {
             barcodeExtract = { BarcodeDecodeResult.NoBarcodeFound },
         )
 
-        val result = importer.import(source(pngBytes), "plain.png") { persisted += it }
+        val result = importer.import(
+            source = source(pngBytes),
+            displayLabel = "plain.png",
+            confirmBarcode = { _, _ -> true },
+            persist = { persisted += it },
+        )
 
         assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
         assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
@@ -207,8 +218,81 @@ class DocumentImporterTest {
             imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
             barcodeExtract = { BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.ImageDecodeFailed) },
         )
-        val result = importer.import(source(pngBytes), "plain.png") {}
+        val result = importer.import(
+            source = source(pngBytes),
+            displayLabel = "plain.png",
+            confirmBarcode = { _, _ -> true },
+            persist = {},
+        )
         assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
+    }
+
+    @Test
+    fun withoutAConfirmHookExtractionIsSkippedAndTheResultIsAPlainImage() = runTest {
+        // Opt-in default (wpass-8lu review rec 2): no hook -> no isolated barcode round-trip, and a
+        // present code never silently produces a composite.
+        var extractionCalled = false
+        val persisted = mutableListOf<DocumentPersist>()
+        val importer = importer(
+            imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
+            barcodeExtract = {
+                extractionCalled = true
+                BarcodeDecodeResult.DecodedBarcode("INCIDENTAL", ScannableFormat.Qr)
+            },
+        )
+
+        val result = importer.import(source(pngBytes), "photo.png") { persisted += it }
+
+        assertThat(extractionCalled).isFalse()
+        assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
+        assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
+    }
+
+    @Test
+    fun confirmHookThrowingNonCancellationDegradesToPlainImage() = runTest {
+        // A confirm-UI bug must not fail the whole import: a non-cancellation throw is treated as
+        // a declined confirmation and the artifact degrades to a plain image.
+        val persisted = mutableListOf<DocumentPersist>()
+        val importer = importer(
+            imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
+            barcodeExtract = { BarcodeDecodeResult.DecodedBarcode("CODE", ScannableFormat.Qr) },
+        )
+
+        val result = importer.import(
+            source = source(pngBytes),
+            displayLabel = "card.png",
+            confirmBarcode = { _, _ -> error("confirm UI crashed") },
+            persist = { persisted += it },
+        )
+
+        assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
+        assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
+    }
+
+    @Test
+    fun confirmHookCancellationPropagatesOutOfImportAndPersistsNothing() = runTest {
+        // CancellationException must propagate to preserve structured concurrency (not be swallowed
+        // to a declined confirmation), and nothing is persisted because confirm runs before persist.
+        var persisted = false
+        var propagated = false
+        val importer = importer(
+            imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
+            barcodeExtract = { BarcodeDecodeResult.DecodedBarcode("CODE", ScannableFormat.Qr) },
+        )
+
+        try {
+            importer.import(
+                source = source(pngBytes),
+                displayLabel = "card.png",
+                confirmBarcode = { _, _ -> throw CancellationException("scope cancelled") },
+                persist = { persisted = true },
+            )
+        } catch (_: CancellationException) {
+            propagated = true
+        }
+
+        assertThat(propagated).isTrue()
+        assertThat(persisted).isFalse()
     }
 
     @Test
@@ -265,7 +349,13 @@ class DocumentImporterTest {
                 BarcodeDecodeResult.NoBarcodeFound
             },
         )
-        importer.import(source(pdfBytes), "x.pdf") {}
+        // Opt in to composites; the PDF branch must STILL never run image-barcode extraction.
+        importer.import(
+            source = source(pdfBytes),
+            displayLabel = "x.pdf",
+            confirmBarcode = { _, _ -> true },
+            persist = {},
+        )
         assertThat(extractionCalled).isFalse()
     }
 
