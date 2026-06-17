@@ -722,3 +722,117 @@ for `Intent.ACTION_SEND` / `application/pdf` stays green across both arms.
 | I3       | `DocumentImporterTest`: PDF magic routes to the PDF backend, image magic to the image backend, unrecognized bytes touch neither; original bytes reach `persist`. |
 | I4       | `passes-storage` `SchemaMigrationTest.migrationFromV5AddsDocumentFormatAndDimensionColumns` + `...DefaultsExistingDocumentsToPdfFormat...`; `DocumentRepositoryTest` image-insert tests. |
 | I5       | `DocumentSurfaceLockTest` (9-param lock + `ImageDecodeBinder`-interface lock); `DocumentTrustSurfaceTest.imageDocumentViewRendersTheNonSuppressibleTrustCaption`; existing `application/pdf` / `ACTION_SEND` bytecode scan. |
+
+## Addendum 2026-06-17: Composite artifact — `Document = PDF | image | barcoded-image`
+
+Tracks: `wpass-8lu` (first-class composite artifact: image + extracted/generated
+barcode, one wallet item). Consumer-requested by walt-android epic `wlt-yjn5`
+(add-to-wallet UX rethink); blocks consumer `wlt-u3tk → wlt-2ub2`. Follow-on to the
+2026-06-16 image addendum (`wpass-i9x`). Module names below are the post-`wpass-xmp`
+names (`passes-document-core` / `passes-document-ui`, formerly `passes-pdf-core` /
+`passes-pdf-ui`).
+
+### Context
+
+A common add-flow input is a photographed or screenshotted membership / loyalty card
+that *carries a barcode* — the user wants both the picture (to recognise the card) and
+a crisp, re-renderable native barcode (to scan at a terminal). The image-only arm
+(`wpass-i9x`) covers the barcode-*less* case; a separate `ScannableCard` (ADR 0001)
+covers the barcode-*only* case. The composite is the union: ONE artifact carrying an
+image AND a barcode extracted from that image. Rather than a fourth artifact tower or a
+host-side join of two rows, it is a **third `Document` arm** that is a strict superset
+of `ImageDocument`, so it reuses the image isolation, storage, trust-caption, and
+display substrate verbatim and degrades to a plain `ImageDocument` when no code is
+found. The decisions below record only what is **new or different** for the composite.
+
+### C1. `Document` gains a third arm: `BarcodedImageDocument`
+
+`passes-document-core` adds `BarcodedImageDocument` (with `BarcodedImageDocumentId`)
+alongside `PdfDocument` and `ImageDocument`. It carries every `ImageDocument` field
+(`widthPx` / `heightPx`, original bytes persisted) PLUS `barcodePayload: String` and
+`barcodeFormat: ScannableFormat`. It shares no superclass with `Pass` (D1 unchanged)
+and has no `SignatureStatus` (D5 unchanged — a barcode extracted from a user image is
+not a verified credential). The arm exists **only when a code was actually found and
+(consumer-side) confirmed**; an image with no barcode stays an `ImageDocument`, never a
+`BarcodedImageDocument` with an empty payload. This forces a deliberate, security-
+reviewed edit to `passes-document-core`'s `PublicApiSurfaceTest` arm-set lock, in the
+same audit register as adding a binder method. `passes-document-core` takes a new
+pure-JVM `api` edge to `passes-core` for `ScannableFormat` (mirrors
+`passes-barcode-core → passes-core`; adds no Android dependency).
+
+### C2. Barcode extraction runs in the isolated worker — the load-bearing constraint
+
+The user-imported image is the hostile-input surface (the same `CVE-2023-4863`
+libwebp / codec-RCE class D3 and `wpass-i9x` exist to contain). Extracting a barcode
+from it means decoding the image and running a symbol reader over the pixels — both
+MUST happen in the permissionless sandbox, never in the host process. The importer
+reuses `passes-barcode`'s existing isolated `BarcodeImageDecoder` (the static-image
+posture, `wpass-zrt`): the original bytes are decoded in-sandbox and **only**
+`{payload, ScannableFormat}` (the pure `BarcodeDecodeResult` from `passes-core`) crosses
+the binder — never a `Bitmap`, never the source bytes. No `BitmapFactory` / `ImageDecoder`
+/ ZXing call touches user-image bytes in the host process. This is the same invariant
+that gates `wpass-i9x` acceptance, extended to the barcode read.
+
+The composite import runs **two** isolated decodes of the same bytes — the image-decode
+sandbox (for the display raster / thumbnail / dimensions) and the barcode-decode sandbox
+(for the symbol) — each on its **own** `memfd` PFD materialized from the single bounded
+read. The source fd is still read exactly once (no offset corruption); holding the
+compressed bytes in a host `ByteArray` is not a decode and is not the RCE surface.
+
+### C3. Confirm-before-persist; first code wins; graceful degradation
+
+A misread barcode that only surfaces at a checkout terminal is a real failure mode.
+`DocumentImporter.import` therefore gains a `confirmBarcode: suspend (payload, format) ->
+Boolean` hook, invoked with the decoded value **before anything is persisted**, so the
+consumer can gate on its `BarcodeCreateConfirmSheet` (the decoded payload is the value
+shown for verification). Returning `true` persists a composite; returning `false`
+degrades to a plain image. The default accepts every read. When an image yields no code,
+the extraction fails, or confirmation is declined, the import lands on `ImportedImage`
+(plain `Document.Image`) — extraction failure NEVER fails the whole import. When an
+image contains several codes, the kernel returns the **first** detected code (consumer
+decision, `wlt-yjn5`; ZXing's `MultiFormatReader` stops at the first match). No content
+beyond the barcode is extracted (D4 holds: no EXIF / XMP / payload-derived label).
+
+### C4. Storage: `documents` schema v6 → v7 (forward-only)
+
+The `documents` table gains nullable `barcode_payload TEXT` / `barcode_format TEXT`
+columns. A row is a composite **iff** both are non-null; the `format` column stays the
+image container format (`'png' / 'jpeg' / 'webp'`), so a composite reads back as an
+image row that additionally carries a barcode — there is **no** new `format` value and
+**no** third reject enum. `barcode_format` stores the `ScannableFormat` name, matching
+the `scannable_cards.format` vocabulary; an unrecognised name (DB tampering only — this
+module is the sole writer) decodes to "no barcode" rather than throwing on a list query.
+`insertDocument`'s sealed `DocumentInsert` gains a `BarcodedImage` arm. The D7 size and
+label caps apply; the page cap does not (a composite is a single-page image). The barcode
+is carried on the SAME row as its image — one artifact, one wallet entry, never a
+host-side join. Migration is forward-only per ADR 0002; existing rows read back NULL.
+
+### C5. The composite reuses `DocumentView` for its image half; the barcode UI is consumer-composed
+
+`DocumentView` dispatches `BarcodedImageDocument` to the **same** `ImageDocumentView` as
+a plain image, over the **same** `imageFile` / `imageDecoder` backend pair — so the
+dispatcher gains NO new parameter and the `DocumentSurfaceLockTest` 9-param shape lock
+stays green. The non-suppressible `DocumentTrustCaption` (D5) is therefore present
+unchanged. The generated barcode and its format switcher are **not** rendered here: they
+are composed by the consumer with `passes-ui`'s `ScannableCardView` + `passes-core`'s
+`BarcodeEncoder.encode(payload, format)`, which re-encodes the one stored payload across
+symbologies. This keeps the two UI towers (`passes-ui` for PKPASS/scannable surfaces,
+`passes-document-ui` for document surfaces) independent — the composite is the one place
+they are *combined*, and that combination lives in the consumer, not in a new kernel
+cross-tower edge. D8 (no share-out) holds.
+
+### Telemetry discipline (unchanged, reaffirmed)
+
+The composite import reuses the image `onImportSucceeded` event verbatim — byte count /
+format / dimensions only. The decoded barcode **payload is never written to telemetry**;
+a composite import is indistinguishable from a plain image import in the telemetry stream.
+
+### Tests pinning this addendum
+
+| Decision | Test                                                                                                  |
+|----------|-------------------------------------------------------------------------------------------------------|
+| C1       | `passes-document-core` `PublicApiSurfaceTest`: `Document` has exactly `PdfDocument` + `ImageDocument` + `BarcodedImageDocument`; the composite shape is exercised. |
+| C2       | `passes-document` `DocumentImporterTest.imageWithBarcodeRoutesToCompositeAndPersistsPayloadAndFormat` (the barcode seam sees the same ORIGINAL bytes; only `{payload, format}` cross); on-device `wpass-k9t`. |
+| C3       | `DocumentImporterTest`: no-code / extraction-failure / declined-confirmation all degrade to `ImportedImage`; `confirmHookSeesTheDecodedPayloadBeforePersist`; `pdfWithEmbeddedBytesNeverRunsBarcodeExtraction`. |
+| C4       | `passes-storage` `SchemaMigrationTest` (v6→v7 barcode columns, version/DDL/migration-keys locks in `PublicApiSurfaceTest`); `DocumentRepositoryTest` composite round-trip + plain-image-null-barcode tests. |
+| C5       | `DocumentSurfaceLockTest` (9-param lock holds — composite adds no `DocumentView` param); `DocumentTrustSurfaceTest`; `application/pdf` / `ACTION_SEND` bytecode scan stays green. |
