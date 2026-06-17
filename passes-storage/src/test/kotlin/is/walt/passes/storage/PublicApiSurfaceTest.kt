@@ -203,8 +203,8 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun schemaDeclaresSevenTablesAndIsAtVersionSix() {
-        assertThat(Schema.VERSION).isEqualTo(6)
+    fun schemaDeclaresSevenTablesAndIsAtVersionSeven() {
+        assertThat(Schema.VERSION).isEqualTo(7)
         assertThat(Schema.Tables.SCHEMA_META).isEqualTo("schema_meta")
         assertThat(Schema.Tables.PASSES).isEqualTo("passes")
         assertThat(Schema.Tables.PASS_IMAGES).isEqualTo("pass_images")
@@ -216,9 +216,10 @@ class PublicApiSurfaceTest {
         // + documents + 1 document index + document_thumbnails
         // + scannable_cards (v4 shape, no color_argb) + 1 scannable-card index
         // + 3 v5->v6 document ALTERs (format / width_px / height_px)
-        // = 15 statements.
-        assertThat(Schema.DDL).hasSize(15)
-        assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2, 3, 4, 5)
+        // + 2 v6->v7 document ALTERs (barcode_payload / barcode_format)
+        // = 17 statements.
+        assertThat(Schema.DDL).hasSize(17)
+        assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2, 3, 4, 5, 6)
     }
 
     @Test

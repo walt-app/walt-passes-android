@@ -1,6 +1,7 @@
 package `is`.walt.passes.document
 
 import android.content.Context
+import `is`.walt.passes.core.ScannableFormat
 
 /**
  * The single document-import entry point. Magic-byte-sniffs the source as PDF or image and
@@ -14,6 +15,13 @@ import android.content.Context
  * still happens inside the isolated backends. The trust claim is the same one `PdfImporter`'s
  * KDoc makes: composing this by hand in the consumer would be the parallel-implementation
  * pattern the repository's DECISIVE CONSTRAINT forbids.
+ *
+ * Composite artifacts (wpass-8lu): the image branch additionally runs the isolated still-image
+ * barcode decoder (`passes-barcode`) over the SAME once-read bytes. When a code is found the
+ * import yields a [DocumentImportResult.ImportedBarcodedImage]; when none is found (or the
+ * extraction fails, or the consumer declines via `confirmBarcode`) it degrades to a plain
+ * [DocumentImportResult.ImportedImage]. Barcode extraction never runs in the host process; only
+ * the decoded payload + symbology cross the binder, matching the wpass-i9x isolation invariant.
  *
  * Storage is wired through a `persist` callback rather than a `PassRepository` dependency so
  * `passes-document` stays independent of `passes-storage` (matching `PdfImporter`). The
@@ -34,10 +42,23 @@ public interface DocumentImporter {
      *
      * [displayLabel] is supplied by the consumer; the importer never derives it from the
      * source's metadata (ADR 0005 D4). It is forwarded verbatim to [persist].
+     *
+     * [confirmBarcode] gates the composite path (wpass-8lu): for an image whose isolated barcode
+     * extraction found a code, it is invoked with the decoded `(payload, format)` BEFORE anything
+     * is persisted, so the consumer can show its `BarcodeCreateConfirmSheet` and let the user
+     * verify the read (a misread barcode at a checkout is a real failure). Returning `true`
+     * persists a composite ([DocumentPersist.BarcodedImage]); returning `false` degrades to a
+     * plain image ([DocumentPersist.Image]). The default accepts every read, so a consumer that
+     * does not gate gets the composite whenever a code is present. It is never called for PDFs,
+     * for images with no detected barcode, or when extraction fails. A `CancellationException`
+     * from the hook propagates; any other throw is treated as a declined confirmation (degrade
+     * to image) so a confirm-UI bug cannot fail the whole import.
      */
     public suspend fun import(
         source: DocumentImportSource,
         displayLabel: String,
+        confirmBarcode: suspend (payload: String, format: ScannableFormat) -> Boolean =
+            { _, _ -> true },
         persist: suspend (DocumentPersist) -> Unit,
     ): DocumentImportResult
 

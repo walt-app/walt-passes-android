@@ -158,12 +158,16 @@ public class SqlCipherPassRepository internal constructor(
         // applies only to the PDF arm — images cannot exceed it by construction.
         val pageCount = when (insert) {
             is DocumentInsert.Pdf -> insert.pageCount
-            is DocumentInsert.Image -> IMAGE_PAGE_COUNT
+            is DocumentInsert.Image, is DocumentInsert.BarcodedImage -> IMAGE_PAGE_COUNT
         }
         val (format, widthPx, heightPx) = when (insert) {
             is DocumentInsert.Pdf -> Triple(DocumentFormat.Pdf, null, null)
             is DocumentInsert.Image -> Triple(insert.format, insert.widthPx, insert.heightPx)
+            is DocumentInsert.BarcodedImage -> Triple(insert.format, insert.widthPx, insert.heightPx)
         }
+        // Non-null only for the composite arm; a plain image / PDF persists NULL barcode columns.
+        val barcodePayload = (insert as? DocumentInsert.BarcodedImage)?.barcodePayload
+        val barcodeFormat = (insert as? DocumentInsert.BarcodedImage)?.barcodeFormat
 
         rejectionKindOrNull(insert, byteCount)?.let { kind ->
             return@runIo rejectDocument(kind)
@@ -180,6 +184,8 @@ public class SqlCipherPassRepository internal constructor(
                     heightPx = heightPx,
                     thumbnailBytes = insert.thumbnailBytes,
                     nowEpochMs = clock(),
+                    barcodePayload = barcodePayload,
+                    barcodeFormat = barcodeFormat,
                 ),
             )
             // Re-read the full ordered list rather than prepending in-memory: matches the

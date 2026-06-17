@@ -25,7 +25,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.image.android.ImageDecodeBinder
+import `is`.walt.passes.document.BarcodedImageDocument
 import `is`.walt.passes.document.Document
+import `is`.walt.passes.document.DocumentId
 import `is`.walt.passes.document.DocumentTelemetryGuard
 import `is`.walt.passes.document.ImageDocument
 import `is`.walt.passes.document.PdfDocument
@@ -38,10 +40,13 @@ import `is`.walt.passes.ui.core.toComposeColor
  * dispatcher on the sealed [Document] type: it selects the surface for the concrete arm and
  * forwards the consumer's parameters. [PdfDocument] routes to [PdfDocumentView] (a swipeable
  * pager over the isolated PDF renderer); [ImageDocument] routes to [ImageDocumentView] (a
- * single, no-pager image over the isolated image-decode sandbox). The trust caption is
- * non-suppressible inside every arm — this dispatcher adds no parameter that could omit it, so
- * the [DocumentSurfaceLockTest] shape lock and [DocumentTrustSurfaceTest] visible-text lock
- * hold across the seam.
+ * single, no-pager image over the isolated image-decode sandbox); [BarcodedImageDocument]
+ * (wpass-8lu) routes to the SAME [ImageDocumentView] for its image half — the generated barcode
+ * and format switcher are composed by the consumer with `passes-ui`, so this surface stays
+ * image-only and the two UI towers remain independent. The trust caption is non-suppressible
+ * inside every arm — this dispatcher adds no parameter that could omit it, so the
+ * [DocumentSurfaceLockTest] shape lock and [DocumentTrustSurfaceTest] visible-text lock hold
+ * across the seam.
  *
  * The backend handles are kind-specific and nullable: a consumer supplies the [pdfFile] /
  * [renderer] pair for a [PdfDocument] and the [imageFile] / [imageDecoder] pair for an
@@ -73,9 +78,24 @@ public fun DocumentView(
             fullScreenAffordance = fullScreenAffordance,
         )
         is ImageDocument -> ImageDocumentView(
-            doc = doc,
+            documentId = doc.id,
             imageFile = requireNotNull(imageFile) { "DocumentView(ImageDocument) requires a non-null imageFile" },
             decoder = requireNotNull(imageDecoder) { "DocumentView(ImageDocument) requires a non-null imageDecoder" },
+            modifier = modifier,
+            telemetry = telemetry,
+        )
+        // wpass-8lu: a composite renders its IMAGE half through the same isolated image-decode
+        // surface as a plain image (same imageFile / imageDecoder pair, no new DocumentView
+        // parameter). The generated barcode + format switcher are composed by the consumer with
+        // passes-ui, keeping the two UI towers independent — this surface stays image-only.
+        is BarcodedImageDocument -> ImageDocumentView(
+            documentId = doc.id,
+            imageFile = requireNotNull(imageFile) {
+                "DocumentView(BarcodedImageDocument) requires a non-null imageFile"
+            },
+            decoder = requireNotNull(imageDecoder) {
+                "DocumentView(BarcodedImageDocument) requires a non-null imageDecoder"
+            },
             modifier = modifier,
             telemetry = telemetry,
         )
@@ -240,7 +260,7 @@ private fun PdfDocumentView(
  */
 @Composable
 private fun ImageDocumentView(
-    doc: ImageDocument,
+    documentId: DocumentId,
     imageFile: ParcelFileDescriptor,
     decoder: ImageDecodeBinder,
     modifier: Modifier = Modifier,
@@ -270,7 +290,7 @@ private fun ImageDocumentView(
                 TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1)
             }
             val state = rememberDocumentImage(
-                document = doc,
+                documentId = documentId,
                 imageFile = imageFile,
                 decoder = decoder,
                 targetSizePx = IntSize(requestWidthPx, requestHeightPx),

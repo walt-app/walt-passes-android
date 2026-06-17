@@ -1,6 +1,7 @@
 package `is`.walt.passes.storage.internal
 
 import android.content.ContentValues
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.storage.DocumentFormat
 import `is`.walt.passes.storage.DocumentRecordId
 import `is`.walt.passes.storage.DocumentRow
@@ -26,11 +27,16 @@ internal class SqlCipherDocumentStore(
         val out = ArrayList<DocumentRow>()
         db.rawQuery(
             "SELECT id, display_label, byte_count, format, page_count, width_px, height_px, " +
-                "imported_at_epoch_ms " +
+                "imported_at_epoch_ms, barcode_payload, barcode_format " +
                 "FROM ${Schema.Tables.DOCUMENTS} ORDER BY imported_at_epoch_ms DESC, id DESC",
             emptyArray(),
         ).use { c ->
             while (c.moveToNext()) {
+                // A barcode is present only when BOTH columns decode: a payload with an
+                // unrecognised format name (DB tampering only — this module is the sole writer)
+                // reads back as no barcode rather than a half-composite.
+                val payload = if (c.isNull(8)) null else c.getString(8)
+                val barcodeFormat = if (c.isNull(9)) null else c.getString(9).toScannableFormatOrNull()
                 out += DocumentRow(
                     id = DocumentRecordId(c.getLong(0)),
                     displayLabel = c.getString(1),
@@ -40,6 +46,8 @@ internal class SqlCipherDocumentStore(
                     widthPx = if (c.isNull(5)) null else c.getInt(5),
                     heightPx = if (c.isNull(6)) null else c.getInt(6),
                     importedAtEpochMs = c.getLong(7),
+                    barcodePayload = if (barcodeFormat == null) null else payload,
+                    barcodeFormat = if (payload == null) null else barcodeFormat,
                 )
             }
         }
@@ -59,6 +67,16 @@ internal class SqlCipherDocumentStore(
                 if (request.widthPx == null) putNull("width_px") else put("width_px", request.widthPx)
                 if (request.heightPx == null) putNull("height_px") else put("height_px", request.heightPx)
                 put("imported_at_epoch_ms", request.nowEpochMs)
+                if (request.barcodePayload == null) {
+                    putNull("barcode_payload")
+                } else {
+                    put("barcode_payload", request.barcodePayload)
+                }
+                if (request.barcodeFormat == null) {
+                    putNull("barcode_format")
+                } else {
+                    put("barcode_format", request.barcodeFormat.name)
+                }
             }
             val rowId = db.insertOrThrow(Schema.Tables.DOCUMENTS, null, docCv)
             val thumbCv = ContentValues().apply {
@@ -79,6 +97,8 @@ internal class SqlCipherDocumentStore(
                     widthPx = request.widthPx,
                     heightPx = request.heightPx,
                     importedAtEpochMs = request.nowEpochMs,
+                    barcodePayload = request.barcodePayload,
+                    barcodeFormat = request.barcodeFormat,
                 ),
             )
         } finally {
@@ -149,3 +169,12 @@ private fun String.toDocumentFormat(): DocumentFormat = when (this) {
     "webp" -> DocumentFormat.WebP
     else -> DocumentFormat.Pdf
 }
+
+/**
+ * The on-disk vocabulary for the `barcode_format` column: the [ScannableFormat] name, matching
+ * `scannable_cards.format` (`SqlCipherScannableCardStore`). An unrecognised value (only possible
+ * from out-of-band DB tampering) decodes to `null`, which the row mapper treats as "no barcode"
+ * rather than throwing on a list query.
+ */
+private fun String.toScannableFormatOrNull(): ScannableFormat? =
+    ScannableFormat.entries.firstOrNull { it.name == this }

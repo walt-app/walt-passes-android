@@ -1,5 +1,6 @@
 package `is`.walt.passes.storage.internal
 
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.storage.DocumentFormat
 import `is`.walt.passes.storage.DocumentRecordId
 import `is`.walt.passes.storage.DocumentRow
@@ -39,6 +40,9 @@ internal interface DocumentStore {
  * an image, a single page), and [widthPx] / [heightPx] carry the image dimensions (or `null`
  * for a PDF). [bytes] is the original document bytes; the store writes them to the reused
  * `pdf_bytes` BLOB column verbatim.
+ *
+ * [barcodePayload] / [barcodeFormat] are non-null only for a composite artifact (wpass-8lu) — an
+ * image row that also carries an extracted barcode — and `null` for PDF and plain image rows.
  */
 internal data class DocumentInsertRequest(
     val displayLabel: String,
@@ -49,6 +53,8 @@ internal data class DocumentInsertRequest(
     val heightPx: Int?,
     val thumbnailBytes: ByteArray,
     val nowEpochMs: Long,
+    val barcodePayload: String? = null,
+    val barcodeFormat: ScannableFormat? = null,
 )
 
 internal data class DocumentInsertOutcome(

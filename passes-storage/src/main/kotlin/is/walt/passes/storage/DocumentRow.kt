@@ -1,5 +1,7 @@
 package `is`.walt.passes.storage
 
+import `is`.walt.passes.core.ScannableFormat
+
 /**
  * Defensive caps `passes-storage` re-checks before inserting a document row. The
  * authoritative source for size and page count is ADR 0005 D7; the renderer-service in
@@ -81,6 +83,25 @@ public sealed interface DocumentInsert {
         public val widthPx: Int,
         public val heightPx: Int,
     ) : DocumentInsert
+
+    /**
+     * A composite artifact (wpass-8lu): a still image plus a barcode extracted from it, persisted
+     * as ONE row. The image half is identical to [Image] — [format] is one of the image arms of
+     * [DocumentFormat], [widthPx] / [heightPx] are the sandbox raster dimensions. The barcode
+     * half is [barcodePayload] (the decoded symbol contents) plus [barcodeFormat] (the symbology
+     * it was detected as). Passing [DocumentFormat.Pdf] as [format] is a caller bug; a composite
+     * is always image-backed.
+     */
+    public data class BarcodedImage(
+        public override val label: String,
+        public override val bytes: ByteArray,
+        public override val thumbnailBytes: ByteArray,
+        public val format: DocumentFormat,
+        public val widthPx: Int,
+        public val heightPx: Int,
+        public val barcodePayload: String,
+        public val barcodeFormat: ScannableFormat,
+    ) : DocumentInsert
 }
 
 /**
@@ -94,6 +115,12 @@ public sealed interface DocumentInsert {
  * the image formats use [widthPx] / [heightPx]. The fields not relevant to a row's kind are
  * the column defaults — [pageCount] is `1` for image rows (an image is a single page),
  * [widthPx] / [heightPx] are `null` for PDF rows.
+ *
+ * [barcodePayload] / [barcodeFormat] are non-null ONLY for a composite artifact (wpass-8lu) —
+ * an image row that also carries a barcode extracted from it. A consumer rebuilds a
+ * `BarcodedImageDocument` when both are present and an `ImageDocument` otherwise; they are
+ * always `null` for PDF rows and for plain image rows. The pair is the composite discriminator
+ * on top of the image [format] (the barcode does not change the container format).
  */
 public data class DocumentRow(
     public val id: DocumentRecordId,
@@ -104,4 +131,6 @@ public data class DocumentRow(
     public val widthPx: Int?,
     public val heightPx: Int?,
     public val importedAtEpochMs: Long,
+    public val barcodePayload: String? = null,
+    public val barcodeFormat: ScannableFormat? = null,
 )

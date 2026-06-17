@@ -402,6 +402,55 @@ class DocumentRepositoryTest {
     }
 
     @Test
+    fun insertBarcodedImagePersistsImageFieldsAndBarcodePayloadAndFormat() = runTest {
+        val docs = FakeDocumentStore()
+        val repo = repo(docs, RecordingGuard())
+
+        val image = ByteArray(2048) { 0x55 }
+        val result = repo.insertDocument(
+            DocumentInsert.BarcodedImage(
+                label = "membership.png",
+                bytes = image,
+                thumbnailBytes = ByteArray(64) { 0x22 },
+                format = DocumentFormat.Png,
+                widthPx = 600,
+                heightPx = 400,
+                barcodePayload = "MEMBER-99887",
+                barcodeFormat = ScannableFormat.Code128,
+            ),
+        )
+
+        check(result is StorageResult.Success)
+        val row = repo.observeDocuments().first().single()
+        // The barcode is carried on the SAME row as the image — one artifact, one wallet entry.
+        assertThat(row.format).isEqualTo(DocumentFormat.Png)
+        assertThat(row.widthPx).isEqualTo(600)
+        assertThat(row.heightPx).isEqualTo(400)
+        assertThat(row.pageCount).isEqualTo(1)
+        assertThat(row.barcodePayload).isEqualTo("MEMBER-99887")
+        assertThat(row.barcodeFormat).isEqualTo(ScannableFormat.Code128)
+    }
+
+    @Test
+    fun insertPlainImageLeavesBarcodeFieldsNull() = runTest {
+        val docs = FakeDocumentStore()
+        val repo = repo(docs, RecordingGuard())
+        repo.insertDocument(
+            DocumentInsert.Image(
+                label = "plain.png",
+                bytes = ByteArray(32),
+                thumbnailBytes = ByteArray(8),
+                format = DocumentFormat.Png,
+                widthPx = 10,
+                heightPx = 10,
+            ),
+        )
+        val row = repo.observeDocuments().first().single()
+        assertThat(row.barcodePayload).isNull()
+        assertThat(row.barcodeFormat).isNull()
+    }
+
+    @Test
     fun insertImageDocumentStillEnforcesTheByteCap() = runTest {
         val repo = repo(FakeDocumentStore(), RecordingGuard())
         val rejected = repo.insertDocument(
@@ -489,6 +538,8 @@ class DocumentRepositoryTest {
                 widthPx = request.widthPx,
                 heightPx = request.heightPx,
                 importedAtEpochMs = request.nowEpochMs,
+                barcodePayload = request.barcodePayload,
+                barcodeFormat = request.barcodeFormat,
             )
             entries[id.value] = Entry(row, request.bytes.copyOf(), request.thumbnailBytes.copyOf())
             return DocumentInsertOutcome(id = id, row = row)

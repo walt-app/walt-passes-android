@@ -16,8 +16,8 @@ import androidx.compose.ui.unit.IntSize
 import `is`.walt.passes.image.android.ImageDecodeBinder
 import `is`.walt.passes.image.android.ImageDecodeRejectedKind
 import `is`.walt.passes.image.android.ImageDecodeResult
+import `is`.walt.passes.document.DocumentId
 import `is`.walt.passes.document.DocumentTelemetryGuard
-import `is`.walt.passes.document.ImageDocument
 import `is`.walt.passes.document.ui.internal.decodeImage
 import `is`.walt.passes.document.ui.internal.discardImageResult
 import kotlinx.coroutines.NonCancellable
@@ -57,10 +57,16 @@ public sealed interface DocumentImageState {
  *
  * [imageFile] is the ORIGINAL image bytes opened by the caller; it is owned by the caller and
  * must remain open while the composable is composed. Close after composition ends.
+ *
+ * [documentId] is used only as the produceState restart key (so a different document re-decodes);
+ * it is the [DocumentId] supertype, not a concrete arm, so the same facade renders the image of an
+ * [ImageDocument][`is`.walt.passes.document.ImageDocument] and the image half of a
+ * [BarcodedImageDocument][`is`.walt.passes.document.BarcodedImageDocument] (wpass-8lu) — the
+ * barcode half is rendered by the consumer with `passes-ui`, never here.
  */
 @Composable
 public fun rememberDocumentImage(
-    document: ImageDocument,
+    documentId: DocumentId,
     imageFile: ParcelFileDescriptor,
     decoder: ImageDecodeBinder,
     targetSizePx: IntSize,
@@ -70,7 +76,7 @@ public fun rememberDocumentImage(
     val heightPx = targetSizePx.height.coerceAtLeast(1)
     val state: State<DocumentImageState> = produceState<DocumentImageState>(
         initialValue = DocumentImageState.Loading,
-        document.id,
+        documentId,
         widthPx,
         heightPx,
         decoder,
