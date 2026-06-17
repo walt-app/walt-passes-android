@@ -1,7 +1,7 @@
 package `is`.walt.passes.pdf.android
 
 import com.google.common.truth.Truth.assertThat
-import `is`.walt.passes.pdf.DocumentRejectedKind
+import `is`.walt.passes.document.DocumentRejectedKind
 import org.junit.Test
 
 /**
@@ -9,13 +9,13 @@ import org.junit.Test
  *
  * The wire format used to be `kind.ordinal`. That left every consumer of this binder
  * (eventually walt-android, post-`wlt-4pg`) coupled to the source-order of the enum: a
- * benign-looking refactor in `passes-pdf-core` that reorders or inserts an arm would
+ * benign-looking refactor in `passes-document-core` that reorders or inserts an arm would
  * have shifted every code on the wire and silently mis-decoded rejections. Today the
  * proxy and client live in the same process from the same build, so the on-the-wire
  * fragility is latent rather than active — but the kernel-vs-consumer coupling is real,
  * and this test is the structural gate that keeps the mapping honest.
  *
- * Allowlist by explicit pair (mirrors `PublicApiSurfaceTest` in `passes-pdf-core`): the
+ * Allowlist by explicit pair (mirrors `PublicApiSurfaceTest` in `passes-document-core`): the
  * exhaustive `when` in [RejectedKindWire.encode] ensures every enum arm has a code, and
  * this test ensures the codes are the documented ones. Adding an arm requires touching
  * the enum, the mapping table, and this test in lockstep.

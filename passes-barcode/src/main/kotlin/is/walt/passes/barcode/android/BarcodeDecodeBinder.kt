@@ -28,7 +28,7 @@ import `is`.walt.passes.core.BarcodeDecodeResult
  * service owns and closes its received copy.
  *
  * `internal`, not `public`: unlike `passes-pdf`'s `PdfRendererBinder` (consumed by
- * `passes-pdf-ui`), nothing outside `:passes-barcode` references this — [BarcodeImageDecoder]
+ * `passes-document-ui`), nothing outside `:passes-barcode` references this — [BarcodeImageDecoder]
  * is the only intended entry point and never exposes the binder. Keeping it module-private
  * narrows the maintained/trust surface and removes a second place to hang an extraction
  * passthrough. [BarcodeDecodeBinderSurfaceTest] (same module) still locks the surface.

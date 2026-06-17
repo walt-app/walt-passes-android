@@ -13,7 +13,7 @@ import org.junit.Test
  * before review.
  *
  * Allowlist over denylist for the same reason as
- * `passes-pdf-core`'s `DocumentTelemetryGuardSurfaceTest`: a denylist test
+ * `passes-document-core`'s `DocumentTelemetryGuardSurfaceTest`: a denylist test
  * ("no method named getText") leaks past synonyms (`extractText`, `text`,
  * `documentText`) that the renderer service might still serve. Allowlisting the
  * exactly-two-methods-by-name closes the gap structurally.

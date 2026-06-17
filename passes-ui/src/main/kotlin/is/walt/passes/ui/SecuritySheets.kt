@@ -442,5 +442,5 @@ private fun provenanceAnnotated(
     }
 }
 
-// `isolated()`, `FSI`, and `PDI` moved to `passes-ui-core` so `passes-pdf-ui` can use the
+// `isolated()`, `FSI`, and `PDI` moved to `passes-ui-core` so `passes-document-ui` can use the
 // same bidi fence without depending on `passes-ui` (wpass-r4z). Imported above.

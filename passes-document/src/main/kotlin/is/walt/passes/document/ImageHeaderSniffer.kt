@@ -4,7 +4,7 @@ package `is`.walt.passes.document
  * Header-sniff for the three accepted image formats. Returns the detected [ImageFormat], or
  * `null` if the byte sequence matches no supported magic. Salvaged from PR #146's
  * `passes-image-core` sniffer and re-homed in the importer module; the sibling
- * [isPdfHeader][`is`.walt.passes.pdf.isPdfHeader] gate (in `passes-pdf-core`) is the PDF half
+ * [isPdfHeader][`is`.walt.passes.document.isPdfHeader] gate (in `passes-document-core`) is the PDF half
  * of the same branch.
  *
  * Each format is identified by its leading magic bytes:

@@ -7,12 +7,12 @@ import android.os.SharedMemory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
-import `is`.walt.passes.pdf.DocumentImportFailedEvent
-import `is`.walt.passes.pdf.DocumentImportSucceededEvent
-import `is`.walt.passes.pdf.DocumentRejectedKind
-import `is`.walt.passes.pdf.DocumentTelemetryGuard
-import `is`.walt.passes.pdf.PdfImportConfig
-import `is`.walt.passes.pdf.PdfImportResult
+import `is`.walt.passes.document.DocumentImportFailedEvent
+import `is`.walt.passes.document.DocumentImportSucceededEvent
+import `is`.walt.passes.document.DocumentRejectedKind
+import `is`.walt.passes.document.DocumentTelemetryGuard
+import `is`.walt.passes.document.PdfImportConfig
+import `is`.walt.passes.document.PdfImportResult
 import `is`.walt.passes.pdf.android.internal.ThumbnailEncoder
 import `is`.walt.passes.isolation.ConnectResult
 import `is`.walt.passes.isolation.IsolatedWorkerSession
@@ -583,7 +583,7 @@ class PdfImporterTest {
             events += "failed:${event.outcome.name}"
         }
 
-        override fun onConsumerRenderFailed(reason: `is`.walt.passes.pdf.ConsumerRenderFailure) = Unit
+        override fun onConsumerRenderFailed(reason: `is`.walt.passes.document.ConsumerRenderFailure) = Unit
     }
 
     private data class PersistArgs(

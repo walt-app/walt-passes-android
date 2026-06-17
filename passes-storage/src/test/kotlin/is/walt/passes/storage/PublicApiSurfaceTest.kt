@@ -510,7 +510,7 @@ class PublicApiSurfaceTest {
 
     @Test
     fun documentBoundsMirrorAdr0005D7CapsAndCarryALabelLengthCap() {
-        // The `passes-pdf-core` renderer-service enforces MAX_BYTES and MAX_PAGES.
+        // The `passes-document-core` renderer-service enforces MAX_BYTES and MAX_PAGES.
         // Storage carries them again so a future caller bug cannot land an oversized
         // row. MAX_LABEL_CHARS is enforced only at this layer; nothing upstream bounds
         // the consumer-supplied display label, so a multi-MB string would inflate the

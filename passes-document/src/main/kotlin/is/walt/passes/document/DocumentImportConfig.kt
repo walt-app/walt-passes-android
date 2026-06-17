@@ -1,6 +1,5 @@
 package `is`.walt.passes.document
 
-import `is`.walt.passes.pdf.PdfImportConfig
 
 /**
  * Configuration for [DocumentImporter]. Bundles the shared sniff-stage byte cap, the PDF
@@ -16,7 +15,7 @@ import `is`.walt.passes.pdf.PdfImportConfig
  * [maxImageDecodePx] is the per-side bound the image arm asks the sandbox to decode within
  * (aspect-preserving, never upscaled, and additionally capped by the sandbox's own 4 MP
  * output ceiling). The returned bounded raster is what becomes the [ImageDocument][`is`.walt
- * .passes.pdf.ImageDocument] dimensions and the persisted display thumbnail.
+ * .passes.document.ImageDocument] dimensions and the persisted display thumbnail.
  */
 public data class DocumentImportConfig(
     public val maxBytes: Long = PdfImportConfig.DEFAULT_MAX_BYTES,

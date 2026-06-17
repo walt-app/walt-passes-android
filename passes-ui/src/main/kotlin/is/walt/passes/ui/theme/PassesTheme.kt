@@ -47,7 +47,7 @@ public val LocalPassesSemantics: ProvidableCompositionLocal<PassesSemantics> =
 /**
  * Re-export of `passes-ui-core::ArgbColor` under the historical
  * `is.walt.passes.ui.theme.ArgbColor` import path. The value class itself moved to
- * `passes-ui-core` (wpass-r4z) so `passes-pdf-ui::DocumentSemantics` could share the
+ * `passes-ui-core` (wpass-r4z) so `passes-document-ui::DocumentSemantics` could share the
  * type without depending on `passes-ui`. The typealias keeps existing consumer
  * imports compiling — `import is.walt.passes.ui.theme.ArgbColor` continues to
  * resolve to the same value class.

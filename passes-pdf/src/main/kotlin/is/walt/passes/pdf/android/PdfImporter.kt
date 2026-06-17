@@ -1,8 +1,8 @@
 package `is`.walt.passes.pdf.android
 
 import android.content.Context
-import `is`.walt.passes.pdf.PdfImportConfig
-import `is`.walt.passes.pdf.PdfImportResult
+import `is`.walt.passes.document.PdfImportConfig
+import `is`.walt.passes.document.PdfImportResult
 
 /**
  * The single import entry point that ADR 0005 G.1 calls for. Owns the trust-claim-bearing
@@ -30,7 +30,7 @@ import `is`.walt.passes.pdf.PdfImportResult
 public interface PdfImporter {
     /**
      * Run the import sequence end-to-end. Returns [PdfImportResult.Imported] on success,
-     * or [PdfImportResult.Rejected] folded onto the [is.walt.passes.pdf.DocumentRejectedKind]
+     * or [PdfImportResult.Rejected] folded onto the [is.walt.passes.document.DocumentRejectedKind]
      * enum at the first failing step. The renderer service is unbound before this method
      * returns regardless of outcome.
      *
@@ -38,8 +38,8 @@ public interface PdfImporter {
      * succeeds and before the [PdfImportResult.Imported] arm is constructed. It is never
      * invoked on a rejection. If [persist] throws (other than `CancellationException`,
      * which is rethrown to preserve structured concurrency), the import returns
-     * [is.walt.passes.pdf.DocumentRejectedKind.StorageHandoffFailed] — distinct from
-     * the renderer's own [is.walt.passes.pdf.DocumentRejectedKind.RendererFailed] so
+     * [is.walt.passes.document.DocumentRejectedKind.StorageHandoffFailed] — distinct from
+     * the renderer's own [is.walt.passes.document.DocumentRejectedKind.RendererFailed] so
      * telemetry can separate "PDFium choked on this file" from "the consumer's storage
      * layer blew up." Telemetry fires `onImportFailed`.
      *

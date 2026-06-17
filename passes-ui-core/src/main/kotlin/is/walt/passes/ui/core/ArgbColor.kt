@@ -8,7 +8,7 @@ import androidx.compose.ui.graphics.Color
  * express transparency that pass.json's RGB triplet cannot.
  *
  * Lives in `passes-ui-core` so both `passes-ui` (PKPASS theme tokens) and
- * `passes-pdf-ui` (document theme tokens) can share the same ARGB shape without
+ * `passes-document-ui` (document theme tokens) can share the same ARGB shape without
  * either module depending on the other. The kdoc on the surface modules' theme
  * data classes describes how each slot is consumed.
  *

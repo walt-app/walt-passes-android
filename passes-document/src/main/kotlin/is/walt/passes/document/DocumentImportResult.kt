@@ -1,9 +1,6 @@
 package `is`.walt.passes.document
 
 import `is`.walt.passes.image.android.ImageDecodeRejectedKind
-import `is`.walt.passes.pdf.DocumentRejectedKind
-import `is`.walt.passes.pdf.ImageDocument
-import `is`.walt.passes.pdf.PdfDocument
 
 /**
  * The outcome of [DocumentImporter.import]. Sealed so the consumer gets compile-time
@@ -11,7 +8,7 @@ import `is`.walt.passes.pdf.PdfDocument
  *
  * The two reject arms REUSE each backend's existing taxonomy verbatim rather than flattening
  * them into one enum (the design decision wpass-bsf calls out): [PdfRejected] carries
- * `passes-pdf-core`'s [DocumentRejectedKind]; [ImageRejected] carries `passes-image`'s
+ * `passes-document-core`'s [DocumentRejectedKind]; [ImageRejected] carries `passes-image`'s
  * [ImageDecodeRejectedKind]. Folding them together would force every consumer to branch on
  * arms that cannot occur for a given kind (a PDF is never `DimensionsTooLarge`; an image is
  * never `Encrypted`). The importer-facing reject types therefore live nowhere new — there is
