@@ -54,7 +54,12 @@ internal class DefaultDocumentImporter(
     private val config: DocumentImportConfig,
     private val pdfImport: suspend (ByteArray, String, PdfPersist) -> PdfImportResult,
     private val imageDecode: suspend (ByteArray, Int) -> ImageDecodeOutcome,
+    // Monotonic clock for telemetry durations only. Must NOT be used for importedAt: the
+    // [wallClock] below supplies wall time for the persisted record.
     private val now: () -> Long,
+    // Wall clock for the stamped importedAt. Seam-injected so a test can pin it; `now` cannot
+    // serve here because it is monotonic (elapsedRealtime), not epoch time.
+    private val wallClock: () -> Long,
     private val idGenerator: () -> String,
 ) : DocumentImporter {
 
@@ -152,7 +157,7 @@ internal class DefaultDocumentImporter(
             byteCount = bytes.size.toLong(),
             widthPx = decoded.widthPx,
             heightPx = decoded.heightPx,
-            importedAtEpochMs = System.currentTimeMillis(),
+            importedAtEpochMs = wallClock(),
         )
         guard.onImportSucceeded(
             ImageImportSucceededEvent(
@@ -265,6 +270,7 @@ internal class DefaultDocumentImporter(
                     }
                 },
                 now = { SystemClock.elapsedRealtime() },
+                wallClock = { System.currentTimeMillis() },
                 idGenerator = { UUID.randomUUID().toString() },
             )
         }
