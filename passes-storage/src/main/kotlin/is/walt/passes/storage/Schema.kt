@@ -14,7 +14,7 @@ package `is`.walt.passes.storage
 public object Schema {
     public const val DATABASE_NAME: String = "walt_passes.db"
 
-    public const val VERSION: Int = 6
+    public const val VERSION: Int = 7
 
     public object Tables {
         public const val SCHEMA_META: String = "schema_meta"
@@ -165,6 +165,25 @@ public object Schema {
     )
 
     /**
+     * v6 -> v7 migration. Adds the composite-artifact columns (wpass-8lu): a barcode extracted
+     * from an imported image, carried on the same `documents` row as the image it came from so
+     * the composite stays ONE artifact / ONE row.
+     *
+     *  - `barcode_payload` — the verbatim decoded symbol contents.
+     *  - `barcode_format` — the [ScannableFormat][`is`.walt.passes.core.ScannableFormat] name
+     *    the code was detected as (stored as the name, matching `scannable_cards.format`).
+     *
+     * Both nullable: NULL for every existing row (PDF or plain image) and for any future image
+     * with no detected barcode. A row is a composite iff BOTH are non-null; the `format` column
+     * stays the image container format ('png' / 'jpeg' / 'webp'), so a composite reads back as an
+     * image row that additionally carries a barcode. Pure additive ALTERs; no row can fail.
+     */
+    private val V6_TO_V7_ADD_BARCODE: List<String> = listOf(
+        "ALTER TABLE documents ADD COLUMN barcode_payload TEXT",
+        "ALTER TABLE documents ADD COLUMN barcode_format TEXT",
+    )
+
+    /**
      * The DDL block that brings a fresh database to [VERSION]. Statements are listed in
      * dependency order (parent tables before child tables); they are executed in a single
      * transaction by the implementation.
@@ -220,7 +239,8 @@ public object Schema {
             PRIMARY KEY (pass_id, locale_tag)
         )
         """.trimIndent(),
-    ) + V2_DOCUMENT_TABLES + V4_SCANNABLE_CARD_TABLES + V5_TO_V6_ADD_DOCUMENT_FORMAT
+    ) + V2_DOCUMENT_TABLES + V4_SCANNABLE_CARD_TABLES + V5_TO_V6_ADD_DOCUMENT_FORMAT +
+        V6_TO_V7_ADD_BARCODE
 
     /**
      * Schema migrations, keyed by `fromVersion`. Forward-only per ADR 0002. Each entry's
@@ -246,6 +266,10 @@ public object Schema {
      * v5 -> v6 generalizes `documents` from PDF-only to PDF + image (ADR 0005, amended for
      * wpass-i9x): adds the `format` discriminator and nullable `width_px` / `height_px`.
      * Pure additive; existing rows default to `format = 'pdf'`.
+     *
+     * v6 -> v7 adds the composite-artifact columns `barcode_payload` / `barcode_format`
+     * (wpass-8lu): a barcode extracted from an imported image, carried on the same row. Pure
+     * additive; existing rows read back NULL (no barcode).
      */
     public val MIGRATIONS: Map<Int, List<String>> = mapOf(
         1 to V2_DOCUMENT_TABLES,
@@ -253,5 +277,6 @@ public object Schema {
         3 to V3_TO_V4_DROP_COLOR_COLUMN,
         4 to V4_TO_V5_ADD_USER_LABEL,
         5 to V5_TO_V6_ADD_DOCUMENT_FORMAT,
+        6 to V6_TO_V7_ADD_BARCODE,
     )
 }

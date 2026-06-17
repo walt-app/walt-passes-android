@@ -29,6 +29,17 @@ public sealed interface DocumentImportResult {
 
     public data class ImportedImage(public val doc: ImageDocument) : DocumentImportResult
 
+    /**
+     * A composite artifact was imported (wpass-8lu): an image whose isolated barcode extraction
+     * found a code AND (when a `confirmBarcode` hook is supplied) the consumer confirmed it. The
+     * [doc]'s `barcodePayload` is the value the consumer already saw in its confirm step. An
+     * image with no detected barcode, a failed/rejected extraction, or a declined confirmation
+     * lands on [ImportedImage] instead — the composite arm exists only for a live, kept barcode.
+     */
+    public data class ImportedBarcodedImage(
+        public val doc: BarcodedImageDocument,
+    ) : DocumentImportResult
+
     public data class PdfRejected(public val kind: DocumentRejectedKind) : DocumentImportResult
 
     public data class ImageRejected(public val kind: ImageDecodeRejectedKind) : DocumentImportResult

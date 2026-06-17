@@ -6,6 +6,10 @@ import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
 import android.os.SystemClock
+import `is`.walt.passes.barcode.android.BarcodeImageDecoder
+import `is`.walt.passes.barcode.android.BarcodeImageSource
+import `is`.walt.passes.core.BarcodeDecodeResult
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.image.android.BoundedImageDecoder
 import `is`.walt.passes.image.android.ImageDecodeRejectedKind
 import `is`.walt.passes.image.android.ImageDecodeResult
@@ -45,10 +49,19 @@ internal typealias PdfPersist = suspend (String, ByteArray, Int, ByteArray) -> U
  * [DocumentRejectedKind.StorageHandoffFailed] is translated to it so a persist failure reads
  * the same regardless of document kind.
  */
+// LongParameterList: every parameter is an injected seam (three isolated-backend seams plus the
+// two clocks and the id generator) so the orchestration is unit-tested without a live binder.
+// Bundling them into a holder would only relocate the list and obscure what each seam fakes.
+@Suppress("LongParameterList")
 internal class DefaultDocumentImporter(
     private val config: DocumentImportConfig,
     private val pdfImport: suspend (ByteArray, String, PdfPersist) -> PdfImportResult,
     private val imageDecode: suspend (ByteArray, Int) -> ImageDecodeOutcome,
+    // Composite-artifact seam (wpass-8lu): runs the isolated still-image barcode decoder over the
+    // SAME once-read bytes the image decode saw, on its own memfd. Returns the pure
+    // BarcodeDecodeResult; the host never decodes the source bytes. Seam-injected so the
+    // orchestration is unit-tested without a live binder.
+    private val barcodeExtract: suspend (ByteArray) -> BarcodeDecodeResult,
     // Monotonic clock for telemetry durations only. Must NOT be used for importedAt: the
     // [wallClock] below supplies wall time for the persisted record.
     private val now: () -> Long,
@@ -61,6 +74,7 @@ internal class DefaultDocumentImporter(
     override suspend fun import(
         source: DocumentImportSource,
         displayLabel: String,
+        confirmBarcode: (suspend (payload: String, format: ScannableFormat) -> Boolean)?,
         persist: suspend (DocumentPersist) -> Unit,
     ): DocumentImportResult {
         val bytes = readBounded(source) ?: return DocumentImportResult.Unrecognized
@@ -69,7 +83,7 @@ internal class DefaultDocumentImporter(
             else -> {
                 val format = sniffImageFormat(bytes)
                 if (format != null) {
-                    importImage(bytes, format, displayLabel, persist)
+                    importImage(bytes, format, displayLabel, persist, confirmBarcode)
                 } else {
                     DocumentImportResult.Unrecognized
                 }
@@ -112,6 +126,7 @@ internal class DefaultDocumentImporter(
         format: ImageFormat,
         displayLabel: String,
         persist: suspend (DocumentPersist) -> Unit,
+        confirmBarcode: (suspend (String, ScannableFormat) -> Boolean)?,
     ): DocumentImportResult {
         val startedAt = now()
         val guard = config.imageTelemetryGuard
@@ -127,17 +142,15 @@ internal class DefaultDocumentImporter(
             is ImageDecodeOutcome.Decoded -> outcome
         }
 
+        // Composite path (wpass-8lu): extract a barcode from the same bytes in the isolated
+        // decoder. A found+confirmed code makes this a composite; anything else (no code,
+        // extraction failure, declined confirmation) degrades to a plain image — extraction never
+        // fails the import. Resolved BEFORE persist so nothing is stored until the consumer's
+        // confirm step has run ("before the code becomes usable").
+        val barcode = extractConfirmedBarcode(bytes, confirmBarcode)
+
         runCatching {
-            persist(
-                DocumentPersist.Image(
-                    label = displayLabel,
-                    bytes = bytes,
-                    thumbnailBytes = decoded.thumbnailBytes,
-                    format = format,
-                    widthPx = decoded.widthPx,
-                    heightPx = decoded.heightPx,
-                ),
-            )
+            persist(buildPersist(barcode, displayLabel, bytes, decoded, format))
         }.getOrElse { t ->
             if (t is CancellationException) throw t
             guard.onImportFailed(
@@ -146,25 +159,113 @@ internal class DefaultDocumentImporter(
             return DocumentImportResult.StorageHandoffFailed
         }
 
-        val doc = ImageDocument(
-            id = ImageDocumentId(idGenerator()),
-            displayLabel = displayLabel,
-            byteCount = bytes.size.toLong(),
-            widthPx = decoded.widthPx,
-            heightPx = decoded.heightPx,
-            importedAtEpochMs = wallClock(),
-        )
+        val byteCount = bytes.size.toLong()
+        // Same no-PII telemetry event for both arms: it carries only byte count / format /
+        // dimensions, never the decoded payload, so a composite import emits no barcode contents.
         guard.onImportSucceeded(
             ImageImportSucceededEvent(
-                byteCount = doc.byteCount,
+                byteCount = byteCount,
                 format = format,
-                widthPx = doc.widthPx,
-                heightPx = doc.heightPx,
+                widthPx = decoded.widthPx,
+                heightPx = decoded.heightPx,
                 durationMillis = now() - startedAt,
             ),
         )
-        return DocumentImportResult.ImportedImage(doc)
+        return buildImportedResult(barcode, displayLabel, byteCount, decoded)
     }
+
+    private fun buildImportedResult(
+        barcode: DecodedBarcode?,
+        displayLabel: String,
+        byteCount: Long,
+        decoded: ImageDecodeOutcome.Decoded,
+    ): DocumentImportResult {
+        val importedAt = wallClock()
+        return if (barcode != null) {
+            DocumentImportResult.ImportedBarcodedImage(
+                BarcodedImageDocument(
+                    id = BarcodedImageDocumentId(idGenerator()),
+                    displayLabel = displayLabel,
+                    byteCount = byteCount,
+                    widthPx = decoded.widthPx,
+                    heightPx = decoded.heightPx,
+                    barcodePayload = barcode.payload,
+                    barcodeFormat = barcode.format,
+                    importedAtEpochMs = importedAt,
+                ),
+            )
+        } else {
+            DocumentImportResult.ImportedImage(
+                ImageDocument(
+                    id = ImageDocumentId(idGenerator()),
+                    displayLabel = displayLabel,
+                    byteCount = byteCount,
+                    widthPx = decoded.widthPx,
+                    heightPx = decoded.heightPx,
+                    importedAtEpochMs = importedAt,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Opts into and runs the isolated barcode extraction plus the consumer's confirm gate. When
+     * [confirmBarcode] is `null` the caller has not opted into composites: extraction does NOT run
+     * (no isolated barcode-decode cost) and the result is always a plain image. Otherwise returns
+     * the `(payload, format)` to persist as a composite, or `null` to degrade to a plain image —
+     * for no detected code, an extraction failure, OR a declined/failed confirmation. A
+     * `CancellationException` from the confirm hook propagates (structured concurrency); any
+     * other throw is swallowed to a declined confirmation so a confirm-UI bug cannot fail the
+     * whole import.
+     */
+    // ReturnCount: three guard-style early exits (not-opted-in, no code, declined) each read as a
+    // distinct reason to stay a plain image; collapsing them behind one expression would obscure
+    // which condition degraded the artifact. Same precedent as importImage above.
+    @Suppress("ReturnCount")
+    private suspend fun extractConfirmedBarcode(
+        bytes: ByteArray,
+        confirmBarcode: (suspend (String, ScannableFormat) -> Boolean)?,
+    ): DecodedBarcode? {
+        if (confirmBarcode == null) return null
+        val decoded = barcodeExtract(bytes) as? BarcodeDecodeResult.DecodedBarcode ?: return null
+        val confirmed = try {
+            confirmBarcode(decoded.payload, decoded.format)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            false
+        }
+        return if (confirmed) DecodedBarcode(decoded.payload, decoded.format) else null
+    }
+
+    private fun buildPersist(
+        barcode: DecodedBarcode?,
+        displayLabel: String,
+        bytes: ByteArray,
+        decoded: ImageDecodeOutcome.Decoded,
+        format: ImageFormat,
+    ): DocumentPersist =
+        if (barcode != null) {
+            DocumentPersist.BarcodedImage(
+                label = displayLabel,
+                bytes = bytes,
+                thumbnailBytes = decoded.thumbnailBytes,
+                format = format,
+                widthPx = decoded.widthPx,
+                heightPx = decoded.heightPx,
+                barcodePayload = barcode.payload,
+                barcodeFormat = barcode.format,
+            )
+        } else {
+            DocumentPersist.Image(
+                label = displayLabel,
+                bytes = bytes,
+                thumbnailBytes = decoded.thumbnailBytes,
+                format = format,
+                widthPx = decoded.widthPx,
+                heightPx = decoded.heightPx,
+            )
+        }
 
     private fun readBounded(source: DocumentImportSource): ByteArray? {
         val stream = openSource(source) ?: return null
@@ -225,6 +326,16 @@ internal class DefaultDocumentImporter(
         data class Rejected(val kind: ImageDecodeRejectedKind) : ImageDecodeOutcome
     }
 
+    /**
+     * A confirmed barcode to persist as a composite — the pure `(payload, format)` distilled from
+     * the isolated [BarcodeDecodeResult] once the consumer's confirm gate passed. Internal so the
+     * importer never threads a raw [BarcodeDecodeResult] (with its reject arms) past the seam.
+     */
+    internal data class DecodedBarcode(
+        val payload: String,
+        val format: ScannableFormat,
+    )
+
     internal companion object {
         // Read buffer for the bounded materialization loop. 64 KiB matches the
         // InputStream.copyTo default and keeps the read syscall count low.
@@ -243,6 +354,7 @@ internal class DefaultDocumentImporter(
             val pfdFactory = MemfdPfdFactory(MEMFD_DEBUG_NAME)
             val pdfImporter = PdfImporter.create(appContext, config.pdfConfig)
             val imageDecoder = BoundedImageDecoder.create(appContext)
+            val barcodeDecoder = BarcodeImageDecoder.create(appContext)
             return DefaultDocumentImporter(
                 config = config,
                 pdfImport = { bytes, label, persist ->
@@ -260,6 +372,16 @@ internal class DefaultDocumentImporter(
                             is ImageDecodeResult.Rejected -> ImageDecodeOutcome.Rejected(r.kind)
                             is ImageDecodeResult.Ok -> encodeRasterToThumbnail(r)
                         }
+                    } finally {
+                        runCatching { pfd.close() }
+                    }
+                },
+                barcodeExtract = { bytes ->
+                    // A second memfd over the same bytes — the image-decode and barcode-extract
+                    // sandboxes each consume their own fd; the source was still read exactly once.
+                    val pfd = pfdFactory.fromBytes(bytes)
+                    try {
+                        barcodeDecoder.decode(BarcodeImageSource.FileDescriptor(pfd))
                     } finally {
                         runCatching { pfd.close() }
                     }

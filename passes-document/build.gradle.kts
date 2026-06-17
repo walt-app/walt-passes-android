@@ -27,6 +27,12 @@ dependencies {
     // PdfImporter (the PDF backend) is invoked internally; its types do not escape on the
     // public surface, so implementation, not api.
     implementation(project(":passes-pdf"))
+    // Composite-artifact extraction (wpass-8lu): the isolated still-image barcode decoder. Its
+    // BarcodeImageDecoder / BarcodeImageSource are invoked internally inside create(); only the
+    // pure BarcodeDecodeResult (from passes-core, already transitively api) is read, so the
+    // passes-barcode types do not escape the public surface — implementation, not api. This is
+    // the same sniff-and-branch role extended to a third isolated backend, not a new peer edge.
+    implementation(project(":passes-barcode"))
     // Shared memfd plumbing: the sniffed bytes are materialized once into a sealed in-RAM PFD
     // and handed to whichever backend wins, so a one-shot fd source is read exactly once
     // (no offset-corruption between the sniff read and the backend read). Internal seam.

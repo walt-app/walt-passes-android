@@ -124,10 +124,12 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun documentSealedHierarchyHasExactlyThePdfAndImageArms() {
-        // Document is the sealed supertype; both arms are assignable to it, and each id to
-        // DocumentId. Adding a third arm is a deliberate, test-breaking edit here (and a
-        // security review, since each arm is an untrusted-content surface — ADR 0005).
+    fun documentSealedHierarchyHasExactlyThePdfImageAndBarcodedImageArms() {
+        // Document is the sealed supertype; all arms are assignable to it, and each id to
+        // DocumentId. Adding a fourth arm is a deliberate, test-breaking edit here (and a
+        // security review, since each arm is an untrusted-content surface — ADR 0005). The
+        // third arm (BarcodedImageDocument, wpass-8lu) is a composite: an image plus a barcode
+        // extracted from it in the isolated decoder.
         val pdf: Document =
             PdfDocument(
                 id = PdfDocumentId("p"),
@@ -145,16 +147,29 @@ class PublicApiSurfaceTest {
                 heightPx = 1,
                 importedAtEpochMs = 0L,
             )
+        val barcodedImage: Document =
+            BarcodedImageDocument(
+                id = BarcodedImageDocumentId("b"),
+                displayLabel = "b",
+                byteCount = 0,
+                widthPx = 1,
+                heightPx = 1,
+                barcodePayload = "PAYLOAD",
+                barcodeFormat = `is`.walt.passes.core.ScannableFormat.Code128,
+                importedAtEpochMs = 0L,
+            )
         val arms =
-            listOf(pdf, image).map { doc ->
+            listOf(pdf, image, barcodedImage).map { doc ->
                 when (doc) {
                     is PdfDocument -> "pdf"
                     is ImageDocument -> "image"
+                    is BarcodedImageDocument -> "barcodedImage"
                 }
             }
-        assertThat(arms).containsExactly("pdf", "image").inOrder()
+        assertThat(arms).containsExactly("pdf", "image", "barcodedImage").inOrder()
         assertThat(pdf.id).isInstanceOf(PdfDocumentId::class.java)
         assertThat(image.id).isInstanceOf(ImageDocumentId::class.java)
+        assertThat(barcodedImage.id).isInstanceOf(BarcodedImageDocumentId::class.java)
     }
 
     @Test
