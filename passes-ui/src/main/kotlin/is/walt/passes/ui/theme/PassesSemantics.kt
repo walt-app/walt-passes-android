@@ -132,8 +132,8 @@ public data class CategoryAccentColors(
  * The trust-claim is C1 + C2 from `docs/SCANNABLE_CARD_THREAT_MODEL.md`: every
  * `ScannableCardTile` renders the non-suppressible "Created by you" caption AND is
  * visually distinct from a `PassFront`-style tile through redundant treatment (dashed
- * border + leading color band + edit icon). The redundancy is load-bearing: theming any
- * single dimension flat must not collapse the artifact-class distinction.
+ * border + leading color band + smaller corner radius). The redundancy is load-bearing:
+ * theming any single dimension flat must not collapse the artifact-class distinction.
  *
  * These slots NEVER reuse `SignatureBadgeColors`. A `ScannableCard` has no signature to
  * band; borrowing the verified palette would re-create the trust-conflation risk this
@@ -141,8 +141,12 @@ public data class CategoryAccentColors(
  * [Placeholder] only so tests and Compose previews compose without a host theme.
  *
  * [accent] colors the dashed border and the leading band. [captionBackground] /
- * [captionForeground] color the "Created by you" caption strip; [captionIconTint] tints
- * the pencil glyph next to it. Contrast (WCAG AA) is the host theme's responsibility.
+ * [captionForeground] color the "Created by you" caption strip. [captionIconTint] is
+ * currently unrendered: the caption's leading pencil glyph was removed in the wpass-v3u
+ * restyle (the caption is now text-only), so this token tints nothing in `passes-ui`
+ * today. It is retained for public-API stability (locked by `PublicApiSurfaceTest`) and
+ * parity with `DocumentSemantics.captionIconTint`, whose caption still carries an icon.
+ * Contrast (WCAG AA) is the host theme's responsibility.
  */
 public data class UnverifiedArtifactStyle(
     public val accent: ArgbColor,

@@ -197,9 +197,12 @@ private fun PdfDocumentView(
     ) {
         // Docked: the kernel renders the caption here. Hosted: the host has taken on
         // rendering the kernel-owned DocumentTrustCaption in its own surface (wpass-gv6).
-        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5.
-        if (trustCaption == TrustCaptionPlacement.Docked) {
-            DocumentTrustCaption()
+        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5. Exhaustive
+        // `when` (not an `if`) so a future placement arm cannot silently fall through to
+        // omitting the caption — the one direction a trust surface must never default to.
+        when (trustCaption) {
+            TrustCaptionPlacement.Docked -> DocumentTrustCaption()
+            TrustCaptionPlacement.Hosted -> Unit
         }
 
         // `laneBackground` paints behind the pager only — the document-surface tone the
@@ -293,9 +296,12 @@ private fun ImageDocumentView(
     ) {
         // Docked: the kernel renders the caption here. Hosted: the host has taken on
         // rendering the kernel-owned DocumentTrustCaption in its own surface (wpass-gv6).
-        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5.
-        if (trustCaption == TrustCaptionPlacement.Docked) {
-            DocumentTrustCaption()
+        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5. Exhaustive
+        // `when` (not an `if`) so a future placement arm cannot silently fall through to
+        // omitting the caption — the one direction a trust surface must never default to.
+        when (trustCaption) {
+            TrustCaptionPlacement.Docked -> DocumentTrustCaption()
+            TrustCaptionPlacement.Hosted -> Unit
         }
 
         // `laneBackground` paints behind the image only — the document-surface tone the image
