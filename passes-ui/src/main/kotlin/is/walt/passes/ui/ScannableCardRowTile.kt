@@ -42,12 +42,15 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *
  *  1. The row carries no signature dot.
  *  2. The row carries no coloured leading band styled to read as a verified-pass band.
- *  3. The detail surface ([ScannableCardScreen]) retains the bottom-docked
- *     non-suppressible [ScannableCardTrustCaption].
+ *  3. The detail surface ([ScannableCardScreen]) carries the provenance signal: by
+ *     default the bottom-docked [ScannableCardTrustCaption], or — under the audited
+ *     [TrustCaptionPlacement.HostedTypeRow] concession — the host's own "Pass type" row.
  *
- * The trust caption shifts from list-row to detail-surface only. A user who taps the row
- * to use the artifact still sees "Created by you" before scanning. This trade is explicit
- * and bounded; it is not a generalised opt-out of C2.
+ * The trust caption shifts from list-row to detail-surface; under `HostedTypeRow` the
+ * detail surface in turn carries provenance via the host's "Pass type" row (the C2 "Pass
+ * type" row concession). Either way a user who taps the row to use the artifact meets the
+ * provenance signal on the detail surface. This trade is explicit and bounded; it is not
+ * a generalised opt-out of C2.
  *
  * ## Visual shape
  *

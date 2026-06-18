@@ -21,17 +21,19 @@ import `is`.walt.passes.document.ui.theme.LocalDocumentSemantics
 import `is`.walt.passes.ui.core.toComposeColor
 
 /**
- * The non-suppressible "this is a user-supplied document" caption that anchors the
- * trust contract of the PDF surface (ADR 0005 D5 / D8): a PDF rendered by Walt is
- * never signature-verified, has no attestable origin, and is presented under a fixed
- * caption that the user cannot dismiss and the host cannot hide.
+ * The verbatim, locked "this is a user-supplied document" caption that anchors the
+ * trust contract of the document surface (ADR 0005 D5 / D8): a PDF or image rendered by
+ * Walt is never signature-verified, has no attestable origin, and is presented under a
+ * fixed caption the user cannot dismiss.
  *
- * The composable has no `enabled` parameter, no theme token that hides it, and no
- * `DocumentView` overload that skips rendering it. Mirrors `ExpiredOverlay`'s shape:
- * the trust claim is structural, not a configuration. Adding a parameter to this
- * function fails `DocumentSurfaceLockTest`; adding an overload fails the same lock
- * (which counts the largest method named `DocumentTrustCaption` and asserts the
- * exact arity).
+ * This composable's *content* is non-suppressible — its wording and layout are locked by
+ * `DocumentSurfaceLockTest`, with no `enabled` parameter, theme token, or overload to
+ * alter or skip it (the lock counts the largest method named `DocumentTrustCaption` and
+ * asserts the exact arity). *Whether* it is rendered on a detail surface is a separate
+ * question governed by `DocumentView`'s `TrustCaptionPlacement`: docked by default,
+ * omitted only under the audited `HostedTypeRow` D5.T concession (the host then carries
+ * provenance via its own "Pass type" row). Mirrors `ExpiredOverlay`'s shape: the trust
+ * claim is structural, not a per-call configuration.
  *
  * Layout is a flat [Row] of an info-outline icon followed by the caption text, both
  * center-aligned, with `captionBackground` clipped into an inset rounded chip

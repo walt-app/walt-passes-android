@@ -23,7 +23,8 @@ import `is`.walt.passes.ui.core.isolated
  * Full-screen surface for scanning a [ScannableCard]. Wraps [ScannableCardView] with
  * minimal chrome: the user-controlled label up top (FSI/PDI isolated), the barcode
  * itself rendered at its full nominal size on a content-sized white backing, and the
- * non-suppressible [ScannableCardTrustCaption] docked at the bottom.
+ * [ScannableCardTrustCaption] docked at the bottom by default (omitted only under the
+ * audited [TrustCaptionPlacement.HostedTypeRow] concession — see [trustCaption]).
  *
  * The white backing is sized to the code (plus a quiet-zone margin), not to the whole
  * screen (wpass-1wu.2 / Walt wlt-n5z): the rest of the surface is transparent so the
@@ -32,11 +33,13 @@ import `is`.walt.passes.ui.core.isolated
  * preserved; [CODE_QUIET_ZONE] adds visual breathing room inside the card and the
  * QR/1D `ContentScale` split in [ScannableCardView] is unchanged.
  *
- * Trust contract: by default the caption is composed at the bottom of the screen
- * (C2 in `docs/SCANNABLE_CARD_THREAT_MODEL.md`), structurally separate from any host
- * navigation chrome. There is no parameter, theme token, or overload that *suppresses*
- * it. [showLabel] gates ONLY the top label `Text`; it cannot suppress the barcode, the
- * payload caption, or the trust caption.
+ * Trust contract: by default ([TrustCaptionPlacement.Docked]) the caption is composed at
+ * the bottom of the screen (C2 in `docs/SCANNABLE_CARD_THREAT_MODEL.md`), structurally
+ * separate from any host navigation chrome. No theme token and no overload can drop it;
+ * the ONE way it is omitted is the audited [TrustCaptionPlacement.HostedTypeRow]
+ * concession below, under which the host carries provenance via its own "Pass type" row
+ * (C2 "Pass type" row concession). [showLabel] gates ONLY the top label `Text`; it cannot
+ * suppress the barcode, the payload caption, or the trust caption.
  *
  * [trustCaption] selects how the provenance signal is carried: with
  * [TrustCaptionPlacement.HostedTypeRow] the kernel renders no caption here because the

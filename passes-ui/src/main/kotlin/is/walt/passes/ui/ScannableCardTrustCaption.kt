@@ -19,17 +19,19 @@ import `is`.walt.passes.ui.theme.LocalPassesSemantics
 import `is`.walt.passes.ui.theme.toComposeColor
 
 /**
- * The non-suppressible "this is something you typed, not a verified pass" caption that
+ * The verbatim, locked "this is something you typed, not a verified pass" caption that
  * anchors the trust contract of every `ScannableCard` surface (C2 in
  * `docs/SCANNABLE_CARD_THREAT_MODEL.md`): a card rendered by Walt is never
- * signature-verified, has no issuer, and is presented under a fixed caption that the
- * user cannot dismiss and the host cannot hide.
+ * signature-verified, has no issuer, and is presented under a fixed caption the user
+ * cannot dismiss.
  *
- * The composable has no `enabled` parameter, no theme token that hides it, and no
- * `ScannableCardTile` / `ScannableCardScreen` overload that skips rendering it. Mirrors
- * `DocumentTrustCaption` and `ExpiredOverlay`: the trust claim is structural, not a
- * configuration. Adding a parameter to this function or a sibling overload fails
- * `ComposableSurfaceLockTest`.
+ * This composable's *content* is non-suppressible — its wording and layout are locked by
+ * `ComposableSurfaceLockTest`, with no `enabled` parameter, theme token, or sibling
+ * overload to alter or skip it. *Whether* it is rendered on a detail surface is a separate
+ * question governed by that surface's `TrustCaptionPlacement`: docked by default, omitted
+ * only under the audited `HostedTypeRow` C2 concession (the host then carries provenance
+ * via its own "Pass type" row). Mirrors `DocumentTrustCaption` and `ExpiredOverlay`: the
+ * trust claim is structural, not a per-call configuration.
  *
  * Layout is a flat [Row] holding the single caption [Text], its `captionBackground`
  * clipped into an inset rounded chip (wpass-v3u): the chip is inset from the surface
