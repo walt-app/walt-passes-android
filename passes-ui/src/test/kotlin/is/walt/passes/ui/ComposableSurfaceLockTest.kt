@@ -177,13 +177,13 @@ class ComposableSurfaceLockTest {
     fun scannableCardScreenHasExactlyFourUserVisibleParameters() {
         // (card, modifier, showLabel, trustCaption). `showLabel` (wpass-1wu.1 / Walt
         // wlt-tct) gates ONLY the top label Text. `trustCaption` (wpass-gv6) is a
-        // TrustCaptionPlacement — it RELOCATES the caption to a host surface, it does
-        // not suppress it: the verbatim caption text and structure stay locked in
-        // ScannableCardTrustCaption (see scannableCardScreenTrustCaptionParamIsThe
-        // PlacementType) and the C2 relocation concession in SCANNABLE_CARD_THREAT_MODEL.md.
-        // Neither param can hide the barcode, the payload caption, or the trust claim.
-        // Adding a FIFTH parameter — anything resembling a `showCaption: Boolean` — would
-        // breach C2; review the threat model before changing this number.
+        // TrustCaptionPlacement selecting how provenance is carried: Docked renders the
+        // verbatim caption; HostedTypeRow drops it so the host carries provenance via its
+        // own "Pass type" details row, under the bounded C2 concession in
+        // SCANNABLE_CARD_THREAT_MODEL.md. The strong type (not a Boolean) is pinned by
+        // scannableCardScreenTrustCaptionParamIsThePlacementType. Adding a FIFTH parameter
+        // — e.g. a per-element `showBarcode` / `showPayloadCaption` suppressor — would
+        // breach the surface contract; review the threat model before changing this number.
         assertUserVisibleParamCount(
             "ScannableCardScreenKt",
             "ScannableCardScreen",
@@ -194,9 +194,9 @@ class ComposableSurfaceLockTest {
     @Test
     fun scannableCardScreenTrustCaptionParamIsThePlacementType() {
         // Belt-and-suspenders on the count lock: pin that the fourth slot is the strong
-        // TrustCaptionPlacement type, not a Boolean. A `showCaption: Boolean` would read
-        // as suppression and breach C2; TrustCaptionPlacement is relocation-only by
-        // construction (Docked | Hosted, both render the verbatim kernel caption).
+        // TrustCaptionPlacement type, not a raw Boolean. The placement is the audited
+        // carrier-of-provenance choice (Docked | HostedTypeRow), each arm documented in
+        // the C2 concession; a bare `showCaption: Boolean` would erase that audit point.
         val method = findComposable("ScannableCardScreenKt", "ScannableCardScreen")
         val typeNames = method.parameterTypes.map { it.simpleName }
         assertWithMessage("ScannableCardScreen must accept the TrustCaptionPlacement type")

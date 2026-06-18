@@ -38,14 +38,14 @@ import `is`.walt.passes.ui.core.isolated
  * it. [showLabel] gates ONLY the top label `Text`; it cannot suppress the barcode, the
  * payload caption, or the trust caption.
  *
- * [trustCaption] lets a host *relocate* (never suppress) the caption: with
- * [TrustCaptionPlacement.Hosted] the kernel omits its docked copy because the host has
- * taken on rendering the kernel-owned [ScannableCardTrustCaption] in its own
- * always-present surface (e.g. a details "Pass type" row). The verbatim wording and
- * structure still live only in [ScannableCardTrustCaption]; the host chooses location,
- * not content. See `TrustCaptionPlacement` and the C2 relocation concession in the
- * threat model. Defaults to [TrustCaptionPlacement.Docked] so every existing caller is
- * unchanged.
+ * [trustCaption] selects how the provenance signal is carried: with
+ * [TrustCaptionPlacement.HostedTypeRow] the kernel renders no caption here because the
+ * host carries the claim itself, as a "Pass type" row inside its own details section
+ * (value "Scanned" for a scannable card). Under that mode a neutral type label is an
+ * accepted carrier and the row may sit in a collapsed-by-default foldout — see
+ * `TrustCaptionPlacement` and the C2 "Pass type" row concession in the threat model.
+ * Defaults to [TrustCaptionPlacement.Docked] (the verbatim docked caption), so every
+ * existing caller is unchanged.
  *
  * No share / save-to-photos / print affordance, and no overflow menu. The user came
  * here to scan, then back out — those are the only two paths off this surface. Host
@@ -55,9 +55,10 @@ import `is`.walt.passes.ui.core.isolated
  * @param showLabel when false, the built-in label is not rendered. Defaults to true so
  *   every existing caller is unchanged. Hosts that render their own title above this
  *   surface (e.g. an editable self-title) pass false to avoid a duplicate (Walt wlt-tct).
- * @param trustCaption where the non-suppressible trust caption is rendered. Defaults to
- *   [TrustCaptionPlacement.Docked]. [TrustCaptionPlacement.Hosted] relocates it to a
- *   host surface under the C2 concession (wpass-gv6) — relocation, not suppression.
+ * @param trustCaption how the provenance signal is carried. Defaults to
+ *   [TrustCaptionPlacement.Docked] (verbatim docked caption).
+ *   [TrustCaptionPlacement.HostedTypeRow] drops the kernel caption so the host carries
+ *   provenance via its own "Pass type" details row under the C2 concession (wpass-gv6).
  */
 @Composable
 public fun ScannableCardScreen(
@@ -104,13 +105,14 @@ public fun ScannableCardScreen(
             }
         }
 
-        // Docked: the kernel renders the caption here. Hosted: the host has taken on
-        // rendering the kernel-owned ScannableCardTrustCaption in its own surface
-        // (wpass-gv6). Relocation, not suppression — TrustCaptionPlacement / C2.
+        // Docked: the kernel renders the verbatim caption here. HostedTypeRow: the kernel
+        // renders nothing — the host carries provenance via its own "Pass type" details
+        // row (wpass-gv6 / C2 concession). Exhaustive `when` so a future placement arm
+        // must make an explicit decision rather than silently dropping the caption.
         when (trustCaption) {
             TrustCaptionPlacement.Docked ->
                 ScannableCardTrustCaption(modifier = Modifier.fillMaxWidth())
-            TrustCaptionPlacement.Hosted -> Unit
+            TrustCaptionPlacement.HostedTypeRow -> Unit
         }
     }
 }

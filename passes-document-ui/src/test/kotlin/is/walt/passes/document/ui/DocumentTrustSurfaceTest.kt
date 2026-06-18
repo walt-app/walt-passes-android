@@ -193,11 +193,12 @@ class DocumentTrustSurfaceTest {
     }
 
     @Test
-    fun documentViewHostedPlacementOmitsKernelDockedCaption() {
-        // wpass-gv6: TrustCaptionPlacement.Hosted RELOCATES the caption to a host surface
-        // — the kernel arm must NOT render its own copy, otherwise the host's relocated
-        // caption would duplicate it. This is the only behaviour the param changes; the
-        // verbatim caption text and structure remain locked in DocumentTrustCaption.
+    fun documentViewHostedTypeRowOmitsKernelCaption() {
+        // wpass-gv6 / D5 concession: TrustCaptionPlacement.HostedTypeRow drops the kernel
+        // caption on the detail surface — the host carries provenance via its own "Pass
+        // type" details row instead. The kernel arm renders NO caption; that the host
+        // renders a "Pass type" row is the consumer-side obligation, pinned by a
+        // walt-android test (wlt-3cer), not here.
         val doc = ImageDocument(
             id = ImageDocumentId("img-hosted"),
             displayLabel = "ticket.png",
@@ -222,7 +223,7 @@ class DocumentTrustSurfaceTest {
                         doc = doc,
                         imageFile = pfd,
                         imageDecoder = rejectingDecoder,
-                        trustCaption = TrustCaptionPlacement.Hosted,
+                        trustCaption = TrustCaptionPlacement.HostedTypeRow,
                     )
                 }
             }

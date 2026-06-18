@@ -54,13 +54,13 @@ import `is`.walt.passes.ui.core.toComposeColor
  * without its backend pair is a programming error and fails fast. This keeps a consumer that
  * only ever shows one kind from having to fabricate the other backend.
  *
- * [trustCaption] lets a host *relocate* (never suppress) the trust caption: with
- * [TrustCaptionPlacement.Hosted] each arm omits its copy because the host has taken on
- * rendering the kernel-owned [DocumentTrustCaption] in its own always-present surface (e.g.
- * a details "Pass type" row). The verbatim wording and structure still live only in
- * [DocumentTrustCaption]; the host chooses location, not content. See `TrustCaptionPlacement`
- * and the ADR 0005 D5 relocation addendum. Defaults to [TrustCaptionPlacement.Docked] so
- * every existing caller is unchanged.
+ * [trustCaption] selects how the provenance signal is carried: with
+ * [TrustCaptionPlacement.HostedTypeRow] each arm renders no caption because the host carries
+ * the claim itself, as a "Pass type" row inside its own details section (values "PDF" /
+ * "Image" / "Image, Scanned"). Under that mode a neutral type label is an accepted carrier
+ * and the row may sit in a collapsed-by-default foldout — see `TrustCaptionPlacement` and
+ * the ADR 0005 D5 "Pass type" row addendum. Defaults to [TrustCaptionPlacement.Docked] (the
+ * verbatim docked caption) so every existing caller is unchanged.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -195,14 +195,14 @@ private fun PdfDocumentView(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Docked: the kernel renders the caption here. Hosted: the host has taken on
-        // rendering the kernel-owned DocumentTrustCaption in its own surface (wpass-gv6).
-        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5. Exhaustive
-        // `when` (not an `if`) so a future placement arm cannot silently fall through to
-        // omitting the caption — the one direction a trust surface must never default to.
+        // Docked: the kernel renders the verbatim caption here. HostedTypeRow: the kernel
+        // renders nothing — the host carries provenance via its own "Pass type" details
+        // row (wpass-gv6 / D5 concession). Exhaustive `when` (not an `if`) so a future
+        // placement arm cannot silently fall through to omitting the caption — the one
+        // direction a trust surface must never default to.
         when (trustCaption) {
             TrustCaptionPlacement.Docked -> DocumentTrustCaption()
-            TrustCaptionPlacement.Hosted -> Unit
+            TrustCaptionPlacement.HostedTypeRow -> Unit
         }
 
         // `laneBackground` paints behind the pager only — the document-surface tone the
@@ -294,14 +294,14 @@ private fun ImageDocumentView(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // Docked: the kernel renders the caption here. Hosted: the host has taken on
-        // rendering the kernel-owned DocumentTrustCaption in its own surface (wpass-gv6).
-        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5. Exhaustive
-        // `when` (not an `if`) so a future placement arm cannot silently fall through to
-        // omitting the caption — the one direction a trust surface must never default to.
+        // Docked: the kernel renders the verbatim caption here. HostedTypeRow: the kernel
+        // renders nothing — the host carries provenance via its own "Pass type" details
+        // row (wpass-gv6 / D5 concession). Exhaustive `when` (not an `if`) so a future
+        // placement arm cannot silently fall through to omitting the caption — the one
+        // direction a trust surface must never default to.
         when (trustCaption) {
             TrustCaptionPlacement.Docked -> DocumentTrustCaption()
-            TrustCaptionPlacement.Hosted -> Unit
+            TrustCaptionPlacement.HostedTypeRow -> Unit
         }
 
         // `laneBackground` paints behind the image only — the document-surface tone the image
