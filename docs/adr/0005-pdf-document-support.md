@@ -841,3 +841,65 @@ a composite import is indistinguishable from a plain image import in the telemet
 | C3       | `DocumentImporterTest`: no-code / extraction-failure / declined-confirmation all degrade to `ImportedImage`; `confirmHookSeesTheDecodedPayloadBeforePersist`; `pdfWithEmbeddedBytesNeverRunsBarcodeExtraction`. |
 | C4       | `passes-storage` `SchemaMigrationTest` (v6→v7 barcode columns, version/DDL/migration-keys locks in `PublicApiSurfaceTest`); `DocumentRepositoryTest` composite round-trip + plain-image-null-barcode tests. |
 | C5       | `DocumentSurfaceLockTest` (9-param lock holds — composite adds no `DocumentView` param); `DocumentTrustSurfaceTest`; `application/pdf` / `ACTION_SEND` bytecode scan stays green. |
+
+## Addendum 2026-06-18: D5 trust caption is relocatable into a host details row
+
+Tracks: `wpass-gv6` (this addendum). Cross-repo consumer: walt-android
+`wlt-3cer` (the "Pass type" details row, held pending this decision).
+
+### Context
+
+The consumer (Walt) wanted to consolidate the document trust signal into a
+single row inside its own host-rendered details section, instead of the
+kernel's bottom-/top-docked `DocumentTrustCaption`. Read literally, D5 and the
+Z.4 / Z.8 addenda forbid this: the caption is non-suppressible and docked. The
+question this addendum settles is whether "docked by the kernel" is load-bearing
+or whether "always present, verbatim, kernel-owned" is the actual invariant —
+and if the latter, how a host may move it without collapsing the defense.
+
+### D5.R The caption is relocatable, never suppressible
+
+The load-bearing invariant is **always-present, verbatim, kernel-owned**, not
+*kernel-docked*. The kernel therefore exposes
+`DocumentView(trustCaption = TrustCaptionPlacement.Hosted)` (`passes-document-ui`).
+The contract:
+
+- The relocated caption is the **kernel-owned `DocumentTrustCaption`
+  composable**, mounted by the host in its details section. The verbatim wording
+  ("User-provided document. Walt has not verified the source.") and the layout
+  live only in that composable, pinned by `DocumentSurfaceLockTest`. The host
+  chooses *location*, never *content*.
+- A neutral type label is **not** a substitute. A "Pass type: PDF" row does not
+  carry the provenance claim; showing such a label *instead of* the caption
+  collapses D5. The verbatim caption must be present, relocated, somewhere
+  always-visible on the detail surface — it may sit *in the same details
+  section as* the type row, but it is not replaced by it.
+- `TrustCaptionPlacement` is `Docked | Hosted` — both render the verbatim kernel
+  caption; neither hides it. There is no boolean that suppresses it. The shape is
+  pinned by `documentViewTrustCaptionParamIsThePlacementType`, and the param
+  count lock moves from 9 to 10 (`documentViewHasExactlyTenUserVisibleParameters`),
+  superseding the 9-param assertion in the prior (composite) addendum.
+
+This is the same posture as the `SCANNABLE_CARD_THREAT_MODEL.md` wallet-row
+concession (trust shifts surface, never disappears) and the parallel
+`ScannableCardScreen` change under `wpass-gv6`. The kernel cannot verify at
+runtime that the host mounted the relocated caption, so the obligation shifts to
+the consumer and is pinned consumer-side by a walt-android test that the details
+section renders the kernel `DocumentTrustCaption`.
+
+### Scope: inline `DocumentView` only; full-screen stays docked
+
+Relocation applies to the inline `DocumentView` detail surface only.
+`FullScreenDocumentView` is unchanged: its caption stays docked to a screen edge
+and non-suppressible (Z.8). A host's details row is an inline-surface affordance;
+the full-screen zoom surface has no host details chrome to fold into, so there is
+nothing to relocate into and the Z.4 / Z.8 "cannot be panned off, visible at
+every zoom level" guarantees stand verbatim.
+
+### Tests pinning this addendum
+
+| Decision | Test                                                                                                  |
+|----------|-------------------------------------------------------------------------------------------------------|
+| D5.R     | `DocumentSurfaceLockTest.documentViewHasExactlyTenUserVisibleParameters` + `documentViewTrustCaptionParamIsThePlacementType` (relocation-not-suppression shape lock) |
+| D5.R     | `DocumentTrustSurfaceTest.documentViewHostedPlacementOmitsKernelDockedCaption` (Hosted omits the kernel copy so the host's relocated caption is not duplicated); `documentTrustCaptionRendersTheVerbatimTrustText` (the kernel composable the host mounts still renders verbatim) |
+| Scope    | `FullScreenDocumentView` shape lock unchanged (7 params); Z.8 full-screen caption tests stay green |

@@ -32,11 +32,20 @@ import `is`.walt.passes.ui.core.isolated
  * preserved; [CODE_QUIET_ZONE] adds visual breathing room inside the card and the
  * QR/1D `ContentScale` split in [ScannableCardView] is unchanged.
  *
- * Trust contract: the caption is composed unconditionally at the bottom of the screen
+ * Trust contract: by default the caption is composed at the bottom of the screen
  * (C2 in `docs/SCANNABLE_CARD_THREAT_MODEL.md`), structurally separate from any host
- * navigation chrome. There is no parameter, theme token, or overload that hides it.
- * [showLabel] gates ONLY the top label `Text`; it cannot suppress the barcode, the
+ * navigation chrome. There is no parameter, theme token, or overload that *suppresses*
+ * it. [showLabel] gates ONLY the top label `Text`; it cannot suppress the barcode, the
  * payload caption, or the trust caption.
+ *
+ * [trustCaption] lets a host *relocate* (never suppress) the caption: with
+ * [TrustCaptionPlacement.Hosted] the kernel omits its docked copy because the host has
+ * taken on rendering the kernel-owned [ScannableCardTrustCaption] in its own
+ * always-present surface (e.g. a details "Pass type" row). The verbatim wording and
+ * structure still live only in [ScannableCardTrustCaption]; the host chooses location,
+ * not content. See `TrustCaptionPlacement` and the C2 relocation concession in the
+ * threat model. Defaults to [TrustCaptionPlacement.Docked] so every existing caller is
+ * unchanged.
  *
  * No share / save-to-photos / print affordance, and no overflow menu. The user came
  * here to scan, then back out — those are the only two paths off this surface. Host
@@ -46,12 +55,16 @@ import `is`.walt.passes.ui.core.isolated
  * @param showLabel when false, the built-in label is not rendered. Defaults to true so
  *   every existing caller is unchanged. Hosts that render their own title above this
  *   surface (e.g. an editable self-title) pass false to avoid a duplicate (Walt wlt-tct).
+ * @param trustCaption where the non-suppressible trust caption is rendered. Defaults to
+ *   [TrustCaptionPlacement.Docked]. [TrustCaptionPlacement.Hosted] relocates it to a
+ *   host surface under the C2 concession (wpass-gv6) — relocation, not suppression.
  */
 @Composable
 public fun ScannableCardScreen(
     card: ScannableCard,
     modifier: Modifier = Modifier,
     showLabel: Boolean = true,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
 ) {
     Column(
         modifier = modifier.fillMaxSize(),
@@ -91,7 +104,14 @@ public fun ScannableCardScreen(
             }
         }
 
-        ScannableCardTrustCaption(modifier = Modifier.fillMaxWidth())
+        // Docked: the kernel renders the caption here. Hosted: the host has taken on
+        // rendering the kernel-owned ScannableCardTrustCaption in its own surface
+        // (wpass-gv6). Relocation, not suppression — TrustCaptionPlacement / C2.
+        when (trustCaption) {
+            TrustCaptionPlacement.Docked ->
+                ScannableCardTrustCaption(modifier = Modifier.fillMaxWidth())
+            TrustCaptionPlacement.Hosted -> Unit
+        }
     }
 }
 

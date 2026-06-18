@@ -53,6 +53,14 @@ import `is`.walt.passes.ui.core.toComposeColor
  * [ImageDocument]. The dispatcher requires the pair that matches the arm; passing a document
  * without its backend pair is a programming error and fails fast. This keeps a consumer that
  * only ever shows one kind from having to fabricate the other backend.
+ *
+ * [trustCaption] lets a host *relocate* (never suppress) the trust caption: with
+ * [TrustCaptionPlacement.Hosted] each arm omits its copy because the host has taken on
+ * rendering the kernel-owned [DocumentTrustCaption] in its own always-present surface (e.g.
+ * a details "Pass type" row). The verbatim wording and structure still live only in
+ * [DocumentTrustCaption]; the host chooses location, not content. See `TrustCaptionPlacement`
+ * and the ADR 0005 D5 relocation addendum. Defaults to [TrustCaptionPlacement.Docked] so
+ * every existing caller is unchanged.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -64,6 +72,7 @@ public fun DocumentView(
     imageDecoder: ImageDecodeBinder? = null,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
     onOpenFullScreen: (() -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
 ) {
@@ -74,6 +83,7 @@ public fun DocumentView(
             renderer = requireNotNull(renderer) { "DocumentView(PdfDocument) requires a non-null renderer" },
             modifier = modifier,
             telemetry = telemetry,
+            trustCaption = trustCaption,
             onOpenFullScreen = onOpenFullScreen,
             fullScreenAffordance = fullScreenAffordance,
         )
@@ -83,6 +93,7 @@ public fun DocumentView(
             decoder = requireNotNull(imageDecoder) { "DocumentView(ImageDocument) requires a non-null imageDecoder" },
             modifier = modifier,
             telemetry = telemetry,
+            trustCaption = trustCaption,
         )
         // wpass-8lu: a composite renders its IMAGE half through the same isolated image-decode
         // surface as a plain image (same imageFile / imageDecoder pair, no new DocumentView
@@ -98,6 +109,7 @@ public fun DocumentView(
             },
             modifier = modifier,
             telemetry = telemetry,
+            trustCaption = trustCaption,
         )
     }
 }
@@ -167,6 +179,7 @@ private fun PdfDocumentView(
     renderer: PdfRendererBinder,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
     onOpenFullScreen: (() -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
 ) {
@@ -182,7 +195,12 @@ private fun PdfDocumentView(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        DocumentTrustCaption()
+        // Docked: the kernel renders the caption here. Hosted: the host has taken on
+        // rendering the kernel-owned DocumentTrustCaption in its own surface (wpass-gv6).
+        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5.
+        if (trustCaption == TrustCaptionPlacement.Docked) {
+            DocumentTrustCaption()
+        }
 
         // `laneBackground` paints behind the pager only — the document-surface tone the
         // page sits on (showing through ContentScale.Fit letterbox bars). The page region
@@ -259,19 +277,26 @@ private fun PdfDocumentView(
  * surface is the image-document presentation this step ships.
  */
 @Composable
+@Suppress("LongParameterList")
 private fun ImageDocumentView(
     documentId: DocumentId,
     imageFile: ParcelFileDescriptor,
     decoder: ImageDecodeBinder,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
 ) {
     val semantics = LocalDocumentSemantics.current
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        DocumentTrustCaption()
+        // Docked: the kernel renders the caption here. Hosted: the host has taken on
+        // rendering the kernel-owned DocumentTrustCaption in its own surface (wpass-gv6).
+        // Relocation, not suppression — TrustCaptionPlacement / ADR 0005 D5.
+        if (trustCaption == TrustCaptionPlacement.Docked) {
+            DocumentTrustCaption()
+        }
 
         // `laneBackground` paints behind the image only — the document-surface tone the image
         // sits on (showing through the ContentScale.Fit letterbox bars), so the caption above

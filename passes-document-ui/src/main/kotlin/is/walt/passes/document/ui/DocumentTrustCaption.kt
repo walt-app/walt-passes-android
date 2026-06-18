@@ -7,12 +7,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.document.ui.internal.InfoOutlineIcon
 import `is`.walt.passes.document.ui.theme.LocalDocumentSemantics
@@ -32,7 +34,9 @@ import `is`.walt.passes.ui.core.toComposeColor
  * exact arity).
  *
  * Layout is a flat [Row] of an info-outline icon followed by the caption text, both
- * center-aligned, with the [Row] still painting `captionBackground` behind itself. A
+ * center-aligned, with `captionBackground` clipped into an inset rounded chip
+ * (wpass-v3u) so the caption reads as an intentional element rather than an
+ * edge-to-edge band, matching the `ScannableCardTrustCaption` chip register. A
  * consumer that wants the historical filled colour-block keeps a non-transparent
  * `captionBackground`; a consumer matching a flat, borderless house style sets
  * `captionBackground` transparent and the caption reads as inline chrome rather than
@@ -60,8 +64,10 @@ public fun DocumentTrustCaption(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .padding(horizontal = CHIP_INSET)
+            .clip(RoundedCornerShape(CHIP_RADIUS))
             .background(semantics.captionBackground.toComposeColor())
-            .padding(PaddingValues(horizontal = 16.dp, vertical = 12.dp)),
+            .padding(PaddingValues(horizontal = 16.dp, vertical = 10.dp)),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -81,6 +87,10 @@ public fun DocumentTrustCaption(
         )
     }
 }
+
+/** Inset rounded-chip geometry for the caption (wpass-v3u). Kernel-owned, not themable. */
+private val CHIP_INSET = 12.dp
+private val CHIP_RADIUS = 10.dp
 
 /**
  * The exact caption copy. Public-internal so tests can assert the displayed text

@@ -162,6 +162,42 @@ class ScannableCardTrustSurfaceTest {
     }
 
     @Test
+    fun fullScreenHostedPlacementOmitsKernelDockedCaption() {
+        // wpass-gv6: TrustCaptionPlacement.Hosted RELOCATES the caption to a host surface
+        // — the kernel must NOT render its own docked copy, otherwise the host's relocated
+        // caption would duplicate it. This is the only behaviour the param changes; the
+        // verbatim caption text and structure remain locked in ScannableCardTrustCaption.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(
+                    card = qrFixture(),
+                    trustCaption = TrustCaptionPlacement.Hosted,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Created by you").assertDoesNotExist()
+    }
+
+    @Test
+    fun hostedPlacementHostStillRendersKernelCaptionVerbatim() {
+        // The flip side of the relocation contract: Hosted is relocation, not suppression.
+        // A host that takes the caption on mounts the SAME kernel composable in its own
+        // surface and the verbatim wording must appear. Models the host's details "Pass
+        // type" row alongside a Hosted ScannableCardScreen (wpass-gv6 / Walt wlt-3cer).
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(
+                    card = qrFixture(),
+                    trustCaption = TrustCaptionPlacement.Hosted,
+                )
+                // Host-rendered relocation target (e.g. inside a details section).
+                ScannableCardTrustCaption()
+            }
+        }
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
     fun fullScreenRendersUserSuppliedLabel() {
         composeRule.setContent {
             ThemedHost {

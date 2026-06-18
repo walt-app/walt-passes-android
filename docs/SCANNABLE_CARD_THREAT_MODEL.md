@@ -87,6 +87,39 @@ homogeneous-list register and nothing else. A future consumer wanting a wallet
 list that also drops the detail-surface caption is amending this row, not
 filing a refactor.
 
+**C2 — detail-surface relocation concession (host details row).** A consumer
+(Walt, `wlt-3cer`) wanted to consolidate the trust signal into a single row
+inside its own host-rendered details section rather than have it docked at the
+bottom of the kernel detail surface (`ScannableCardScreen`). The kernel grants
+**relocation, not suppression** (`wpass-gv6`), through the
+`ScannableCardScreen(trustCaption = TrustCaptionPlacement.Hosted)` parameter.
+The concession is permitted strictly when, and only when, all of the following
+hold:
+
+1. The relocated caption is the **kernel-owned `ScannableCardTrustCaption`
+   composable**, mounted by the host in its details section. The verbatim
+   wording and the layout live only in that composable (pinned by
+   `ComposableSurfaceLockTest`); the host chooses *location*, never *content*.
+2. A neutral type label is **not** a substitute. A "Pass type: Scanned" row does
+   not carry the provenance claim; folding the caption into such a label, or
+   showing the label *instead of* the caption, collapses C2. The verbatim
+   "Created by you" caption must be present, relocated, somewhere always-visible
+   on the detail surface.
+3. `TrustCaptionPlacement.Hosted` is the **only** way to move the docked copy.
+   There is no boolean that hides it, no theme token that suppresses it, and the
+   placement type is `Docked | Hosted` (both render the verbatim kernel caption)
+   — pinned by `scannableCardScreenTrustCaptionParamIsThePlacementType`.
+
+The kernel cannot verify at runtime that the host actually mounted the relocated
+caption — exactly as it cannot verify condition 3 of the wallet-row concession
+above. The obligation therefore shifts to the consumer and is pinned
+consumer-side by a walt-android test that the details section renders the kernel
+`ScannableCardTrustCaption`. `Docked` remains the default and the recommended
+surface; `Hosted` is the bounded alternative for a host that owns an
+always-present details section and nothing else. A future consumer wanting to
+relocate the caption to a surface that is *not* always present (a collapsible
+panel, a tab the user may never open) is amending this row, not filing a PR.
+
 **C3. Input hygiene at the create boundary.** `passes-core` validates
 `ScannableCardCreateInput` for: per-format length caps (Code128 ~80 chars,
 EAN-13 / UPC-A fixed-length with checksum, QR per-version cap with a
@@ -491,8 +524,13 @@ threat row above.
   (`ScannableCardScreen`), through theming, layout, or consumer-supplied
   composables. The list-row register (`ScannableCardRowTile`) shifts the
   caption from list-row to detail surface under the bounded C1 / C2
-  concession above; the detail surface itself remains non-suppressible. C2
-  forbids any further bypass.
+  concession above; the detail surface itself remains non-suppressible. The
+  `TrustCaptionPlacement.Hosted` parameter (`wpass-gv6`) *relocates* the
+  detail-surface caption into a host details row under the bounded C2
+  relocation concession above — it does not suppress it (the verbatim kernel
+  caption must still be mounted, always-visible, by the host). C2 forbids any
+  bypass beyond those two bounded concessions: no boolean that hides the
+  caption, no substitution of a neutral type label for the verbatim claim.
 
 ## How each control is tested
 
@@ -504,7 +542,7 @@ can trace back here.
 | Control | Pinned by                                  |
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
-| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract |
+| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFourUserVisibleParameters` + `scannableCardScreenTrustCaptionParamIsThePlacementType` (relocation-not-suppression shape lock) and `fullScreenHostedPlacementOmitsKernelDockedCaption` / `hostedPlacementHostStillRendersKernelCaptionVerbatim` to pin the detail-surface relocation concession |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |

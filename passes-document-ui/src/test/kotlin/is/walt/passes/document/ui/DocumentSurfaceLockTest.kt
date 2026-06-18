@@ -33,15 +33,30 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun documentViewHasExactlyNineUserVisibleParameters() {
+    fun documentViewHasExactlyTenUserVisibleParameters() {
         // (doc, pdfFile, renderer, imageFile, imageDecoder, modifier, telemetry,
-        // onOpenFullScreen, fullScreenAffordance). D5: still no flag to hide the trust
-        // caption — the caption is composed inside each arm and gated by no parameter.
-        // Bumping from 7 to 9 is the deliberate wpass-i9x change: the image arm (step 4)
-        // adds the kind-specific (imageFile, imageDecoder) backend pair, mirroring the
-        // (pdfFile, renderer) PDF pair. Neither pair can touch the trust caption or the
-        // tap target, so D5/D8 are unaffected.
-        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 9)
+        // trustCaption, onOpenFullScreen, fullScreenAffordance). D5: still no flag to
+        // SUPPRESS the trust caption. Bumping from 9 to 10 is the deliberate wpass-gv6
+        // change: `trustCaption` is a TrustCaptionPlacement that RELOCATES the caption to
+        // a host surface (Hosted), it does not hide it — the verbatim caption text and
+        // structure stay locked in DocumentTrustCaption (see documentViewTrustCaptionParam
+        // IsThePlacementType) and the ADR 0005 D5 relocation addendum. Adding an ELEVENTH
+        // parameter resembling a `showCaption: Boolean` would breach D5; review the ADR
+        // before changing this number.
+        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 10)
+    }
+
+    @Test
+    fun documentViewTrustCaptionParamIsThePlacementType() {
+        // Belt-and-suspenders on the count lock: pin that the relocation slot is the
+        // strong TrustCaptionPlacement type, not a Boolean. A `showCaption: Boolean` would
+        // read as suppression and breach D5; TrustCaptionPlacement is relocation-only by
+        // construction (Docked | Hosted, both render the verbatim kernel caption).
+        val method = findComposable("DocumentViewKt", "DocumentView")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("DocumentView must accept the TrustCaptionPlacement type")
+            .that(typeNames)
+            .contains("TrustCaptionPlacement")
     }
 
     @Test

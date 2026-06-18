@@ -174,18 +174,34 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
-    fun scannableCardScreenHasExactlyThreeUserVisibleParameters() {
-        // (card, modifier, showLabel). `showLabel` (wpass-1wu.1 / Walt wlt-tct) gates
-        // ONLY the top label Text so a host rendering its own title avoids a duplicate;
-        // it cannot omit the barcode, the payload caption, or the bottom-docked
-        // non-suppressible ScannableCardTrustCaption (C2 in SCANNABLE_CARD_THREAT_MODEL.md).
-        // Adding a fourth parameter — anything that could hide the trust caption — would
+    fun scannableCardScreenHasExactlyFourUserVisibleParameters() {
+        // (card, modifier, showLabel, trustCaption). `showLabel` (wpass-1wu.1 / Walt
+        // wlt-tct) gates ONLY the top label Text. `trustCaption` (wpass-gv6) is a
+        // TrustCaptionPlacement — it RELOCATES the caption to a host surface, it does
+        // not suppress it: the verbatim caption text and structure stay locked in
+        // ScannableCardTrustCaption (see scannableCardScreenTrustCaptionParamIsThe
+        // PlacementType) and the C2 relocation concession in SCANNABLE_CARD_THREAT_MODEL.md.
+        // Neither param can hide the barcode, the payload caption, or the trust claim.
+        // Adding a FIFTH parameter — anything resembling a `showCaption: Boolean` — would
         // breach C2; review the threat model before changing this number.
         assertUserVisibleParamCount(
             "ScannableCardScreenKt",
             "ScannableCardScreen",
-            expected = 3,
+            expected = 4,
         )
+    }
+
+    @Test
+    fun scannableCardScreenTrustCaptionParamIsThePlacementType() {
+        // Belt-and-suspenders on the count lock: pin that the fourth slot is the strong
+        // TrustCaptionPlacement type, not a Boolean. A `showCaption: Boolean` would read
+        // as suppression and breach C2; TrustCaptionPlacement is relocation-only by
+        // construction (Docked | Hosted, both render the verbatim kernel caption).
+        val method = findComposable("ScannableCardScreenKt", "ScannableCardScreen")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("ScannableCardScreen must accept the TrustCaptionPlacement type")
+            .that(typeNames)
+            .contains("TrustCaptionPlacement")
     }
 
     @Test

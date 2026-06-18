@@ -10,7 +10,7 @@ walt-passes-android is a small, security-focused open-source project. This Code 
 - Assume contributors mean well until you have specific evidence otherwise. Most disagreements are misunderstandings, not bad faith.
 - Explain disagreements with reasons rather than vibes. "I think this is wrong because X" is workable; "this is bad" is not.
 - Remember that security-critical code attracts strong opinions. Strong opinions are fine when they are about the code and expressed respectfully toward the person.
-- Make it easy for the next person. Clear commit messages, scoped PRs, links to the relevant beads issue or specification when one exists.
+- Make it easy for the next person. When you open an issue or a security report, be clear and specific, and link the relevant beads issue or specification when one exists.
 - Credit prior work. If a fix is informed by another project's bug report or a paper, say so.
 
 ## What is not okay
@@ -19,14 +19,14 @@ walt-passes-android is a small, security-focused open-source project. This Code 
 - Slurs or demeaning language tied to identity, including (but not limited to) race, ethnicity, nationality, religion, gender, sexual orientation, disability, age, or appearance.
 - Doxxing or publishing private information about another contributor without their consent.
 - Posting unverified vulnerability claims publicly instead of using the disclosure process in [`SECURITY.md`](SECURITY.md). Responsible disclosure is part of the project's trust model.
-- Knowingly wasting maintainer time. Examples: low-effort AI-generated PRs that the submitter has not read or tested; reopening the same out-of-scope proposal after it has been declined with a reason; demanding response timelines from a single-maintainer project.
+- Knowingly wasting maintainer time. Examples: low-effort AI-generated issues or reports that the submitter has not read or verified; reopening the same proposal after it has been declined with a reason; demanding response timelines from a single-maintainer project.
 - Retaliation against anyone who reports a violation in good faith.
 
 ## Disagreement is not misconduct
 
 The following are explicitly not Code of Conduct matters:
 
-- A maintainer declining a pull request for being out of scope as defined in [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- A maintainer closing a pull request unmerged, since this repository does not accept external contributions (see [`CONTRIBUTING.md`](CONTRIBUTING.md)).
 - A reviewer pointing out a real flaw in your code, including bluntly. "This unbounded loop will OOM on a malformed pass" is a security-critical observation, not an attack.
 - A contributor disagreeing with a design decision and saying so directly, with reasons.
 
@@ -34,7 +34,7 @@ The line is whether someone is being attacked versus their work being criticized
 
 ## Scope
 
-This document applies to interactions in this repository: issues, pull requests, code reviews, and discussions. It also applies to direct project communication, such as email about a contribution or a security report.
+This document applies to interactions in this repository: issues, security reports, and discussions. It also applies to direct project communication, such as email about an issue or a security report.
 
 It does not try to govern behavior in unrelated venues. People are people in many places, and one project's Code of Conduct cannot reasonably extend to all of them.
 
@@ -74,4 +74,4 @@ When the project grows beyond a single maintainer, this section will be replaced
 
 ## A living document
 
-This Code of Conduct will change as the project changes. Pull requests against it are welcome. The maintainer will treat proposed changes the same way as any other PR: on technical and substantive merit, with reasons given.
+This Code of Conduct will change as the project changes. Suggestions are welcome via an issue; any change lands through the maintainer's internal process, as this repository does not accept external pull requests.

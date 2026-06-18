@@ -192,6 +192,51 @@ class DocumentTrustSurfaceTest {
         }
     }
 
+    @Test
+    fun documentViewHostedPlacementOmitsKernelDockedCaption() {
+        // wpass-gv6: TrustCaptionPlacement.Hosted RELOCATES the caption to a host surface
+        // — the kernel arm must NOT render its own copy, otherwise the host's relocated
+        // caption would duplicate it. This is the only behaviour the param changes; the
+        // verbatim caption text and structure remain locked in DocumentTrustCaption.
+        val doc = ImageDocument(
+            id = ImageDocumentId("img-hosted"),
+            displayLabel = "ticket.png",
+            byteCount = 2048L,
+            widthPx = 1080,
+            heightPx = 1920,
+            importedAtEpochMs = 0L,
+        )
+        val rejectingDecoder = object : ImageDecodeBinder {
+            override suspend fun decode(
+                image: ParcelFileDescriptor,
+                maxWidthPx: Int,
+                maxHeightPx: Int,
+            ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
+        }
+        val file = File.createTempFile("walt-image-doc", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            composeRule.setContent {
+                ThemedHost {
+                    DocumentView(
+                        doc = doc,
+                        imageFile = pfd,
+                        imageDecoder = rejectingDecoder,
+                        trustCaption = TrustCaptionPlacement.Hosted,
+                    )
+                }
+            }
+            composeRule.onAllNodesWithText(
+                "User-provided document. Walt has not verified the source.",
+            ).fetchSemanticsNodes().let { nodes ->
+                assertThat(nodes).isEmpty()
+            }
+        } finally {
+            pfd.close()
+            file.delete()
+        }
+    }
+
     @Composable
     private fun ThemedHost(content: @Composable () -> Unit) {
         MaterialTheme {
