@@ -114,6 +114,38 @@ avoids that surface entirely by using only the encoder path. Encoder bugs
 remain a concern (see Threat 6) but the attack-surface delta is small because
 encoder input is the user's own keystrokes after C3 validation.
 
+**C5 amendment — decoding of untrusted bytes now occurs, under confinement
+(wpass-7rv; composite artifact wpass-8lu, consumer epic wlt-yjn5).** The
+encoder-only stance above held while the *only* way bytes entered the system
+was a user typing a payload. The composite (image + extracted barcode) artifact
+and the live-scan path changed that: the kernel now links and invokes a decoder
+(`decodeYPlane` in `passes-barcode-core`; `BarcodeImageDecoder` in
+`passes-barcode`) on bytes the user did not type. C5 is therefore no longer
+"no runtime decoding of untrusted bytes" — it is "untrusted-byte decoding is
+confined to a sandbox or to a still-codec-free path," enforced two ways:
+
+- **Static image bytes decode in a permission-stripped ISOLATED process.**
+  Gallery picks, file-picker images, and system-camera manual snaps all hand
+  their bytes to `BarcodeImageDecoder`'s `isolatedProcess` service, where the
+  still-image codec (libwebp / Skia / Quram — the historical RCE class) runs
+  with no Keystore, no network, no storage. Only `BarcodeDecodeResult`
+  (`{payload, format}`) crosses the binder back; raw bytes never decode in the
+  app process. This is the new structural mitigation that lets C5 survive the
+  feature.
+- **Live-camera frames decode in-process, but carry no still-image codec.**
+  `decodeYPlane` reads a first-party `YUV_420_888` luminance plane straight from
+  CameraX `ImageAnalysis` — already-decoded sensor pixels, never a file format —
+  so the RCE class that justifies isolating the static path is structurally
+  absent (wpass-7xo). Decode is pure-JVM ZXing. This is the one place untrusted
+  bytes decode in-process, and it is bounded to the no-codec live path.
+
+The decoder (`MultiFormatReader` core) is now in the dependency closure and
+invoked, so Threat 6's encoder-CVE cadence extends to decoder advisories on
+these two paths (no longer "decoder-only advisories are informational"). The
+decoded payload is never trusted as a usable code until the consumer's
+confirmation surface (C4 URI-scheme gate / image-keep confirm) clears it — a
+misread code cannot silently become a scannable artifact. See Threat 14.
+
 **C6. No secret material in the artifact.** The `ScannableCard` data model
 carries `payload`, `format`, `label`, `color`, `createdAt` and nothing else.
 There is no `secret`, `hmacKey`, `totpSeed`, `counter`, or any other field
@@ -245,6 +277,13 @@ that affects encoder code, treat decoder-only advisories as informational.
 Track this as `wpass-lzi.X` (encoder-dependency hygiene) if the cadence
 becomes operationally heavier than that.
 
+**Updated by the C5 amendment (wpass-7rv).** The decoder is now linked and
+invoked on the composite image-decode and live-scan paths, so decoder advisories
+are no longer informational: apply the same 30-day cadence to decoder CVEs that
+are reachable from `decodeYPlane` / `BarcodeImageDecoder`. The blast radius of a
+*static*-path decoder bug is contained to the isolated process (C5 amendment),
+which lowers severity but does not remove the upgrade obligation.
+
 **Status.** Mitigated by surface reduction (C5) and a stated cadence; the
 upgrade-cadence bead is the follow-up artifact.
 
@@ -363,6 +402,52 @@ boundary exists.
 **Status.** Out of scope for this document; tracked as `wlt-*` follow-ups via
 the handoff spec.
 
+### 14. Composite image-decode: hostile image bytes / misread payload — Remote code execution / Tampering
+
+**What.** The composite (image + extracted barcode) artifact (`wpass-8lu`,
+consumer epic `wlt-yjn5`) introduces two new ways untrusted data enters the
+system, neither of which existed for the type-it-yourself ScannableCard:
+
+1. **Hostile image bytes.** A user imports an image (gallery, file picker, or a
+   system-camera snap) that the kernel must decode to find a barcode. A crafted
+   image targeting a still-image codec bug (libwebp / Skia / Quram have a CVE
+   history of heap overflows reachable from a single malformed file) could
+   achieve code execution at decode time.
+2. **Misread payload presented as authoritative.** The decoder could misread a
+   barcode (damaged scan, ambiguous symbology) and, if the result were stored
+   silently as a usable code, the user would later present a wrong loyalty /
+   ticket number at a POS believing it correct.
+
+**Mitigation.** Decode-surface confinement plus mandatory confirmation:
+
+- **Static image bytes decode only in the permission-stripped isolated
+  process** (`BarcodeImageDecoder`), so a codec RCE is contained to a sandbox
+  with no Keystore / network / storage — see the C5 amendment. This covers all
+  three still sources; the system-camera snap is first-party bytes written to an
+  app-private cache file, but is decoded through the same isolated path so a
+  malicious gallery/file substitution gets identical treatment.
+- **Live auto-detect** decodes in-process but only first-party sensor YUV (no
+  still-image codec; C5 amendment, wpass-7xo), and produces a *code-only*
+  artifact — no image is retained on that path.
+- **The decoded payload is never a usable code until confirmed.** Actionable
+  payloads (URI schemes) raise the C4 create-time confirmation; the composite
+  also passes a consumer-side image-keep confirm before persist. Decode is *not*
+  the trust boundary — user confirmation is. A misread that the user does not
+  recognise is the residual risk, bounded the same way Threat 9 bounds a typo:
+  Walt is a display device, the POS is the authority.
+- **Transient camera stills are swept** to one-at-most in the consumer's cache
+  (`wlt-noq5`); the persisted image lives only in SQLCipher (Threats 7, 8
+  inherited).
+
+The image-codec RCE class is the kernel's to contain (isolated process); the
+manual-snap "system camera, never CameraX `ImageCapture`" rule and the
+confirmation surfaces are the consumer's, recorded in walt-android
+`docs/decisions-and-learnings.md`. Decoder advisories on these paths are now
+in-scope for the Threat 6 upgrade cadence.
+
+**Status.** Mitigated by isolation (static bytes) + no-codec path (live frames)
++ mandatory confirmation. Consumer obligations verified on-device in `wlt-yjn5.1`.
+
 ## Inventory: PKPASS controls and ScannableCard equivalents
 
 | PKPASS control                                  | ScannableCard equivalent                                                                |
@@ -422,7 +507,7 @@ can trace back here.
 | C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
-| C5      | `wpass-lzi.3` (encoder integration), dependency-graph assertion in build      |
+| C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |
 | C6      | `wpass-lzi.2` (schema snapshot — no `secret`/`hmac`/`totp` fields permitted) |
 
 ## Out of scope for this document
