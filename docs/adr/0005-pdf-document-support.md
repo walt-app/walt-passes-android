@@ -841,3 +841,80 @@ a composite import is indistinguishable from a plain image import in the telemet
 | C3       | `DocumentImporterTest`: no-code / extraction-failure / declined-confirmation all degrade to `ImportedImage`; `confirmHookSeesTheDecodedPayloadBeforePersist`; `pdfWithEmbeddedBytesNeverRunsBarcodeExtraction`. |
 | C4       | `passes-storage` `SchemaMigrationTest` (v6→v7 barcode columns, version/DDL/migration-keys locks in `PublicApiSurfaceTest`); `DocumentRepositoryTest` composite round-trip + plain-image-null-barcode tests. |
 | C5       | `DocumentSurfaceLockTest` (9-param lock holds — composite adds no `DocumentView` param); `DocumentTrustSurfaceTest`; `application/pdf` / `ACTION_SEND` bytecode scan stays green. |
+
+## Addendum 2026-06-18: D5 trust caption may be carried by a host "Pass type" row
+
+Tracks: `wpass-gv6` (this addendum). Cross-repo consumer: walt-android
+`wlt-3cer` (the "Pass type" details row, held pending this decision).
+
+### Context
+
+The consumer (Walt) wants to consolidate the document provenance signal into a
+single "Pass type" row inside its own host-rendered details section — values
+*PDF / Image / "Image, Scanned"* — instead of the kernel's docked
+`DocumentTrustCaption`. Read literally, D5 and the Z.4 / Z.8 addenda forbid this:
+the caption is non-suppressible and docked.
+
+This addendum first considered preserving the caption verbatim and only letting
+the host *relocate* it (an earlier draft, "D5.R: relocatable, not suppressible").
+That did not match the consumer's actual design: Walt wants one neutral
+provenance/type row across all artifact classes, and wants it to live inside a
+**collapsed-by-default** details foldout. A verbatim-relocation contract forbade
+both (no neutral-label substitution; the relocated caption had to be
+always-visible). The kernel owner chose to grant the consumer's design instead,
+as an explicit policy change to D5 — recorded here with its trade.
+
+### D5.T The provenance signal may be carried by a host "Pass type" row
+
+The kernel exposes
+`DocumentView(trustCaption = TrustCaptionPlacement.HostedTypeRow)`
+(`passes-document-ui`). Under that mode the kernel renders **no** trust caption on
+the detail surface; the host carries the claim with its own type label. The
+contract, and what it deliberately gives up versus docked D5:
+
+- **Neutral-type-label substitution is blessed.** A "Pass type: PDF" row is an
+  accepted carrier of the provenance claim. This is weaker than the verbatim
+  "User-provided document. Walt has not verified the source." sentence: it names
+  the artifact class rather than stating, in words, that the document is
+  user-provided and unverified. The consumer accepts that to keep one consistent
+  provenance/type row across artifact classes.
+- **Collapsible, not-always-visible placement is blessed.** The "Pass type" row
+  may sit inside a collapsed-by-default foldout. A user who never expands it does
+  not see the provenance signal on the detail surface.
+- `TrustCaptionPlacement` is `Docked | HostedTypeRow`. There is no
+  `showCaption: Boolean`: the placement is the audited carrier-of-provenance
+  choice, pinned by `documentViewTrustCaptionParamIsThePlacementType`. The param
+  count lock moves from 9 to 10
+  (`documentViewHasExactlyTenUserVisibleParameters`), superseding the 9-param
+  assertion in the prior (composite) addendum.
+
+**Why this is bounded.** D5 already accepts all PDFs as `Provenance.UserProvided`
+and never shows a "verified" signal; the document tower has no verified-vs-
+unverified ladder to conflate (unlike the PKPASS `SignatureStatus` badge). The
+"Pass type" row, even collapsed, is a labelled, discoverable, consistent location
+for provenance, and Walt remains a display device (D4: no extraction; the
+document is shown, not attested). The residual risk is that a user who never
+expands the foldout loses the in-words "unverified source" reminder on the detail
+surface; the kernel owner judges that acceptable for a user viewing a document
+they themselves imported. A host using `HostedTypeRow` is obliged to render the
+"Pass type" row; the kernel cannot verify this at runtime, so the obligation is
+pinned consumer-side by a walt-android test (the pin moved from the earlier
+draft's "host renders the kernel caption" to "host renders a Pass type row").
+
+### Scope: inline `DocumentView` only; full-screen stays docked
+
+`HostedTypeRow` applies to the inline `DocumentView` detail surface only.
+`FullScreenDocumentView` is unchanged: its caption stays docked to a screen edge
+and non-suppressible (Z.8). A host's collapsible details section is an
+inline-surface affordance; the full-screen zoom surface has no host details
+chrome to fold into, so the Z.4 / Z.8 "cannot be panned off, visible at every
+zoom level" guarantees stand verbatim.
+
+### Tests pinning this addendum
+
+| Decision | Test                                                                                                  |
+|----------|-------------------------------------------------------------------------------------------------------|
+| D5.T     | `DocumentSurfaceLockTest.documentViewHasExactlyTenUserVisibleParameters` + `documentViewTrustCaptionParamIsThePlacementType` (placement is the audited choice, not a Boolean) |
+| D5.T     | `DocumentTrustSurfaceTest.documentViewHostedTypeRowOmitsKernelCaption` (HostedTypeRow renders no kernel caption); `documentTrustCaptionRendersTheVerbatimTrustText` (the docked-mode caption still renders verbatim) |
+| Consumer | walt-android `wlt-3cer`: the details section renders a "Pass type" row enumerating the artifact class |
+| Scope    | `FullScreenDocumentView` shape lock unchanged (7 params); Z.8 full-screen caption tests stay green |

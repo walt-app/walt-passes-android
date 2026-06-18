@@ -23,7 +23,8 @@ import `is`.walt.passes.ui.core.isolated
  * Full-screen surface for scanning a [ScannableCard]. Wraps [ScannableCardView] with
  * minimal chrome: the user-controlled label up top (FSI/PDI isolated), the barcode
  * itself rendered at its full nominal size on a content-sized white backing, and the
- * non-suppressible [ScannableCardTrustCaption] docked at the bottom.
+ * [ScannableCardTrustCaption] docked at the bottom by default (omitted only under the
+ * audited [TrustCaptionPlacement.HostedTypeRow] concession — see [trustCaption]).
  *
  * The white backing is sized to the code (plus a quiet-zone margin), not to the whole
  * screen (wpass-1wu.2 / Walt wlt-n5z): the rest of the surface is transparent so the
@@ -32,11 +33,22 @@ import `is`.walt.passes.ui.core.isolated
  * preserved; [CODE_QUIET_ZONE] adds visual breathing room inside the card and the
  * QR/1D `ContentScale` split in [ScannableCardView] is unchanged.
  *
- * Trust contract: the caption is composed unconditionally at the bottom of the screen
- * (C2 in `docs/SCANNABLE_CARD_THREAT_MODEL.md`), structurally separate from any host
- * navigation chrome. There is no parameter, theme token, or overload that hides it.
- * [showLabel] gates ONLY the top label `Text`; it cannot suppress the barcode, the
- * payload caption, or the trust caption.
+ * Trust contract: by default ([TrustCaptionPlacement.Docked]) the caption is composed at
+ * the bottom of the screen (C2 in `docs/SCANNABLE_CARD_THREAT_MODEL.md`), structurally
+ * separate from any host navigation chrome. No theme token and no overload can drop it;
+ * the ONE way it is omitted is the audited [TrustCaptionPlacement.HostedTypeRow]
+ * concession below, under which the host carries provenance via its own "Pass type" row
+ * (C2 "Pass type" row concession). [showLabel] gates ONLY the top label `Text`; it cannot
+ * suppress the barcode, the payload caption, or the trust caption.
+ *
+ * [trustCaption] selects how the provenance signal is carried: with
+ * [TrustCaptionPlacement.HostedTypeRow] the kernel renders no caption here because the
+ * host carries the claim itself, as a "Pass type" row inside its own details section
+ * (value "Scanned" for a scannable card). Under that mode a neutral type label is an
+ * accepted carrier and the row may sit in a collapsed-by-default foldout — see
+ * `TrustCaptionPlacement` and the C2 "Pass type" row concession in the threat model.
+ * Defaults to [TrustCaptionPlacement.Docked] (the verbatim docked caption), so every
+ * existing caller is unchanged.
  *
  * No share / save-to-photos / print affordance, and no overflow menu. The user came
  * here to scan, then back out — those are the only two paths off this surface. Host
@@ -46,12 +58,17 @@ import `is`.walt.passes.ui.core.isolated
  * @param showLabel when false, the built-in label is not rendered. Defaults to true so
  *   every existing caller is unchanged. Hosts that render their own title above this
  *   surface (e.g. an editable self-title) pass false to avoid a duplicate (Walt wlt-tct).
+ * @param trustCaption how the provenance signal is carried. Defaults to
+ *   [TrustCaptionPlacement.Docked] (verbatim docked caption).
+ *   [TrustCaptionPlacement.HostedTypeRow] drops the kernel caption so the host carries
+ *   provenance via its own "Pass type" details row under the C2 concession (wpass-gv6).
  */
 @Composable
 public fun ScannableCardScreen(
     card: ScannableCard,
     modifier: Modifier = Modifier,
     showLabel: Boolean = true,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
 ) {
     Column(
         modifier = modifier.fillMaxSize(),
@@ -91,7 +108,15 @@ public fun ScannableCardScreen(
             }
         }
 
-        ScannableCardTrustCaption(modifier = Modifier.fillMaxWidth())
+        // Docked: the kernel renders the verbatim caption here. HostedTypeRow: the kernel
+        // renders nothing — the host carries provenance via its own "Pass type" details
+        // row (wpass-gv6 / C2 concession). Exhaustive `when` so a future placement arm
+        // must make an explicit decision rather than silently dropping the caption.
+        when (trustCaption) {
+            TrustCaptionPlacement.Docked ->
+                ScannableCardTrustCaption(modifier = Modifier.fillMaxWidth())
+            TrustCaptionPlacement.HostedTypeRow -> Unit
+        }
     }
 }
 

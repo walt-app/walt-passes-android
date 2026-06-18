@@ -1,36 +1,32 @@
-# Contributing
+# About this repository
 
-walt-passes-android is an open-source carve-out from the closed-source [Walt](https://walt.is) Android wallet. Its purpose is **transparency-for-trust**: every security-and-privacy claim Walt makes about pass handling is implemented in code that lives here. That goal shapes what kinds of contributions fit.
+walt-passes-android is an open-source carve-out from the closed-source [Walt](https://walt.is) Android wallet. It is published for one reason: **transparency-for-trust**. Every security-and-privacy claim Walt makes about pass handling is implemented in code that lives here, so users and security researchers can read exactly what Walt does with their pass data.
 
-## What fits this repository
+**This repository is published for auditability, not for external contribution.** It is not a community project. The canonical source of this code is Walt's internal development process; this repository is a faithful mirror of the trust-claim-bearing code, kept in the open so it can be verified — not a venue for collaborative development.
 
-- Bug fixes in PKPASS parsing, signature verification, encrypted storage, or the security-relevant UI flows listed in [`SECURITY.md`](SECURITY.md).
-- Additional parser hardening, fuzzing harnesses, or test coverage for malicious inputs.
-- Improvements that make security-and-privacy behavior easier to audit (clearer code, better naming, more direct trust-claim-to-code mapping).
-- Localization, accessibility, and visual polish in `passes-ui`, as long as the security-relevant composables (URL confirmation, expired badge, bounded image rendering) keep their guarantees.
+## Pull requests are not accepted
 
-## What does not fit
-
-- Features that pull pass data off the device. There is no `webServiceURL` handling, no telemetry to issuers, no cloud sync. PRs that add network calls in `passes-core` or `passes-storage` will be declined.
-- NFC / HCE handling for passes. Passes never register a payment AID; the `nfc` PKPASS field is parsed-and-ignored. This is deliberate to avoid HCE conflicts with Walt's payment feature.
-- WebView-based rendering of pass content. HTML in back fields is rendered through an explicit subset and nothing else.
-- Generalizing the library beyond what Walt needs. This is "Walt's open pass-handling kernel for Android," not a general-purpose PKPASS library. Reuse by other apps is welcome as a side effect; the primary commitment is the audit trail.
-
-If you are unsure whether a contribution fits, open an issue first to discuss.
+External pull requests — features, refactors, fixes, documentation — are not accepted and will be closed unmerged. This is not a judgment on any individual change. It is structural: the code Walt ships comes from its internal process, and merging outside patches here would fork the audit trail from the code that actually runs in the app. The whole value of this repository is that what you read here *is* what Walt ships; accepting outside PRs would undermine that. Please do not invest time in a PR expecting it to be merged.
 
 ## Reporting security issues
 
-Do **not** open a public GitHub issue. See [`SECURITY.md`](SECURITY.md) for the disclosure process.
+Security disclosure is the one form of outside input that is actively wanted. If you find a vulnerability, **do not** open a public GitHub issue — see [`SECURITY.md`](SECURITY.md) for the private disclosure process. Reports that demonstrate a gap between a stated trust claim and the code are especially valuable.
 
-## Development setup
+## Flagging an inconsistency
 
-The repo is in pre-alpha. Gradle modules and the build-logic convention plugins are introduced as the architecture phase concludes. Until then:
+If you notice a non-security discrepancy between a documented trust claim and the code, you are welcome to open an issue describing it, purely as a signal for the maintainers. There is no commitment to triage on any timeline, and any resulting change lands through Walt's internal process (and is then mirrored here), not through an external pull request.
 
-- Source of truth for architectural intent: [`README.md`](README.md) and the [`CLAUDE.md`](CLAUDE.md) at the repo root.
-- The trust-claim-to-module audit map in `README.md` describes where each security-and-privacy claim is intended to live.
-- Issue tracking uses [beads](https://github.com/steveyegge/beads) (`bd`). Run `bd ready` to see available work in this repo. The umbrella epic for the Walt Passes feature lives in walt-android (`wlt-0tn`).
+## Building locally (for audit and verification)
 
-## Code style
+Researchers who want to build and run the code to verify its behavior:
+
+- Architectural intent and the trust-claim-to-module audit map live in [`README.md`](README.md) and the [`CLAUDE.md`](CLAUDE.md) at the repo root.
+- The [`SECURITY.md`](SECURITY.md) trust claims map each security-and-privacy guarantee to the code that implements it.
+- Issue tracking uses [beads](https://github.com/steveyegge/beads) (`bd`); the history is in `.beads/` for transparency into how the code evolved.
+
+## How the code is written
+
+These conventions are documented so the code reads consistently for auditors, not as contributor onboarding:
 
 - 100% Kotlin (no Java).
 - Sealed interfaces, not sealed classes.
@@ -41,14 +37,6 @@ The repo is in pre-alpha. Gradle modules and the build-logic convention plugins 
 - BouncyCastle (JVM) for PKCS#7 / X.509.
 - `passes-core` has **no** Android framework dependencies.
 
-## Pull request workflow
-
-1. Fork or create a topic branch.
-2. Keep PRs focused. One change per PR makes the audit trail readable.
-3. Reference the relevant beads issue in the description if one exists.
-4. Confirm the change does not regress any of the trust claims listed in `SECURITY.md`. If it does, that is the conversation to have in the PR.
-5. CI must be green. Tests, linters, and dependency review all run automatically.
-
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0, the same license as the rest of the repository.
+The repository is licensed under the Apache License 2.0. Publishing under a permissive license serves the transparency goal — anyone may read, build, and verify the code — and reuse by other applications is welcome as a side effect. The primary commitment remains the audit trail, not a supported general-purpose library.

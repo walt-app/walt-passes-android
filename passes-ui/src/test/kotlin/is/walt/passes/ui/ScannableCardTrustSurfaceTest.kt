@@ -162,6 +162,42 @@ class ScannableCardTrustSurfaceTest {
     }
 
     @Test
+    fun fullScreenHostedTypeRowOmitsKernelCaption() {
+        // wpass-gv6 / C2 concession: TrustCaptionPlacement.HostedTypeRow drops the kernel
+        // caption on the detail surface — the host carries provenance via its own "Pass
+        // type" details row instead. The kernel renders NO "Created by you" caption here;
+        // that the host renders a "Pass type" row is the consumer-side obligation, pinned
+        // by a walt-android test (wlt-3cer), not here. The barcode and payload caption are
+        // unaffected (asserted below) — only the trust caption is dropped.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(
+                    card = qrFixture(),
+                    trustCaption = TrustCaptionPlacement.HostedTypeRow,
+                )
+            }
+        }
+        composeRule.onNodeWithText("Created by you").assertDoesNotExist()
+    }
+
+    @Test
+    fun hostedTypeRowStillRendersBarcodeAndPayloadCaption() {
+        // HostedTypeRow drops ONLY the trust caption; it is not a general surface
+        // suppressor. The barcode and the GH #102 payload-readback caption must still
+        // render, so a host opting into the type-row concession does not lose the scan
+        // target or the POS fallback.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(
+                    card = qrFixture(label = "Library card"),
+                    trustCaption = TrustCaptionPlacement.HostedTypeRow,
+                )
+            }
+        }
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+    }
+
+    @Test
     fun fullScreenRendersUserSuppliedLabel() {
         composeRule.setContent {
             ThemedHost {

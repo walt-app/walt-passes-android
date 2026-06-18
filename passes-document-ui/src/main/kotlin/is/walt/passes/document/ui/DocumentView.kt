@@ -43,16 +43,26 @@ import `is`.walt.passes.ui.core.toComposeColor
  * single, no-pager image over the isolated image-decode sandbox); [BarcodedImageDocument]
  * (wpass-8lu) routes to the SAME [ImageDocumentView] for its image half — the generated barcode
  * and format switcher are composed by the consumer with `passes-ui`, so this surface stays
- * image-only and the two UI towers remain independent. The trust caption is non-suppressible
- * inside every arm — this dispatcher adds no parameter that could omit it, so the
- * [DocumentSurfaceLockTest] shape lock and [DocumentTrustSurfaceTest] visible-text lock hold
- * across the seam.
+ * image-only and the two UI towers remain independent. By default the trust caption is
+ * rendered inside every arm; the ONE way it is omitted is the audited [trustCaption] =
+ * [TrustCaptionPlacement.HostedTypeRow] concession (ADR 0005 D5.T), under which the host
+ * carries provenance via its own "Pass type" row. No other parameter, theme token, or
+ * overload can drop it, so the [DocumentSurfaceLockTest] shape lock and
+ * [DocumentTrustSurfaceTest] visible-text lock hold across the seam.
  *
  * The backend handles are kind-specific and nullable: a consumer supplies the [pdfFile] /
  * [renderer] pair for a [PdfDocument] and the [imageFile] / [imageDecoder] pair for an
  * [ImageDocument]. The dispatcher requires the pair that matches the arm; passing a document
  * without its backend pair is a programming error and fails fast. This keeps a consumer that
  * only ever shows one kind from having to fabricate the other backend.
+ *
+ * [trustCaption] selects how the provenance signal is carried: with
+ * [TrustCaptionPlacement.HostedTypeRow] each arm renders no caption because the host carries
+ * the claim itself, as a "Pass type" row inside its own details section (values "PDF" /
+ * "Image" / "Image, Scanned"). Under that mode a neutral type label is an accepted carrier
+ * and the row may sit in a collapsed-by-default foldout — see `TrustCaptionPlacement` and
+ * the ADR 0005 D5 "Pass type" row addendum. Defaults to [TrustCaptionPlacement.Docked] (the
+ * verbatim docked caption) so every existing caller is unchanged.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -64,6 +74,7 @@ public fun DocumentView(
     imageDecoder: ImageDecodeBinder? = null,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
     onOpenFullScreen: (() -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
 ) {
@@ -74,6 +85,7 @@ public fun DocumentView(
             renderer = requireNotNull(renderer) { "DocumentView(PdfDocument) requires a non-null renderer" },
             modifier = modifier,
             telemetry = telemetry,
+            trustCaption = trustCaption,
             onOpenFullScreen = onOpenFullScreen,
             fullScreenAffordance = fullScreenAffordance,
         )
@@ -83,6 +95,7 @@ public fun DocumentView(
             decoder = requireNotNull(imageDecoder) { "DocumentView(ImageDocument) requires a non-null imageDecoder" },
             modifier = modifier,
             telemetry = telemetry,
+            trustCaption = trustCaption,
         )
         // wpass-8lu: a composite renders its IMAGE half through the same isolated image-decode
         // surface as a plain image (same imageFile / imageDecoder pair, no new DocumentView
@@ -98,12 +111,13 @@ public fun DocumentView(
             },
             modifier = modifier,
             telemetry = telemetry,
+            trustCaption = trustCaption,
         )
     }
 }
 
 /**
- * Presentation of a [PdfDocument] — a non-suppressible trust caption above a swipeable
+ * Presentation of a [PdfDocument] — the trust caption (Docked by default) above a swipeable
  * pager of rasterised pages. `PdfDocumentView` fills the bounds the consumer gives it and
  * does NOT assume a full screen: the caption takes its natural height, the pager takes
  * the rest, and each page is letterboxed into the pager slot rather than sized from a
@@ -118,10 +132,12 @@ public fun DocumentView(
  *
  * Trust contract:
  *
- *  - The non-suppressible [DocumentTrustCaption] is rendered inside this view and is
- *    not gated by any parameter. There is no `DocumentView` overload that omits it.
- *    `DocumentSurfaceLockTest` pins the parameter shape; `DocumentTrustSurfaceTest`
- *    pins the visible-text contract.
+ *  - The [DocumentTrustCaption] is rendered inside this view by default; the ONE way it
+ *    is omitted is the audited `trustCaption = TrustCaptionPlacement.HostedTypeRow`
+ *    concession (ADR 0005 D5.T), under which the host carries provenance via its own
+ *    "Pass type" row. No other parameter, theme token, or overload can drop it, and no
+ *    `DocumentView` overload exists. `DocumentSurfaceLockTest` pins the parameter shape;
+ *    `DocumentTrustSurfaceTest` pins the visible-text contract (and the HostedTypeRow omit).
  *  - The view displays only the rasterised page bitmaps and the caption. ADR 0005 D4:
  *    no PDF metadata, no extracted text, no annotation list, no attachment list.
  *  - The view exposes no share, export, print, or open-with affordance. ADR 0005 D8.
@@ -167,6 +183,7 @@ private fun PdfDocumentView(
     renderer: PdfRendererBinder,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
     onOpenFullScreen: (() -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
 ) {
@@ -182,7 +199,15 @@ private fun PdfDocumentView(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        DocumentTrustCaption()
+        // Docked: the kernel renders the verbatim caption here. HostedTypeRow: the kernel
+        // renders nothing — the host carries provenance via its own "Pass type" details
+        // row (wpass-gv6 / D5 concession). Exhaustive `when` (not an `if`) so a future
+        // placement arm cannot silently fall through to omitting the caption — the one
+        // direction a trust surface must never default to.
+        when (trustCaption) {
+            TrustCaptionPlacement.Docked -> DocumentTrustCaption()
+            TrustCaptionPlacement.HostedTypeRow -> Unit
+        }
 
         // `laneBackground` paints behind the pager only — the document-surface tone the
         // page sits on (showing through ContentScale.Fit letterbox bars). The page region
@@ -235,7 +260,7 @@ private fun PdfDocumentView(
 }
 
 /**
- * Presentation of an [ImageDocument] — the non-suppressible trust caption above a single,
+ * Presentation of an [ImageDocument] — the trust caption (Docked by default) above a single,
  * fixed-fit image (wpass-i9x step 4). The image-arm analogue of [PdfDocumentView], minus the
  * pager: an image is a single page, so there is no [HorizontalPager] and no per-page cache.
  * The original image is decoded once inside the `passes-image` sandbox (reached through the
@@ -244,9 +269,11 @@ private fun PdfDocumentView(
  *
  * Trust contract (identical to the PDF arm):
  *
- *  - The non-suppressible [DocumentTrustCaption] is composed inside this view and gated by no
- *    parameter. There is no overload that omits it. `DocumentSurfaceLockTest` /
- *    `DocumentTrustSurfaceTest` pin the shape and the visible text across both arms.
+ *  - The [DocumentTrustCaption] is composed inside this view by default; the ONE way it is
+ *    omitted is the audited `trustCaption = TrustCaptionPlacement.HostedTypeRow` concession
+ *    (ADR 0005 D5.T). No other parameter, theme token, or overload can drop it, and no
+ *    overload exists. `DocumentSurfaceLockTest` / `DocumentTrustSurfaceTest` pin the shape
+ *    and the visible text (and the HostedTypeRow omit) across both arms.
  *  - The view displays only the decoded raster and the caption. ADR 0005 D4: no image
  *    metadata, no EXIF, no extracted text — the content description is a fixed neutral string.
  *  - No share / export / open-with affordance (ADR 0005 D8); the bytecode scan in
@@ -259,19 +286,29 @@ private fun PdfDocumentView(
  * surface is the image-document presentation this step ships.
  */
 @Composable
+@Suppress("LongParameterList")
 private fun ImageDocumentView(
     documentId: DocumentId,
     imageFile: ParcelFileDescriptor,
     decoder: ImageDecodeBinder,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
 ) {
     val semantics = LocalDocumentSemantics.current
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        DocumentTrustCaption()
+        // Docked: the kernel renders the verbatim caption here. HostedTypeRow: the kernel
+        // renders nothing — the host carries provenance via its own "Pass type" details
+        // row (wpass-gv6 / D5 concession). Exhaustive `when` (not an `if`) so a future
+        // placement arm cannot silently fall through to omitting the caption — the one
+        // direction a trust surface must never default to.
+        when (trustCaption) {
+            TrustCaptionPlacement.Docked -> DocumentTrustCaption()
+            TrustCaptionPlacement.HostedTypeRow -> Unit
+        }
 
         // `laneBackground` paints behind the image only — the document-surface tone the image
         // sits on (showing through the ContentScale.Fit letterbox bars), so the caption above

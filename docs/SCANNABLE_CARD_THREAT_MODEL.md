@@ -87,6 +87,57 @@ homogeneous-list register and nothing else. A future consumer wanting a wallet
 list that also drops the detail-surface caption is amending this row, not
 filing a refactor.
 
+**C2 — host "Pass type" row concession (detail surface).** A consumer (Walt,
+`wlt-3cer`) consolidates the provenance signal into a single "Pass type" row
+inside its own host-rendered details section — values *Image / Scanned / Pkpass
+/ PDF / "Image, Scanned"* across artifact classes — rather than carrying it as
+the kernel's bottom-docked `ScannableCardTrustCaption`. The kernel grants this
+through `ScannableCardScreen(trustCaption = TrustCaptionPlacement.HostedTypeRow)`
+(`wpass-gv6`): under that mode the kernel renders **no** trust caption on the
+detail surface, and the host carries the claim with its own type label.
+
+This is a deliberate **weakening of the detail-surface mitigation**, and it is
+recorded as such. Two things this concession explicitly blesses that the
+docked-caption contract forbade:
+
+1. **Neutral-type-label substitution.** A "Pass type: Scanned" row *is* an
+   accepted carrier of the provenance claim under this mode. It is a weaker
+   signal than the verbatim "Created by you" sentence: it names the artifact
+   class rather than stating, in words, "you made this and Walt did not verify
+   it." The consumer accepts that trade to keep one consistent provenance/type
+   row across all artifact classes instead of a class-specific caption.
+2. **Collapsible, not-always-visible placement.** The "Pass type" row may sit
+   inside a collapsed-by-default details foldout. A user who never expands the
+   foldout does not see the provenance signal on the detail surface at all.
+
+**Why this is bounded rather than an open hole.** The load-bearing mitigation for
+Threat 1 (visual conflation with a verified PKPASS) is C1 + C2 *combined*, and
+C1 is untouched: the wallet **list** still distinguishes the artifact class
+structurally — distinct lane / `ScannableCardRowTile` with no signature dot and
+no verified-styled band. The detail surface is reached only *after* the user has
+already seen that list-level distinction, and on a card they themselves created
+and can delete. The "Pass type" row, even collapsed, is a labelled, discoverable,
+consistent location for provenance. And Walt remains a display device, not an
+issuer — the POS / recipient is the authority for whether an artifact is
+credit-worthy (Threat 9). The residual risk is that a user who relies solely on
+the detail surface, never expands the foldout, and ignores the list-level
+distinction loses the in-words provenance reminder; the consumer judges that
+acceptable for a user viewing their own self-created card.
+
+**Bound of the concession.** `HostedTypeRow` is permitted strictly for a host
+that (a) renders a "Pass type" row enumerating the artifact class on its detail
+surface, and (b) preserves the C1 list-level distinctions. The kernel cannot
+verify either at runtime — exactly as it cannot verify condition 3 of the
+wallet-row concession above — so the obligation shifts to the consumer and is
+pinned consumer-side by a walt-android test that the details section renders a
+"Pass type" row (the pin moved from the earlier "host renders the kernel
+caption"). `Docked` remains the default and the recommended surface for hosts
+that do not own a details section. A future consumer wanting to drop **both** the
+detail-surface caption **and** the C1 list-level distinction is amending this
+row, not filing a PR. There is still no `showCaption: Boolean`: the placement is
+the audited `Docked | HostedTypeRow` choice, pinned by
+`scannableCardScreenTrustCaptionParamIsThePlacementType`.
+
 **C3. Input hygiene at the create boundary.** `passes-core` validates
 `ScannableCardCreateInput` for: per-format length caps (Code128 ~80 chars,
 EAN-13 / UPC-A fixed-length with checksum, QR per-version cap with a
@@ -182,7 +233,19 @@ list-row to detail-surface only; the artifact-class distinction at list scale
 is then carried by the absence of pass-only chrome (signature dot, verified
 band) rather than by the carousel tile's four redundant distinguishers.
 
-**Status.** Mitigated structurally. This is the load-bearing concern of the
+A second, deeper consumer-side concession (`HostedTypeRow`, `wpass-gv6`) lets a
+host drop the detail-surface caption entirely and carry provenance with its own
+"Pass type" row — a neutral type label, possibly inside a collapsed foldout.
+Under that mode the detail-surface arm of this mitigation is reduced to the host
+type row, and the load shifts almost entirely onto C1's list-level distinction
+(the user has already seen the artifact class on the list before reaching the
+detail surface, on a card they created themselves). This is a real reduction in
+defense-in-depth, accepted deliberately; full conditions, rationale, and residual
+risk are in the C2 "Pass type" row concession subsection above.
+
+**Status.** Mitigated structurally, with the detail-surface layer reducible to a
+host "Pass type" row under the bounded `HostedTypeRow` concession (C1 list-level
+distinction then carries the load). This is the load-bearing concern of the
 entire epic; every downstream child must trace back to this row.
 
 ### 2. Hostile URI payload encoded into a QR that another device auto-acts on — Spoofing / Elevation of privilege
@@ -487,12 +550,19 @@ threat row above.
 - **No payload-bytes telemetry.** The `ScannableCardTelemetryGuard` may
   surface format counts and create/delete event counts; payload contents and
   payload length distributions are PII and never leave the device.
-- **No bypass of the "Created by you" caption on the detail surface**
-  (`ScannableCardScreen`), through theming, layout, or consumer-supplied
-  composables. The list-row register (`ScannableCardRowTile`) shifts the
-  caption from list-row to detail surface under the bounded C1 / C2
-  concession above; the detail surface itself remains non-suppressible. C2
-  forbids any further bypass.
+- **No unbounded bypass of the "Created by you" provenance signal on the detail
+  surface** (`ScannableCardScreen`), through theming, layout, or
+  consumer-supplied composables. Two bounded concessions exist, both recorded
+  above and nowhere else: the list-row register (`ScannableCardRowTile`) shifts
+  the caption from list-row to detail surface under the C1 / C2 concession; and
+  `TrustCaptionPlacement.HostedTypeRow` (`wpass-gv6`) lets a host drop the
+  detail-surface caption and carry provenance with its own "Pass type" row (a
+  neutral type label, possibly collapsed) under the C2 "Pass type" row
+  concession, with C1's list-level distinction carrying the load. Outside those
+  two concessions C2 forbids any bypass: there is no `showCaption: Boolean`, and
+  a host that drops the detail-surface caption without *both* a "Pass type" row
+  *and* the C1 list-level distinction is amending the C2 concession, not filing
+  a PR.
 
 ## How each control is tested
 
@@ -504,7 +574,7 @@ can trace back here.
 | Control | Pinned by                                  |
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
-| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract |
+| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFourUserVisibleParameters` + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer` |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |

@@ -192,6 +192,52 @@ class DocumentTrustSurfaceTest {
         }
     }
 
+    @Test
+    fun documentViewHostedTypeRowOmitsKernelCaption() {
+        // wpass-gv6 / D5 concession: TrustCaptionPlacement.HostedTypeRow drops the kernel
+        // caption on the detail surface — the host carries provenance via its own "Pass
+        // type" details row instead. The kernel arm renders NO caption; that the host
+        // renders a "Pass type" row is the consumer-side obligation, pinned by a
+        // walt-android test (wlt-3cer), not here.
+        val doc = ImageDocument(
+            id = ImageDocumentId("img-hosted"),
+            displayLabel = "ticket.png",
+            byteCount = 2048L,
+            widthPx = 1080,
+            heightPx = 1920,
+            importedAtEpochMs = 0L,
+        )
+        val rejectingDecoder = object : ImageDecodeBinder {
+            override suspend fun decode(
+                image: ParcelFileDescriptor,
+                maxWidthPx: Int,
+                maxHeightPx: Int,
+            ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
+        }
+        val file = File.createTempFile("walt-image-doc", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            composeRule.setContent {
+                ThemedHost {
+                    DocumentView(
+                        doc = doc,
+                        imageFile = pfd,
+                        imageDecoder = rejectingDecoder,
+                        trustCaption = TrustCaptionPlacement.HostedTypeRow,
+                    )
+                }
+            }
+            composeRule.onAllNodesWithText(
+                "User-provided document. Walt has not verified the source.",
+            ).fetchSemanticsNodes().let { nodes ->
+                assertThat(nodes).isEmpty()
+            }
+        } finally {
+            pfd.close()
+            file.delete()
+        }
+    }
+
     @Composable
     private fun ThemedHost(content: @Composable () -> Unit) {
         MaterialTheme {

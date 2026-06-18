@@ -47,9 +47,11 @@ import `is`.walt.passes.ui.theme.toComposeColor
  *     [PassColors] background).
  *  3. Smaller corner radius (8 dp vs the pass's 16 dp), mirroring `DocumentTile`'s
  *     same "not a pass" cue.
- *  4. The non-suppressible "Created by you" caption with its pencil glyph
- *     ([ScannableCardTrustCaption]), composed inside the tile so the trust signal
- *     travels with the artifact and cannot be hidden by a host.
+ *  4. The "Created by you" caption ([ScannableCardTrustCaption], text-only since the
+ *     wpass-v3u restyle), composed unconditionally inside the tile so the trust signal
+ *     travels with the artifact and cannot be hidden by a host. The tile has no
+ *     placement parameter; the `HostedTypeRow` concession applies only to the detail
+ *     surface (`ScannableCardScreen`), so the caption here is always rendered.
  *
  * The caption is always rendered, [maxLines = 1], `softWrap = false`, and overflow
  * [TextOverflow.Visible] so it does not truncate at any tile size — the trust caption
