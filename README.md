@@ -52,6 +52,30 @@ Pre-alpha. Architecture and design phase. No releases yet.
 - Manual entry, QR-scan import (deferred to v2).
 - Lock screen integration (deferred to v1.5).
 
+## Verifying a downloaded APK
+
+Every Walt Android build is signed with the same key, so its SHA-256
+signing-certificate fingerprint is stable across releases. The canonical
+download is [walt.is/releases](https://walt.is/releases); this fingerprint is
+published here as a second, independent source so it can be cross-checked
+against the website rather than trusted on the website's word alone.
+
+**SHA-256 signing fingerprint:**
+
+```
+6C:8D:50:53:EB:9D:0A:4A:84:72:CA:7D:92:F2:52:9E:FB:A9:4C:24:E4:90:1D:99:D1:6B:B8:5A:79:34:64:99
+```
+
+Before installing a directly downloaded APK, run `apksigner` (from the Android
+SDK build-tools) against the file and confirm the printed certificate digest
+matches the value above:
+
+```
+apksigner verify --print-certs --min-sdk-version 24 walt-<version>.apk
+```
+
+If the digests do not match, do not install the file.
+
 ## Security policy
 
 See [`SECURITY.md`](SECURITY.md) for vulnerability disclosure.
