@@ -80,8 +80,15 @@ internal data class CachedPage(val bitmap: Bitmap, val pageAspect: Float)
 
 /**
  * Compose-friendly facade over the isolated-process PDF renderer for **single-page
- * thumbnails**. Use this from a list-row composable to drive an asynchronously
+ * renders**. Use this from a list-row composable to drive an asynchronously
  * rendered page-N bitmap with correct lifetime, cancellation, and cache discipline.
+ *
+ * This is also the blessed paged-access path for pager surfaces (wpass-tjc.3;
+ * consumer epic wlt-mx2d): [page] selects any index, so a pager composes one call
+ * per visible page — plus the adjacent page for a peek/prefetch — against a shared
+ * [cache], and only that window is ever rasterised ([DEFAULT_PAGE_WINDOW] pages;
+ * never the whole document). `DocumentView`'s inline pager is the reference
+ * consumer of exactly this pattern.
  *
  * Lifecycle guarantees this facade owns so consumers do not have to reimplement:
  *

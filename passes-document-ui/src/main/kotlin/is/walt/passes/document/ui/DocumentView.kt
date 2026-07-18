@@ -226,7 +226,16 @@ private fun PdfDocumentView(
                     if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
                 }
                 .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
-            HorizontalPager(state = pagerState, modifier = pagerModifier) { page ->
+            // beyondViewportPageCount = 1: the adjacent page composes (and rasterises
+            // into the cache) before it enters the viewport, so a swipe or a consumer
+            // peek layout reveals a ready page, not a blank sliver (wpass-tjc.3). One
+            // page each side keeps at most 3 live pages, inside the cache window of
+            // DEFAULT_PAGE_WINDOW (5).
+            HorizontalPager(
+                state = pagerState,
+                modifier = pagerModifier,
+                beyondViewportPageCount = 1,
+            ) { page ->
                 DocumentPage(
                     document = doc,
                     pageIndex = page,
