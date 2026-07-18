@@ -918,3 +918,29 @@ zoom level" guarantees stand verbatim.
 | D5.T     | `DocumentTrustSurfaceTest.documentViewHostedTypeRowOmitsKernelCaption` (HostedTypeRow renders no kernel caption); `documentTrustCaptionRendersTheVerbatimTrustText` (the docked-mode caption still renders verbatim) |
 | Consumer | walt-android `wlt-3cer`: the details section renders a "Pass type" row enumerating the artifact class |
 | Scope    | `FullScreenDocumentView` shape lock unchanged (7 params); Z.8 full-screen caption tests stay green |
+
+## Addendum 2026-07-18: List-surface presentation — content-true previews on neutral cards
+
+Tracks: kernel `wpass-tjc.4`; consumer epic `wlt-mx2d` (wallet redesign).
+
+Walt's redesigned wallet list presents documents as neutral cards with
+content-true previews rendered inline on the card face: a PDF card shows its
+page-0 thumbnail, an image card its photo thumbnail, and a composite card its
+EXTRACTED code (via `passes-ui`'s `CompactCodeView`; the kept image reduces to
+a small corner badge, with the full image behind the detail surface).
+
+Nothing here is mechanically new: previews come from the existing
+Walt-produced rasters (stored thumbnails / `rememberPdfThumbnail`), so no new
+render, decode, or extraction surface is introduced (D2/D3/D4 unchanged).
+What this addendum records is the presentation posture:
+
+- List cards are neutral surfaces with the artifact class named in the
+  eyebrow ("PDF" / "IMAGE" / "IMAGE, QR CODE"); they never take issuer color
+  (ADR 0003 D4 addendum) and carry no verified affordance of any kind.
+- Detail-surface trust posture is unchanged: the non-suppressible caption
+  (D5, Z.4/Z.8) and the audited `HostedTypeRow` concession (D5.T) stand
+  verbatim. The list preview adds no caption of its own — provenance stays a
+  detail-surface signal, exactly as the D5.T addendum records.
+- The composite code-on-card-face posture is recorded as a C1/C2 concession
+  in `SCANNABLE_CARD_THREAT_MODEL.md` ("list-face code render"); this
+  addendum and that row cross-reference each other deliberately.

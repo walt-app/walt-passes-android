@@ -277,3 +277,28 @@ Rationale, restated from the storage precedent:
   `contentDescription: String?` (where applicable) and the implementation bead
   must pass non-null content descriptions for the trust badge, expired pill,
   and barcode altText. Accessibility-test coverage is a follow-on.
+
+## Addendum 2026-07-18: Issuer colors extend to the wallet-list pass card face
+
+Tracks: kernel `wpass-tjc.4`; consumer epic `wlt-mx2d` (wallet redesign).
+
+D4 scoped issuer colors to "the pass surface itself" and made the host theme
+authoritative for wallet-list chrome; in practice the parsed `PassColors` went
+unused at list scale. The redesigned wallet list renders each pkpass as an
+Apple-Wallet-style card whose face is a miniature pass surface, and D4's
+override now extends to it: `pass.json` `backgroundColor` drives the card
+face, `foregroundColor` / `labelColor` drive its text under the consumer's
+contrast guard, with the category accent as fallback. A white issuer card is
+distinguished from the wallet background by a hairline, not by tinting.
+
+The D4 boundaries are otherwise unchanged, and two are load-bearing:
+
+- **Only pkpass cards take issuer color.** Document, scannable, and composite
+  list cards stay neutral with the class named in the eyebrow — see the
+  "list-face code render" and "redesign context" rows in
+  `SCANNABLE_CARD_THREAT_MODEL.md`. Issuer color functions as pass identity,
+  never as the artifact-class signal.
+- **Color is presentation, not trust.** No signature or verified affordance
+  renders on any list card; the trust ladder stays on detail surfaces. The
+  security-sheet family and other off-pass surfaces remain issuer-color-free
+  exactly as D4 records.

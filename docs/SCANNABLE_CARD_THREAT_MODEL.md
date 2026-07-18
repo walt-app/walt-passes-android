@@ -123,7 +123,23 @@ recipient remains the authority on whether the code is credit-worthy (Threat
 eyebrow taxonomy, or wanting pkpass barcodes at list scale, is amending this
 row, not filing a PR.
 
-**C2 — host "Pass type" row concession (detail surface).** A consumer (Walt,
+**Redesign context — where the C1 list distinction now lives (wpass-tjc.4;
+consumer epic wlt-mx2d).** The redesigned wallet list changes what
+distinguishes card classes, and the change is recorded here so the
+verified-band confusion class can be checked against it:
+
+- **Issuer `pass.json` colors now drive pkpass list-card faces** (previously
+  parsed but unused off the pass front; ADR 0003 D4 addendum). Issuer color
+  appears on pkpass cards ONLY: document, scannable, and composite cards keep
+  the neutral surface + class eyebrow of condition 2 above. A white issuer card
+  is distinguished from the wallet background by a hairline, not by tinting —
+  color never becomes the class signal.
+- **No list card of any class carries a signature or verified affordance.** The
+  trust ladder (signature badge, trust captions) lives exclusively on detail
+  surfaces. The verified-band confusion class is therefore structurally absent
+  at list scale: there is no verified visual for a user-created card to
+  imitate, which is a stronger posture than the per-row distinguisher
+  accounting the original C1/C2 text assumed. A consumer (Walt,
 `wlt-3cer`) consolidates the provenance signal into a single "Pass type" row
 inside its own host-rendered details section — values *Image / Scanned / Pkpass
 / PDF / "Image, Scanned"* across artifact classes — rather than carrying it as
