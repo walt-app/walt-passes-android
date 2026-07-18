@@ -131,7 +131,8 @@ verified-band confusion class can be checked against it:
 - **Issuer `pass.json` colors now drive pkpass list-card faces** (previously
   parsed but unused off the pass front; ADR 0003 D4 addendum). Issuer color
   appears on pkpass cards ONLY: document, scannable, and composite cards keep
-  the neutral surface + class eyebrow of condition 2 above. A white issuer card
+  the neutral surface + class eyebrow posture of condition 2 above (document
+  eyebrows "PDF" / "IMAGE" per the ADR 0005 list-surface addendum). A white issuer card
   is distinguished from the wallet background by a hairline, not by tinting —
   color never becomes the class signal.
 - **No list card of any class carries a signature or verified affordance.** The
@@ -139,7 +140,12 @@ verified-band confusion class can be checked against it:
   surfaces. The verified-band confusion class is therefore structurally absent
   at list scale: there is no verified visual for a user-created card to
   imitate, which is a stronger posture than the per-row distinguisher
-  accounting the original C1/C2 text assumed. A consumer (Walt,
+  accounting the original C1/C2 text assumed. Pinned consumer-side: the
+  `WalletListTest` "no signature dot" invariant extends to every card class
+  under `wlt-mx2d` (pin lands with the consumer redesign; until then the
+  existing scannable-row invariant holds).
+
+**C2 — host "Pass type" row concession (detail surface).** A consumer (Walt,
 `wlt-3cer`) consolidates the provenance signal into a single "Pass type" row
 inside its own host-rendered details section — values *Image / Scanned / Pkpass
 / PDF / "Image, Scanned"* across artifact classes — rather than carrying it as
@@ -297,8 +303,11 @@ risk are in the C2 "Pass type" row concession subsection above.
 
 **Status.** Mitigated structurally, with the detail-surface layer reducible to a
 host "Pass type" row under the bounded `HostedTypeRow` concession (C1 list-level
-distinction then carries the load). This is the load-bearing concern of the
-entire epic; every downstream child must trace back to this row.
+distinction then carries the load). Under the `wlt-mx2d` redesign the
+list-level distinction is carried per the "Redesign context" row above: neutral
+surface + class eyebrow on non-pass cards, issuer color on pkpass cards only,
+and no verified affordance on any list card. This is the load-bearing concern
+of the entire epic; every downstream child must trace back to this row.
 
 ### 2. Hostile URI payload encoded into a QR that another device auto-acts on — Spoofing / Elevation of privilege
 
