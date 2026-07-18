@@ -347,6 +347,48 @@ class DocumentRepositoryTest {
     }
 
     @Test
+    fun updateLabelOverCapAgainstUnknownIdIsRejectedBeforeRowLookup() = runTest {
+        val telemetry = RecordingGuard()
+        val repo = repo(FakeDocumentStore(), telemetry)
+
+        val tooLongAfterTrim = "  " + "a".repeat(DocumentBounds.MAX_LABEL_CHARS + 1) + "  "
+        val result = repo.updateDocumentLabel(DocumentRecordId(404L), tooLongAfterTrim)
+
+        check(result is StorageResult.Failure)
+        val err = result.error as StorageError.DocumentRejected
+        assertThat(err.kind).isEqualTo(DocumentStorageRejectedKind.LabelTooLongAtStorage)
+        // Cap precedence: rejected before the row lookup, so no IntegrityViolation event.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "doc-rejected:LabelTooLongAtStorage",
+        ).inOrder()
+    }
+
+    @Test
+    fun insertTrimsLabelAndFoldsBlankToEmptyMatchingUpdate() = runTest {
+        val repo = repo(FakeDocumentStore(), RecordingGuard())
+
+        val trimmed = repo.insertDocument(
+            label = "  boarding pass  ",
+            pdfBytes = ByteArray(1),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(trimmed is StorageResult.Success)
+        val blank = repo.insertDocument(
+            label = "   ",
+            pdfBytes = ByteArray(1),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(blank is StorageResult.Success)
+
+        val labelsById = repo.observeDocuments().first().associate { it.id to it.displayLabel }
+        assertThat(labelsById[trimmed.value]).isEqualTo("boarding pass")
+        assertThat(labelsById[blank.value]).isEqualTo("")
+    }
+
+    @Test
     fun updateLabelOnImageRowPreservesKindColumns() = runTest {
         val repo = repo(FakeDocumentStore(), RecordingGuard())
         val insert = repo.insertDocument(
@@ -642,9 +684,6 @@ class DocumentRepositoryTest {
     }
 
     /**
-     * Pass-side store stub: the document tests do not exercise pass-side code paths.
-     */
-    /**
      * Scannable-card store stub: the document tests do not exercise scannable-card paths.
      */
     private object NoOpScannableCardStore : ScannableCardStore {
@@ -658,6 +697,9 @@ class DocumentRepositoryTest {
         override fun close() = Unit
     }
 
+    /**
+     * Pass-side store stub: the document tests do not exercise pass-side code paths.
+     */
     private object NoOpPassStore : PassStore {
         override fun listSummaries(): List<PassSummary> = emptyList()
         override fun loadById(id: PassRecordId): StoredPass? = null

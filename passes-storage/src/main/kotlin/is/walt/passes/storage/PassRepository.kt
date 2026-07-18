@@ -107,7 +107,9 @@ public interface PassRepository {
      * Defense in depth (ADR 0005 D7): rejects documents whose size exceeds
      * [DocumentBounds.MAX_BYTES] with [DocumentStorageRejectedKind.OversizedAtStorage], and
      * labels longer than [DocumentBounds.MAX_LABEL_CHARS] with
-     * [DocumentStorageRejectedKind.LabelTooLongAtStorage]. For a [DocumentInsert.Pdf] it
+     * [DocumentStorageRejectedKind.LabelTooLongAtStorage]. The label is normalized like
+     * [updateDocumentLabel] — trimmed, blank folding to the empty string — and the cap is
+     * measured against the trimmed value, so both paths writing the label column agree. For a [DocumentInsert.Pdf] it
      * additionally rejects page counts exceeding [DocumentBounds.MAX_PAGES] with
      * [DocumentStorageRejectedKind.TooManyPagesAtStorage]; the page cap does not apply to
      * images, which are a single page. The upstream import path already enforces the size
@@ -132,8 +134,7 @@ public interface PassRepository {
      * trailing whitespace before storage (internal whitespace preserved), and a label
      * that is blank after trimming is stored as the empty string — the document label
      * column is non-null with no fallback identity, so empty is its cleared state
-     * (consumers render a placeholder). The same "invisible label" defense in depth
-     * applies here as on the pass side: an all-whitespace rename cannot land verbatim.
+     * (consumers render a placeholder).
      *
      * Mirrors [insertDocument]'s label cap, measured against the trimmed value: rejects
      * labels longer than [DocumentBounds.MAX_LABEL_CHARS] with
