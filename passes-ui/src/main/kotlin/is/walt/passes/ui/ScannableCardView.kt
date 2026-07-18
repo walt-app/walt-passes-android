@@ -1,7 +1,6 @@
 package `is`.walt.passes.ui
 
 import android.graphics.Bitmap
-import android.graphics.Color as AndroidColor
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,11 +23,11 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.BarcodeEncoder
-import `is`.walt.passes.core.BarcodeMatrix
 import `is`.walt.passes.core.EncodeResult
 import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.ui.core.isolated
+import `is`.walt.passes.ui.internal.toMonochromeBitmap
 
 /**
  * Renders [card]'s barcode through [BarcodeEncoder] as a 1-bit-per-module bitmap.
@@ -148,21 +147,6 @@ private fun ScannableFormat.contentScale(): ContentScale = when (this) {
     ScannableFormat.UpcA,
     ScannableFormat.Code39,
     -> ContentScale.FillBounds
-}
-
-/**
- * Paints a [BarcodeMatrix] into a matrix-sized ARGB_8888 bitmap. Compose scales to
- * the final dp container nearest-neighbor via `BitmapPainter(filterQuality = None)`.
- */
-private fun BarcodeMatrix.toMonochromeBitmap(): Bitmap {
-    val pixels = IntArray(width * height)
-    for (y in 0 until height) {
-        val rowOffset = y * width
-        for (x in 0 until width) {
-            pixels[rowOffset + x] = if (isSet(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
-        }
-    }
-    return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
 }
 
 private val CAPTION_GAP = 12.dp

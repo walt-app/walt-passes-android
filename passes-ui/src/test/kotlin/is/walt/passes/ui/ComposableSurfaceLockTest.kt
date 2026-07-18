@@ -217,6 +217,16 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
+    fun compactCodeViewHasExactlyFourUserVisibleParameters() {
+        // (payload, format, modifier, contentDescription). The compact list-face code
+        // render (wpass-tjc.2) is mechanism only: no label, eyebrow, caption, or
+        // signature-affordance parameter may appear here — the C1/C2 list-surface
+        // distinctions live on the consumer's card and kernel trust captions stay on
+        // detail surfaces. Review the threat model before changing this number.
+        assertUserVisibleParamCount("CompactCodeViewKt", "CompactCodeView", expected = 4)
+    }
+
+    @Test
     fun scannableCardSurfacesHaveNoOverloads() {
         // The caption non-suppressibility rule extends to overloads: a future
         // contributor cannot quietly add `ScannableCardTile(..., showCaption: Boolean)`
@@ -229,6 +239,9 @@ class ComposableSurfaceLockTest {
             "ScannableCardTileKt" to "ScannableCardTile",
             "ScannableCardScreenKt" to "ScannableCardScreen",
             "ScannableCardRowTileKt" to "ScannableCardRowTile",
+            // Compact list-face render (wpass-tjc.2): an overload adding chrome would
+            // dilute the mechanism-only shape its param-count lock pins.
+            "CompactCodeViewKt" to "CompactCodeView",
         ).forEach { (file, name) ->
             val klass = Class.forName("is.walt.passes.ui.$file")
             val matches = klass.methods.filter { it.name == name || it.name.startsWith("$name-") }
