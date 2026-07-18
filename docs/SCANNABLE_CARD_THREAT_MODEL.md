@@ -66,9 +66,10 @@ only when, all three of the following hold:
 
 1. The row owns no signature dot or other verified-pass affordance. Pinned at
    the kernel surface by `ComposableSurfaceLockTest.scannableCardRowTileHas
-   ExactlyThreeUserVisibleParameters` (count: 3 — `card`, `onClick`, `modifier`;
-   no `showSignatureBadge`, no `leadingIcon`) and at the consumer (walt-android)
-   by `WalletListTest`'s "no scannable-card row owns a signature dot" invariant.
+   ExactlyFourUserVisibleParameters` (count: 4 — `card`, `onClick`, `modifier`,
+   `leadingSlot` (a visual hook only, wpass-2a2); no `showSignatureBadge`) and
+   at the consumer (walt-android) by `WalletListTest`'s "no scannable-card row
+   owns a signature dot" invariant.
 2. The row owns no coloured leading strip styled to read as a verified-pass
    band. The kernel surface uses the `unverifiedArtifact.accent` token (the
    same neutral token the carousel tile's leading strip uses). Per-card
@@ -86,6 +87,41 @@ in their own lane; `ScannableCardRowTile` is the alternative for the
 homogeneous-list register and nothing else. A future consumer wanting a wallet
 list that also drops the detail-surface caption is amending this row, not
 filing a refactor.
+
+**C1 / C2 — list-face code render concession (wpass-tjc.2; consumer epic
+wlt-mx2d).** The redesigned wallet list renders a scannable card's — and a
+composite artifact's extracted — ACTUAL code on its list card face, through the
+kernel's `CompactCodeView` (`(payload, format)` only). This goes one step past
+the wallet-row concession above: its condition 3 reasoned that "a user who taps
+a row to *use* the artifact still sees 'Created by you' before the scan target
+renders," and a code usable at a reader straight from the list means the user
+may never tap through at all. That shift is recorded here, and it is permitted
+strictly when all three of the following hold:
+
+1. The kernel render stays mechanism-only. No label, eyebrow, caption, or
+   signature affordance can be composed inside `CompactCodeView`; the shape is
+   pinned by `ComposableSurfaceLockTest.compactCodeViewHasExactlyFourUser
+   VisibleParameters` (count: 4 — `payload`, `format`, `modifier`,
+   `contentDescription`) and by its no-overload lock.
+2. The consumer card carries the C1 class distinction structurally: a neutral
+   (never issuer-colored) card surface with the artifact class named in the
+   eyebrow ("QR CODE" / "CODE 128" / "IMAGE, QR CODE"), and no verified
+   affordance of any kind on any list card. Only user-created codes render at
+   list scale — the payload is user-authored, not a trust signal. Signed pkpass
+   barcodes stay detail-surface-only; a pass card face never renders its code
+   in the list.
+3. Detail-surface provenance is unchanged: the bottom-docked caption by
+   default, or the audited `HostedTypeRow` carrier under the concession below.
+
+**Accepted residual risk.** A user who scans straight from the list never meets
+the in-words provenance signal for that use. This is judged bounded for the
+same reasons as the foldout placement below: the artifact is the user's own
+creation, the list-level class distinction (condition 2) is still in view at
+the moment of scanning, and Walt is a display device, not an issuer — the POS /
+recipient remains the authority on whether the code is credit-worthy (Threat
+9). A consumer wanting to render a list-face code without the condition-2
+eyebrow taxonomy, or wanting pkpass barcodes at list scale, is amending this
+row, not filing a PR.
 
 **C2 — host "Pass type" row concession (detail surface).** A consumer (Walt,
 `wlt-3cer`) consolidates the provenance signal into a single "Pass type" row

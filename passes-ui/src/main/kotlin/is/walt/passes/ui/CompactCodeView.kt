@@ -20,6 +20,8 @@ import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.BarcodeEncoder
 import `is`.walt.passes.core.EncodeResult
 import `is`.walt.passes.core.ScannableFormat
+import `is`.walt.passes.ui.internal.BARCODE_RENDER_FAILURE_DESCRIPTION
+import `is`.walt.passes.ui.internal.barcodeContentScale
 import `is`.walt.passes.ui.internal.toMonochromeBitmap
 
 /**
@@ -48,7 +50,10 @@ import `is`.walt.passes.ui.internal.toMonochromeBitmap
  * `defaultMinSize` floor only guards against a collapsed, unscannable render).
  * Encoder failures render as a same-sized white tile with a TalkBack-readable
  * "Barcode failed to render" description instead of throwing, mirroring
- * [ScannableCardView].
+ * [ScannableCardView]. Encoding runs synchronously in composition (`remember`),
+ * the same trade [ScannableCardView] makes: for validated list-scale payloads the
+ * ZXing writers are sub-millisecond, and a card face renders one code. A consumer
+ * observing jank on pathological lists owns the async wrapping.
  *
  * ## Trust posture
  *
@@ -80,7 +85,7 @@ public fun CompactCodeView(
     Box(
         modifier = modifier
             .defaultMinSize(minWidth = minWidthDp.dp, minHeight = minHeightDp.dp)
-            .background(Color.White),
+            .background(COMPACT_CODE_BACKING),
         contentAlignment = Alignment.Center,
     ) {
         if (bitmap != null) {
@@ -90,7 +95,7 @@ public fun CompactCodeView(
                     filterQuality = FilterQuality.None,
                 ),
                 contentDescription = contentDescription,
-                contentScale = format.compactContentScale(),
+                contentScale = format.barcodeContentScale(),
                 modifier = Modifier
                     .matchParentSize()
                     .padding(QUIET_ZONE_PADDING),
@@ -101,7 +106,7 @@ public fun CompactCodeView(
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .semantics { this.contentDescription = "Barcode failed to render" },
+                    .semantics { this.contentDescription = BARCODE_RENDER_FAILURE_DESCRIPTION },
             )
         }
     }
@@ -121,14 +126,11 @@ private fun ScannableFormat.compactMinSizeDp(): Pair<Int, Int> = when (this) {
     -> 96 to 32
 }
 
-/** Same QR-vs-1D split as ScannableCardView; see that KDoc for the rationale. */
-private fun ScannableFormat.compactContentScale(): ContentScale = when (this) {
-    ScannableFormat.Qr -> ContentScale.Fit
-    ScannableFormat.Code128,
-    ScannableFormat.Ean13,
-    ScannableFormat.UpcA,
-    ScannableFormat.Code39,
-    -> ContentScale.FillBounds
-}
-
 private val QUIET_ZONE_PADDING = 8.dp
+
+/**
+ * Literally white, never a theme surface token — the dark-mode scannability guarantee.
+ * Internal (not private) so the smoke test pins the value; rerouting the backing off
+ * this constant is amending the blessed-path contract, not a refactor.
+ */
+internal val COMPACT_CODE_BACKING: Color = Color.White

@@ -2,11 +2,13 @@ package `is`.walt.passes.ui
 
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.ScannableFormat
 import org.junit.Rule
 import org.junit.Test
@@ -54,6 +56,15 @@ class CompactCodeViewTest {
             )
         }
         composeRule.onNodeWithContentDescription("Library card, Code 128").assertIsDisplayed()
+    }
+
+    @Test
+    fun backingIsLiterallyWhiteNotAThemeToken() {
+        // The white backing is a blessed-path guarantee (dark-mode scannability); a
+        // refactor to a theme surface token must fail here, not in the field. Pixel
+        // capture is unavailable under this Robolectric setup, so the pin is the
+        // internal constant the backing modifier routes through.
+        assertThat(COMPACT_CODE_BACKING).isEqualTo(Color.White)
     }
 
     @Test

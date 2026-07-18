@@ -27,6 +27,8 @@ import `is`.walt.passes.core.EncodeResult
 import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.ui.core.isolated
+import `is`.walt.passes.ui.internal.BARCODE_RENDER_FAILURE_DESCRIPTION
+import `is`.walt.passes.ui.internal.barcodeContentScale
 import `is`.walt.passes.ui.internal.toMonochromeBitmap
 
 /**
@@ -111,7 +113,7 @@ private fun BarcodeImage(
                 filterQuality = FilterQuality.None,
             ),
             contentDescription = imageDescription,
-            contentScale = format.contentScale(),
+            contentScale = format.barcodeContentScale(),
             modifier = modifier.defaultMinSize(
                 minWidth = minWidthDp.dp,
                 minHeight = minHeightDp.dp,
@@ -124,7 +126,7 @@ private fun BarcodeImage(
         Spacer(
             modifier = modifier
                 .defaultMinSize(minWidth = minWidthDp.dp, minHeight = minHeightDp.dp)
-                .semantics { contentDescription = "Barcode failed to render" },
+                .semantics { contentDescription = BARCODE_RENDER_FAILURE_DESCRIPTION },
         )
     }
 }
@@ -137,16 +139,6 @@ private fun ScannableFormat.minRenderSizeDp(): Pair<Int, Int> = when (this) {
     ScannableFormat.UpcA,
     ScannableFormat.Code39,
     -> 320 to 96
-}
-
-/** Per-symbology paint scale. See ScannableCardView KDoc for the QR-vs-1D split. */
-private fun ScannableFormat.contentScale(): ContentScale = when (this) {
-    ScannableFormat.Qr -> ContentScale.Fit
-    ScannableFormat.Code128,
-    ScannableFormat.Ean13,
-    ScannableFormat.UpcA,
-    ScannableFormat.Code39,
-    -> ContentScale.FillBounds
 }
 
 private val CAPTION_GAP = 12.dp
