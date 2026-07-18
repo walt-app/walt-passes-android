@@ -226,7 +226,13 @@ private fun PdfDocumentView(
                     if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
                 }
                 .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
-            HorizontalPager(state = pagerState, modifier = pagerModifier) { page ->
+            // Adjacent page rasterises ahead of the viewport so a swipe or peek reveals a
+            // ready page (wpass-tjc.3); up to 4 live pages mid-swipe, inside DEFAULT_PAGE_WINDOW.
+            HorizontalPager(
+                state = pagerState,
+                modifier = pagerModifier,
+                beyondViewportPageCount = 1,
+            ) { page ->
                 DocumentPage(
                     document = doc,
                     pageIndex = page,
