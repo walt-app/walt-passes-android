@@ -40,9 +40,9 @@ public sealed interface PdfThumbnailState {
 
 /**
  * The cache's default size: how many recently-rendered pages to retain per consumer.
- * Sized so the `HorizontalPager` in `DocumentView` can keep the current page plus
- * `±2` adjacent pages hot during a swipe without recycling a bitmap that is still
- * being painted.
+ * The `HorizontalPager` in `DocumentView` composes the current page ±1
+ * (`beyondViewportPageCount = 1`), up to 4 live pages mid-swipe; 5 keeps a margin so
+ * a still-painted bitmap is never recycled by an eviction.
  */
 public const val DEFAULT_PAGE_WINDOW: Int = 5
 

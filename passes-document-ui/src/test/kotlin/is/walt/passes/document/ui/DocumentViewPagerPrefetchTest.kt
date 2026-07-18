@@ -18,6 +18,7 @@ import `is`.walt.passes.pdf.android.RenderSourceRect
 import `is`.walt.passes.ui.core.ArgbColor
 import java.io.File
 import java.util.Collections
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +37,17 @@ class DocumentViewPagerPrefetchTest {
 
     @get:Rule
     val composeRule = createComposeRule()
+
+    // Closed in @After, not inside the test: the documented pdfFile contract is that
+    // the fd outlives the composition.
+    private var pfd: ParcelFileDescriptor? = null
+    private var file: File? = null
+
+    @After
+    fun tearDown() {
+        pfd?.close()
+        file?.delete()
+    }
 
     private val semantics = DocumentSemantics(
         captionBackground = ArgbColor(0xFF202020.toInt()),
@@ -75,21 +87,19 @@ class DocumentViewPagerPrefetchTest {
             pageCount = 5,
             importedAtEpochMs = 0L,
         )
-        val file = File.createTempFile("doc", ".pdf").apply { writeBytes(byteArrayOf(0x25)) }
-        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        try {
-            composeRule.setContent {
-                ThemedHost {
-                    DocumentView(doc = doc, pdfFile = pfd, renderer = recordingRenderer)
-                }
-            }
-            composeRule.waitForIdle()
+        val backing = File.createTempFile("doc", ".pdf").apply { writeBytes(byteArrayOf(0x25)) }
+        file = backing
+        val fd = ParcelFileDescriptor.open(backing, ParcelFileDescriptor.MODE_READ_ONLY)
+        pfd = fd
 
-            assertThat(requestedPages).containsExactly(0, 1)
-        } finally {
-            pfd.close()
-            file.delete()
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(doc = doc, pdfFile = fd, renderer = recordingRenderer)
+            }
         }
+        composeRule.waitForIdle()
+
+        assertThat(requestedPages).containsExactly(0, 1)
     }
 
     @Composable

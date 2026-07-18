@@ -102,6 +102,9 @@ public fun FullScreenDocumentView(
             dock = { DocumentTrustCaption() },
             modifier = Modifier.fillMaxSize(),
         ) {
+            // Deliberately no beyondViewportPageCount here (unlike DocumentView's inline
+            // pager): full-screen rasters are far larger and the peek redesign does not
+            // apply to this surface (wpass-tjc.3).
             HorizontalPager(
                 state = pagerState,
                 modifier = Modifier.fillMaxSize(),
