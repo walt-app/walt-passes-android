@@ -305,7 +305,7 @@ class DocumentRepositoryTest {
     }
 
     @Test
-    fun updateLabelAcceptsEmptyAndBlankToMatchInsertDocument() = runTest {
+    fun updateLabelTrimsEdgesAndFoldsBlankToEmpty() = runTest {
         val repo = repo(FakeDocumentStore(), RecordingGuard())
         val insert = repo.insertDocument(
             label = "seed",
@@ -316,10 +316,86 @@ class DocumentRepositoryTest {
         check(insert is StorageResult.Success)
         val id = insert.value
 
+        // Edges trimmed, internal whitespace preserved (mirrors updatePassUserLabel).
+        check(repo.updateDocumentLabel(id, "  My Boarding Pass  ") is StorageResult.Success)
+        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo("My Boarding Pass")
+
+        // Blank-after-trim folds to "" — the non-null column's cleared state.
         check(repo.updateDocumentLabel(id, "") is StorageResult.Success)
         assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo("")
         check(repo.updateDocumentLabel(id, "   ") is StorageResult.Success)
-        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo("   ")
+        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo("")
+    }
+
+    @Test
+    fun updateLabelMeasuresCapAgainstTrimmedValue() = runTest {
+        val repo = repo(FakeDocumentStore(), RecordingGuard())
+        val insert = repo.insertDocument(
+            label = "seed",
+            pdfBytes = ByteArray(1),
+            pageCount = 1,
+            thumbnailBytes = ByteArray(0),
+        )
+        check(insert is StorageResult.Success)
+        val id = insert.value
+
+        val maxLabel = "a".repeat(DocumentBounds.MAX_LABEL_CHARS)
+        val padded = "  $maxLabel  "
+        check(padded.length > DocumentBounds.MAX_LABEL_CHARS)
+        check(repo.updateDocumentLabel(id, padded) is StorageResult.Success)
+        assertThat(repo.observeDocuments().first()[0].displayLabel).isEqualTo(maxLabel)
+    }
+
+    @Test
+    fun updateLabelOnImageRowPreservesKindColumns() = runTest {
+        val repo = repo(FakeDocumentStore(), RecordingGuard())
+        val insert = repo.insertDocument(
+            DocumentInsert.Image(
+                label = "photo.png",
+                bytes = ByteArray(16),
+                thumbnailBytes = ByteArray(4),
+                format = DocumentFormat.Png,
+                widthPx = 640,
+                heightPx = 480,
+            ),
+        )
+        check(insert is StorageResult.Success)
+        val id = insert.value
+
+        check(repo.updateDocumentLabel(id, "Gym membership") is StorageResult.Success)
+
+        val row = repo.observeDocuments().first().single()
+        assertThat(row.displayLabel).isEqualTo("Gym membership")
+        assertThat(row.format).isEqualTo(DocumentFormat.Png)
+        assertThat(row.widthPx).isEqualTo(640)
+        assertThat(row.heightPx).isEqualTo(480)
+    }
+
+    @Test
+    fun updateLabelOnCompositeRowPreservesBarcodeColumns() = runTest {
+        val repo = repo(FakeDocumentStore(), RecordingGuard())
+        val insert = repo.insertDocument(
+            DocumentInsert.BarcodedImage(
+                label = "ticket.jpg",
+                bytes = ByteArray(16),
+                thumbnailBytes = ByteArray(4),
+                format = DocumentFormat.Jpeg,
+                widthPx = 800,
+                heightPx = 600,
+                barcodePayload = "PAYLOAD-123",
+                barcodeFormat = ScannableFormat.Qr,
+            ),
+        )
+        check(insert is StorageResult.Success)
+        val id = insert.value
+
+        check(repo.updateDocumentLabel(id, "Concert ticket") is StorageResult.Success)
+
+        val row = repo.observeDocuments().first().single()
+        assertThat(row.displayLabel).isEqualTo("Concert ticket")
+        assertThat(row.format).isEqualTo(DocumentFormat.Jpeg)
+        assertThat(row.barcodePayload).isEqualTo("PAYLOAD-123")
+        assertThat(row.barcodeFormat).isEqualTo(ScannableFormat.Qr)
     }
 
     @Test

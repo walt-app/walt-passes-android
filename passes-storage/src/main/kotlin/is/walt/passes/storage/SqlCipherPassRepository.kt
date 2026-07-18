@@ -205,11 +205,15 @@ public class SqlCipherPassRepository internal constructor(
         id: DocumentRecordId,
         label: String,
     ): StorageResult<Unit> = runIo {
-        if (label.length > DocumentBounds.MAX_LABEL_CHARS) {
+        // Normalize like updatePassUserLabel: trim, then measure the cap against the
+        // trimmed value. Blank-after-trim folds to "" — the non-null column has no
+        // fallback identity to clear to, so empty IS the cleared state.
+        val normalized = label.trim()
+        if (normalized.length > DocumentBounds.MAX_LABEL_CHARS) {
             return@runIo rejectDocument(DocumentStorageRejectedKind.LabelTooLongAtStorage)
         }
         val matched = writeMutex.withLock {
-            val ok = documentStore.updateLabel(id, label)
+            val ok = documentStore.updateLabel(id, normalized)
             if (ok) _documents.value = documentStore.listRows()
             ok
         }
