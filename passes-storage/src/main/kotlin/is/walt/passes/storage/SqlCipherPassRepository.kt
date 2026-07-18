@@ -169,14 +169,18 @@ public class SqlCipherPassRepository internal constructor(
         val barcodePayload = (insert as? DocumentInsert.BarcodedImage)?.barcodePayload
         val barcodeFormat = (insert as? DocumentInsert.BarcodedImage)?.barcodeFormat
 
-        rejectionKindOrNull(insert, byteCount)?.let { kind ->
+        // Same label normalization as updateDocumentLabel, so both paths writing
+        // display_label agree (an all-whitespace label cannot land at import either).
+        val label = insert.label.trim()
+
+        rejectionKindOrNull(insert, label, byteCount)?.let { kind ->
             return@runIo rejectDocument(kind)
         }
 
         val outcome = writeMutex.withLock {
             val o = documentStore.insert(
                 DocumentInsertRequest(
-                    displayLabel = insert.label,
+                    displayLabel = label,
                     bytes = insert.bytes,
                     format = format,
                     pageCount = pageCount,
@@ -205,11 +209,14 @@ public class SqlCipherPassRepository internal constructor(
         id: DocumentRecordId,
         label: String,
     ): StorageResult<Unit> = runIo {
-        if (label.length > DocumentBounds.MAX_LABEL_CHARS) {
+        // Normalize like updatePassUserLabel: trim, measure the cap against the trimmed
+        // value. Blank folds to "" (see the contract KDoc).
+        val normalized = label.trim()
+        if (normalized.length > DocumentBounds.MAX_LABEL_CHARS) {
             return@runIo rejectDocument(DocumentStorageRejectedKind.LabelTooLongAtStorage)
         }
         val matched = writeMutex.withLock {
-            val ok = documentStore.updateLabel(id, label)
+            val ok = documentStore.updateLabel(id, normalized)
             if (ok) _documents.value = documentStore.listRows()
             ok
         }
@@ -381,17 +388,19 @@ public class SqlCipherPassRepository internal constructor(
 
     /**
      * Returns the storage-side rejection kind for an insert, or null if all caps pass.
-     * Checked in order: size, page count (PDF only), label length. The page cap is skipped
-     * for the image arm, which is a single page and cannot exceed it.
+     * Checked in order: size, page count (PDF only), label length ([label] is the
+     * trimmed value). The page cap is skipped for the image arm, which is a single page
+     * and cannot exceed it.
      */
     private fun rejectionKindOrNull(
         insert: DocumentInsert,
+        label: String,
         byteCount: Long,
     ): DocumentStorageRejectedKind? = when {
         byteCount > DocumentBounds.MAX_BYTES -> DocumentStorageRejectedKind.OversizedAtStorage
         insert is DocumentInsert.Pdf && insert.pageCount > DocumentBounds.MAX_PAGES ->
             DocumentStorageRejectedKind.TooManyPagesAtStorage
-        insert.label.length > DocumentBounds.MAX_LABEL_CHARS ->
+        label.length > DocumentBounds.MAX_LABEL_CHARS ->
             DocumentStorageRejectedKind.LabelTooLongAtStorage
         else -> null
     }

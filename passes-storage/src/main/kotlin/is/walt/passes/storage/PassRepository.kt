@@ -107,7 +107,9 @@ public interface PassRepository {
      * Defense in depth (ADR 0005 D7): rejects documents whose size exceeds
      * [DocumentBounds.MAX_BYTES] with [DocumentStorageRejectedKind.OversizedAtStorage], and
      * labels longer than [DocumentBounds.MAX_LABEL_CHARS] with
-     * [DocumentStorageRejectedKind.LabelTooLongAtStorage]. For a [DocumentInsert.Pdf] it
+     * [DocumentStorageRejectedKind.LabelTooLongAtStorage]. The label is normalized like
+     * [updateDocumentLabel] — trimmed, blank folding to the empty string — and the cap is
+     * measured against the trimmed value, so both paths writing the label column agree. For a [DocumentInsert.Pdf] it
      * additionally rejects page counts exceeding [DocumentBounds.MAX_PAGES] with
      * [DocumentStorageRejectedKind.TooManyPagesAtStorage]; the page cap does not apply to
      * images, which are a single page. The upstream import path already enforces the size
@@ -124,14 +126,23 @@ public interface PassRepository {
     ): StorageResult<DocumentRecordId>
 
     /**
-     * Updates the display label of an existing document row. Mirrors [insertDocument]'s
-     * label cap: rejects labels longer than [DocumentBounds.MAX_LABEL_CHARS] with
+     * Updates the display label of an existing document row. Applies to every document
+     * kind — PDF, image, and composite rows share one `documents` table, and the update
+     * touches only `display_label`; kind-specific columns are preserved.
+     *
+     * Normalization mirrors [updatePassUserLabel]: [label] is trimmed of leading and
+     * trailing whitespace before storage (internal whitespace preserved), and a label
+     * that is blank after trimming is stored as the empty string — the document label
+     * column is non-null with no fallback identity, so empty is its cleared state
+     * (consumers render a placeholder).
+     *
+     * Mirrors [insertDocument]'s label cap, measured against the trimmed value: rejects
+     * labels longer than [DocumentBounds.MAX_LABEL_CHARS] with
      * [StorageError.DocumentRejected] carrying
      * [DocumentStorageRejectedKind.LabelTooLongAtStorage], and no row is touched. The cap
      * is checked before the row is loaded, so an over-long label against an unknown
      * [id] surfaces as [StorageError.DocumentRejected], not
-     * [StorageError.IntegrityViolation]. Empty and blank labels are accepted, matching
-     * [insertDocument]'s behavior.
+     * [StorageError.IntegrityViolation].
      *
      * Returns [StorageError.IntegrityViolation] if no row matches [id] (and the label
      * passed the cap). On success, the row's `imported_at_epoch_ms` is unchanged
