@@ -5,6 +5,10 @@ import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.core.TamperReason
+import org.bouncycastle.cert.X509CertificateHolder
+import org.bouncycastle.cms.CMSProcessableByteArray
+import org.bouncycastle.cms.CMSSignedData
+import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.junit.BeforeClass
 import org.junit.Test
@@ -415,6 +419,139 @@ class SignatureVerifierTest {
             )
 
         assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    /**
+     * Control for the three tests below: proves the fixture really does reproduce the
+     * wpass-x70 wire shape. Stock BouncyCastle re-encodes the attributes as sorted DER
+     * and so reports a mismatch on this sound envelope — if this ever starts passing,
+     * BC changed and the fallback's regression tests would be silently vacuous.
+     */
+    @Test
+    fun unsortedSignedAttrsFixtureIsRejectedByStockBouncyCastle() {
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Unsorted Attrs")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature =
+            cmsDetachedSignatureWithUnsortedSignedAttrs(manifest, leaf, key.private, listOf(leaf))
+
+        val signedData = CMSSignedData(CMSProcessableByteArray(manifest), signature)
+        val signer = signedData.signerInfos.signers.first()
+        val verifier =
+            JcaSimpleSignerInfoVerifierBuilder()
+                .setProvider(BouncyCastleProvider())
+                .build(X509CertificateHolder(leaf.encoded))
+
+        assertThat(signer.verify(verifier)).isFalse()
+    }
+
+    /**
+     * wpass-x70. Real issuers sign the SignedAttributes SET in wire order rather than
+     * sorted DER order; Apple Wallet, Google Wallet and OpenSSL all accept those passes.
+     * The verifier must too, instead of accusing the user's pass of being tampered.
+     */
+    @Test
+    fun signedAttrsInWireOrderStillVerify() {
+        val rootKey = newRsaKeyPair()
+        val rootCert = selfSignedCertificate(rootKey, "CN=Test Apple Root")
+        val leafKey = newRsaKeyPair()
+        val leafCert = signLeafCertificate(leafKey.public, rootKey, rootCert, "CN=Test Apple Leaf")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature =
+            cmsDetachedSignatureWithUnsortedSignedAttrs(
+                manifest,
+                leafCert,
+                leafKey.private,
+                listOf(leafCert, rootCert),
+            )
+
+        val result =
+            verifySignatureAgainstAnchorsForTesting(
+                signatureBytes = signature,
+                manifestBytes = manifest,
+                config = ParserConfig(),
+                trustAnchors = setOf(TrustAnchor(rootCert, null)),
+                knownIntermediates = emptySet(),
+            )
+
+        assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    /**
+     * The security-critical half of wpass-x70. The fallback bypasses
+     * [org.bouncycastle.cms.SignerInformation.verify], which is what normally binds the
+     * signed `messageDigest` attribute to the content — so the fallback re-checks that
+     * binding itself. Without that check a tampered manifest would sail through, since
+     * the signature over the untouched attributes stays perfectly valid.
+     */
+    @Test
+    fun wireOrderFallbackStillRejectsTamperedManifest() {
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Self")
+        val original = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature =
+            cmsDetachedSignatureWithUnsortedSignedAttrs(original, leaf, key.private, listOf(leaf))
+        val tampered = original.copyOf().also { it[1] = 0x20 }
+
+        val result = runWithFakeAnchor(signature, tampered, ParserConfig())
+
+        assertFailed(result, TamperReason.ManifestSignatureMismatch)
+    }
+
+    /** A wire-order envelope signed by a key other than the named leaf must still fail. */
+    @Test
+    fun wireOrderFallbackRejectsSignatureFromWrongKey() {
+        val realKey = newRsaKeyPair()
+        val leaf = selfSignedCertificate(realKey, "CN=Self")
+        val impostorKey = newRsaKeyPair()
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature =
+            cmsDetachedSignatureWithUnsortedSignedAttrs(
+                manifest,
+                leaf,
+                impostorKey.private,
+                listOf(leaf),
+            )
+
+        val result = runWithFakeAnchor(signature, manifest, ParserConfig())
+
+        assertFailed(result, TamperReason.ManifestSignatureMismatch)
+    }
+
+    /**
+     * Pins the single-signer floor the fallback documents. Both signatures here are
+     * genuine, so nothing but that guard stops the verifier from accepting the envelope
+     * off its first SignerInfo while silently ignoring the second.
+     */
+    @Test
+    fun wireOrderFallbackRejectsMultiSignerEnvelope() {
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Self")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature = cmsWithTwoUnsortedSigners(manifest, leaf, key.private, listOf(leaf))
+
+        val result = runWithFakeAnchor(signature, manifest, ParserConfig())
+
+        assertThat(result).isInstanceOf(SignatureVerifyResult.Failed::class.java)
+    }
+
+    /**
+     * Two `messageDigest` attributes leave "which digest did the signer commit to?"
+     * ambiguous, so no answer may be picked. Asserts only that the pass is rejected: BC
+     * throws on the ambiguity before the fallback is reached, so which of the two
+     * [TamperReason] arms wins is BC's internal ordering, not this kernel's policy.
+     */
+    @Test
+    fun duplicateMessageDigestAttributeIsRejected() {
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Self")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature =
+            cmsWithDuplicateMessageDigestAttribute(manifest, leaf, key.private, listOf(leaf))
+
+        val result = runWithFakeAnchor(signature, manifest, ParserConfig())
+
+        assertThat(result).isInstanceOf(SignatureVerifyResult.Failed::class.java)
     }
 
     private fun runWithFakeAnchor(

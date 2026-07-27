@@ -1,9 +1,26 @@
 package `is`.walt.passes.core.internal
 
+import org.bouncycastle.asn1.ASN1Encodable
+import org.bouncycastle.asn1.ASN1Encoding
+import org.bouncycastle.asn1.ASN1Integer
+import org.bouncycastle.asn1.ASN1ObjectIdentifier
+import org.bouncycastle.asn1.DERNull
+import org.bouncycastle.asn1.DEROctetString
+import org.bouncycastle.asn1.DERSet
+import org.bouncycastle.asn1.DLSequence
+import org.bouncycastle.asn1.DLSet
+import org.bouncycastle.asn1.DLTaggedObject
+import org.bouncycastle.asn1.cms.Attribute
+import org.bouncycastle.asn1.cms.CMSAttributes
+import org.bouncycastle.asn1.cms.CMSObjectIdentifiers
+import org.bouncycastle.asn1.cms.IssuerAndSerialNumber
 import org.bouncycastle.asn1.x500.X500Name
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier
 import org.bouncycastle.asn1.x509.BasicConstraints
+import org.bouncycastle.asn1.x509.Certificate
 import org.bouncycastle.asn1.x509.Extension
 import org.bouncycastle.asn1.x509.SubjectKeyIdentifier
+import org.bouncycastle.asn1.x509.Time
 import org.bouncycastle.cert.jcajce.JcaCertStore
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils
@@ -17,9 +34,11 @@ import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder
 import java.math.BigInteger
 import java.security.KeyPair
 import java.security.KeyPairGenerator
+import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.PublicKey
 import java.security.Security
+import java.security.Signature
 import java.security.cert.X509Certificate
 import java.util.Date
 
@@ -166,6 +185,139 @@ internal fun cmsDetachedSignatureWithSki(
         }
     return gen.generate(CMSProcessableByteArray(content), false).encoded
 }
+
+/**
+ * Detached CMS blob whose `SignedAttributes` are signed — and encoded — in the order
+ * `contentType`, `messageDigest`, `signingTime`, which is **not** DER-sorted (their
+ * encodings run 0x18, 0x23, 0x1c; DER SET OF requires ascending 0x18, 0x1c, 0x23).
+ *
+ * This reproduces the wire shape of real issuers whose signing tooling emits the
+ * natural insertion order rather than the sorted one. [CMSSignedDataGenerator] cannot
+ * produce it — it always emits sorted DER — so the envelope is assembled by hand and
+ * serialized with [ASN1Encoding.DL], which preserves element order where DER would
+ * re-sort it. [DLTaggedObject] rather than `DERTaggedObject` for the same reason: the
+ * DER flavor re-encodes its base object and would silently sort the set back.
+ *
+ * SHA-1 digest with a plain `rsaEncryption` signature algorithm mirrors the observed
+ * real-world envelopes.
+ */
+internal fun cmsDetachedSignatureWithUnsortedSignedAttrs(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    includedCerts: List<X509Certificate>,
+): ByteArray =
+    unsortedSignedAttrsEnvelope(
+        includedCerts,
+        listOf(unsortedSignedAttrsSignerInfo(content, signerCert, signerKey)),
+    )
+
+/**
+ * As [cmsDetachedSignatureWithUnsortedSignedAttrs], but with two SignerInfos, both
+ * genuinely signed. The verifier claims to handle single-signer envelopes only, so this
+ * must fail closed rather than verify off the first signer.
+ */
+internal fun cmsWithTwoUnsortedSigners(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    includedCerts: List<X509Certificate>,
+): ByteArray =
+    unsortedSignedAttrsEnvelope(
+        includedCerts,
+        List(2) { unsortedSignedAttrsSignerInfo(content, signerCert, signerKey) },
+    )
+
+/**
+ * As [cmsDetachedSignatureWithUnsortedSignedAttrs], but carrying the `messageDigest`
+ * attribute twice. Both copies are correct and inside the signature, so the envelope is
+ * cryptographically sound — it is the ambiguity itself that must be rejected, since
+ * "which digest did the signer commit to?" has no single answer.
+ */
+internal fun cmsWithDuplicateMessageDigestAttribute(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    includedCerts: List<X509Certificate>,
+): ByteArray =
+    unsortedSignedAttrsEnvelope(
+        includedCerts,
+        listOf(unsortedSignedAttrsSignerInfo(content, signerCert, signerKey, duplicateDigest = true)),
+    )
+
+private fun unsortedSignedAttrsSignerInfo(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    duplicateDigest: Boolean = false,
+): DLSequence {
+    ensureBouncyCastleProvider()
+    val digest = MessageDigest.getInstance("SHA-1").digest(content)
+    val messageDigest = Attribute(CMSAttributes.messageDigest, DERSet(DEROctetString(digest)))
+
+    // Deliberately NOT sorted — this is the whole point of the fixture.
+    val attrs =
+        DLSet(
+            listOfNotNull(
+                Attribute(CMSAttributes.contentType, DERSet(CMSObjectIdentifiers.data)),
+                messageDigest,
+                messageDigest.takeIf { duplicateDigest },
+                Attribute(CMSAttributes.signingTime, DERSet(Time(Date()))),
+            ).toTypedArray(),
+        )
+
+    val signature =
+        Signature.getInstance("SHA1withRSA", BC_PROVIDER_NAME).run {
+            initSign(signerKey)
+            update(attrs.getEncoded(ASN1Encoding.DL))
+            sign()
+        }
+
+    return DLSequence(
+        arrayOf(
+            ASN1Integer(1L),
+            IssuerAndSerialNumber(
+                X500Name(signerCert.issuerX500Principal.name),
+                signerCert.serialNumber,
+            ),
+            SHA1_ALG_ID,
+            DLTaggedObject(false, 0, attrs),
+            AlgorithmIdentifier(ASN1ObjectIdentifier(RSA_ENCRYPTION_OID), DERNull.INSTANCE),
+            DEROctetString(signature),
+        ),
+    )
+}
+
+private fun unsortedSignedAttrsEnvelope(
+    includedCerts: List<X509Certificate>,
+    signerInfos: List<DLSequence>,
+): ByteArray {
+    val signedData =
+        DLSequence(
+            arrayOf(
+                ASN1Integer(1L),
+                DLSet(arrayOf<ASN1Encodable>(SHA1_ALG_ID)),
+                DLSequence(arrayOf<ASN1Encodable>(CMSObjectIdentifiers.data)),
+                DLTaggedObject(
+                    false,
+                    0,
+                    DLSet(includedCerts.map { Certificate.getInstance(it.encoded) }.toTypedArray()),
+                ),
+                DLSet(signerInfos.toTypedArray<ASN1Encodable>()),
+            ),
+        )
+
+    return DLSequence(
+        arrayOf(
+            CMSObjectIdentifiers.signedData,
+            DLTaggedObject(true, 0, signedData),
+        ),
+    ).getEncoded(ASN1Encoding.DL)
+}
+
+private const val SHA1_OID = "1.3.14.3.2.26"
+private const val RSA_ENCRYPTION_OID = "1.2.840.113549.1.1.1"
+private val SHA1_ALG_ID = AlgorithmIdentifier(ASN1ObjectIdentifier(SHA1_OID), DERNull.INSTANCE)
 
 /**
  * Pulls the 20-byte SubjectKeyIdentifier extension value out of [cert]. Both
