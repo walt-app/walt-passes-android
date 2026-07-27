@@ -206,19 +206,64 @@ internal fun cmsDetachedSignatureWithUnsortedSignedAttrs(
     signerCert: X509Certificate,
     signerKey: PrivateKey,
     includedCerts: List<X509Certificate>,
-): ByteArray {
+): ByteArray =
+    unsortedSignedAttrsEnvelope(
+        includedCerts,
+        listOf(unsortedSignedAttrsSignerInfo(content, signerCert, signerKey)),
+    )
+
+/**
+ * As [cmsDetachedSignatureWithUnsortedSignedAttrs], but with two SignerInfos, both
+ * genuinely signed. The verifier claims to handle single-signer envelopes only, so this
+ * must fail closed rather than verify off the first signer.
+ */
+internal fun cmsWithTwoUnsortedSigners(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    includedCerts: List<X509Certificate>,
+): ByteArray =
+    unsortedSignedAttrsEnvelope(
+        includedCerts,
+        List(2) { unsortedSignedAttrsSignerInfo(content, signerCert, signerKey) },
+    )
+
+/**
+ * As [cmsDetachedSignatureWithUnsortedSignedAttrs], but carrying the `messageDigest`
+ * attribute twice. Both copies are correct and inside the signature, so the envelope is
+ * cryptographically sound — it is the ambiguity itself that must be rejected, since
+ * "which digest did the signer commit to?" has no single answer.
+ */
+internal fun cmsWithDuplicateMessageDigestAttribute(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    includedCerts: List<X509Certificate>,
+): ByteArray =
+    unsortedSignedAttrsEnvelope(
+        includedCerts,
+        listOf(unsortedSignedAttrsSignerInfo(content, signerCert, signerKey, duplicateDigest = true)),
+    )
+
+private fun unsortedSignedAttrsSignerInfo(
+    content: ByteArray,
+    signerCert: X509Certificate,
+    signerKey: PrivateKey,
+    duplicateDigest: Boolean = false,
+): DLSequence {
     ensureBouncyCastleProvider()
-    val sha1 = AlgorithmIdentifier(ASN1ObjectIdentifier(SHA1_OID), DERNull.INSTANCE)
     val digest = MessageDigest.getInstance("SHA-1").digest(content)
+    val messageDigest = Attribute(CMSAttributes.messageDigest, DERSet(DEROctetString(digest)))
 
     // Deliberately NOT sorted — this is the whole point of the fixture.
     val attrs =
         DLSet(
-            arrayOf(
+            listOfNotNull(
                 Attribute(CMSAttributes.contentType, DERSet(CMSObjectIdentifiers.data)),
-                Attribute(CMSAttributes.messageDigest, DERSet(DEROctetString(digest))),
+                messageDigest,
+                messageDigest.takeIf { duplicateDigest },
                 Attribute(CMSAttributes.signingTime, DERSet(Time(Date()))),
-            ),
+            ).toTypedArray(),
         )
 
     val signature =
@@ -228,33 +273,37 @@ internal fun cmsDetachedSignatureWithUnsortedSignedAttrs(
             sign()
         }
 
-    val signerInfo =
-        DLSequence(
-            arrayOf(
-                ASN1Integer(1L),
-                IssuerAndSerialNumber(
-                    X500Name(signerCert.issuerX500Principal.name),
-                    signerCert.serialNumber,
-                ),
-                sha1,
-                DLTaggedObject(false, 0, attrs),
-                AlgorithmIdentifier(ASN1ObjectIdentifier(RSA_ENCRYPTION_OID), DERNull.INSTANCE),
-                DEROctetString(signature),
+    return DLSequence(
+        arrayOf(
+            ASN1Integer(1L),
+            IssuerAndSerialNumber(
+                X500Name(signerCert.issuerX500Principal.name),
+                signerCert.serialNumber,
             ),
-        )
+            SHA1_ALG_ID,
+            DLTaggedObject(false, 0, attrs),
+            AlgorithmIdentifier(ASN1ObjectIdentifier(RSA_ENCRYPTION_OID), DERNull.INSTANCE),
+            DEROctetString(signature),
+        ),
+    )
+}
 
+private fun unsortedSignedAttrsEnvelope(
+    includedCerts: List<X509Certificate>,
+    signerInfos: List<DLSequence>,
+): ByteArray {
     val signedData =
         DLSequence(
             arrayOf(
                 ASN1Integer(1L),
-                DLSet(arrayOf<ASN1Encodable>(sha1)),
+                DLSet(arrayOf<ASN1Encodable>(SHA1_ALG_ID)),
                 DLSequence(arrayOf<ASN1Encodable>(CMSObjectIdentifiers.data)),
                 DLTaggedObject(
                     false,
                     0,
                     DLSet(includedCerts.map { Certificate.getInstance(it.encoded) }.toTypedArray()),
                 ),
-                DLSet(arrayOf<ASN1Encodable>(signerInfo)),
+                DLSet(signerInfos.toTypedArray<ASN1Encodable>()),
             ),
         )
 
@@ -268,6 +317,7 @@ internal fun cmsDetachedSignatureWithUnsortedSignedAttrs(
 
 private const val SHA1_OID = "1.3.14.3.2.26"
 private const val RSA_ENCRYPTION_OID = "1.2.840.113549.1.1.1"
+private val SHA1_ALG_ID = AlgorithmIdentifier(ASN1ObjectIdentifier(SHA1_OID), DERNull.INSTANCE)
 
 /**
  * Pulls the 20-byte SubjectKeyIdentifier extension value out of [cert]. Both

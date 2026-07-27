@@ -518,6 +518,42 @@ class SignatureVerifierTest {
         assertFailed(result, TamperReason.ManifestSignatureMismatch)
     }
 
+    /**
+     * Pins the single-signer floor the fallback documents. Both signatures here are
+     * genuine, so nothing but that guard stops the verifier from accepting the envelope
+     * off its first SignerInfo while silently ignoring the second.
+     */
+    @Test
+    fun wireOrderFallbackRejectsMultiSignerEnvelope() {
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Self")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature = cmsWithTwoUnsortedSigners(manifest, leaf, key.private, listOf(leaf))
+
+        val result = runWithFakeAnchor(signature, manifest, ParserConfig())
+
+        assertThat(result).isInstanceOf(SignatureVerifyResult.Failed::class.java)
+    }
+
+    /**
+     * Two `messageDigest` attributes leave "which digest did the signer commit to?"
+     * ambiguous, so no answer may be picked. Asserts only that the pass is rejected: BC
+     * throws on the ambiguity before the fallback is reached, so which of the two
+     * [TamperReason] arms wins is BC's internal ordering, not this kernel's policy.
+     */
+    @Test
+    fun duplicateMessageDigestAttributeIsRejected() {
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Self")
+        val manifest = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature =
+            cmsWithDuplicateMessageDigestAttribute(manifest, leaf, key.private, listOf(leaf))
+
+        val result = runWithFakeAnchor(signature, manifest, ParserConfig())
+
+        assertThat(result).isInstanceOf(SignatureVerifyResult.Failed::class.java)
+    }
+
     private fun runWithFakeAnchor(
         signature: ByteArray,
         manifest: ByteArray,

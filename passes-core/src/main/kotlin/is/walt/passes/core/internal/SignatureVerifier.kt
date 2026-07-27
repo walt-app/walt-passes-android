@@ -1,6 +1,5 @@
-// Each verification step is its own named private helper so the policy mapping in the
-// docblock below reads as a sequence; splitting the file would scatter one security
-// boundary across two.
+// One security boundary, one file: each verification step is a named private helper so
+// the policy mapping in the docblock below reads as a sequence.
 @file:Suppress("TooManyFunctions")
 
 package `is`.walt.passes.core.internal
@@ -15,6 +14,7 @@ import org.bouncycastle.asn1.ASN1Sequence
 import org.bouncycastle.asn1.ASN1Set
 import org.bouncycastle.asn1.ASN1TaggedObject
 import org.bouncycastle.asn1.DLSet
+import org.bouncycastle.asn1.cms.Attribute
 import org.bouncycastle.asn1.cms.CMSAttributes
 import org.bouncycastle.cert.X509CertificateHolder
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
@@ -75,11 +75,11 @@ import java.security.cert.X509Certificate
  *     [SignatureStatus.SelfSigned] / [SignatureStatus.CertChainIncomplete] (lenient,
  *     default) or [TamperReason.SignatureCryptoFailure] (strict).
  *
- * **Constant-time digest comparison.** `SignerInformation.verify` delegates digest
- * comparison to [java.security.MessageDigest.isEqual] internally (BC verifies via
- * the JCE Signature object, which uses the constant-time comparator), so we do not
- * re-roll our own. The manifest-vs-signature math is the only digest comparison
- * happening here; the per-file SHA-1 chain lives in [verifyManifest].
+ * **Constant-time digest comparison.** `SignerInformation.verify` compares the signed
+ * `messageDigest` attribute with [java.security.MessageDigest.isEqual] internally. The
+ * wire-order fallback in [verifiesOverWireEncodedAttributes] re-does that one
+ * comparison and uses the same comparator. The per-file SHA-1 chain lives in
+ * [verifyManifest].
  *
  * **No revocation checking.** [PKIXBuilderParameters.isRevocationEnabled] is set to
  * `false`. Revocation requires either an out-of-band CRL fetch (network) or an
@@ -245,7 +245,12 @@ private fun verifyMath(
             false
         }
     if (derVerified) return true
-    return verifiesOverWireEncodedAttributes(signer, leafHolder, signatureBytes, manifestBytes)
+    // Fail closed, and keep the taxonomy stable: an exception raised only inside the
+    // fallback must not turn the DER path's ManifestSignatureMismatch verdict into
+    // SignatureCryptoFailure at the outer runCatching.
+    return runCatching {
+        verifiesOverWireEncodedAttributes(signer, leafHolder, signatureBytes, manifestBytes)
+    }.getOrDefault(false)
 }
 
 /**
@@ -276,8 +281,14 @@ private fun verifyMath(
  * Together those are precisely the check OpenSSL performs. Any real modification to the
  * manifest or to the attributes still fails.
  *
- * Fails closed: any structural surprise (absent attributes, missing digest, multi-signer
- * envelope, indefinite-length BER) returns `false` and the caller reports tampering.
+ * Both halves read the *same* [WireSignedAttributes], parsed once — the digest checked
+ * in (1) is lifted out of the very bytes verified in (2), so no disagreement between
+ * BouncyCastle's parse and ours can satisfy one check with a structure the other never
+ * saw.
+ *
+ * Fails closed: any structural surprise (absent attributes, missing or repeated digest
+ * attribute, multi-signer envelope, indefinite-length BER) returns `false`, as does any
+ * exception, and the caller reports tampering.
  */
 @Suppress("ReturnCount")
 private fun verifiesOverWireEncodedAttributes(
@@ -286,17 +297,11 @@ private fun verifiesOverWireEncodedAttributes(
     signatureBytes: ByteArray,
     manifestBytes: ByteArray,
 ): Boolean {
-    val signedAttrs = signer.signedAttributes ?: return false
-    val declaredDigest =
-        (
-            signedAttrs.get(CMSAttributes.messageDigest)
-                ?.attributeValues?.firstOrNull() as? ASN1OctetString
-        )?.octets ?: return false
+    val wire = wireEncodedSignedAttributes(signatureBytes) ?: return false
     val actualDigest =
         MessageDigest.getInstance(signer.digestAlgOID, BC_PROVIDER).digest(manifestBytes)
-    if (!MessageDigest.isEqual(declaredDigest, actualDigest)) return false
+    if (!MessageDigest.isEqual(wire.messageDigest, actualDigest)) return false
 
-    val wireAttrs = wireEncodedSignedAttributes(signatureBytes) ?: return false
     val signerInfo = signer.toASN1Structure()
     val signatureName =
         DefaultCMSSignatureAlgorithmNameGenerator()
@@ -304,10 +309,19 @@ private fun verifiesOverWireEncodedAttributes(
     val leaf = JcaX509CertificateConverter().setProvider(BC_PROVIDER).getCertificate(leafHolder)
     return Signature.getInstance(signatureName, BC_PROVIDER).run {
         initVerify(leaf.publicKey)
-        update(wireAttrs)
+        update(wire.encoded)
         verify(signer.signature)
     }
 }
+
+/**
+ * The signed attributes as the signer encoded them, together with the `messageDigest`
+ * value lifted out of that same encoding.
+ */
+private class WireSignedAttributes(
+    val encoded: ByteArray,
+    val messageDigest: ByteArray,
+)
 
 /**
  * Re-reads the `[0] IMPLICIT SignedAttributes` of the sole SignerInfo straight out of
@@ -315,24 +329,47 @@ private fun verifiesOverWireEncodedAttributes(
  * [ASN1Encoding.DL] is what keeps that order — [ASN1Encoding.DER] would re-sort and
  * reproduce the very bytes the caller already tried.
  *
- * Returns `null` on anything other than a single-signer, definite-length envelope,
- * matching the single-signer trust claim documented on [firstSignerWithCert].
+ * Returns `null` on anything other than a single-signer, definite-length envelope
+ * carrying exactly one single-valued `messageDigest` attribute. The single-signer floor
+ * matches the trust claim documented on [firstSignerWithCert]; the single-attribute
+ * floor is what lets the caller treat [WireSignedAttributes.messageDigest] as *the*
+ * digest the signature commits to rather than a first-match guess.
  */
 @Suppress("ReturnCount")
-private fun wireEncodedSignedAttributes(signatureBytes: ByteArray): ByteArray? {
+private fun wireEncodedSignedAttributes(signatureBytes: ByteArray): WireSignedAttributes? {
     val contentInfo =
         ASN1InputStream(signatureBytes).use { it.readObject() } as? ASN1Sequence ?: return null
+    if (contentInfo.size() < 2) return null
     val signedData =
         (contentInfo.getObjectAt(1) as? ASN1TaggedObject)
             ?.baseObject?.toASN1Primitive() as? ASN1Sequence ?: return null
     // signerInfos is the final field of SignedData, after the optional [0]/[1] sets.
+    if (signedData.size() == 0) return null
     val signerInfos = signedData.getObjectAt(signedData.size() - 1) as? ASN1Set ?: return null
     if (signerInfos.size() != 1) return null
     val signerInfo = signerInfos.getObjectAt(0) as? ASN1Sequence ?: return null
+    if (signerInfo.size() <= SIGNED_ATTRS_INDEX) return null
     val tagged = signerInfo.getObjectAt(SIGNED_ATTRS_INDEX) as? ASN1TaggedObject ?: return null
     if (tagged.tagNo != 0) return null
     val attrs = ASN1Set.getInstance(tagged, false)
-    return runCatching { DLSet(attrs.toArray()).getEncoded(ASN1Encoding.DL) }.getOrNull()
+    val messageDigest = soleMessageDigestValue(attrs) ?: return null
+    return WireSignedAttributes(DLSet(attrs.toArray()).getEncoded(ASN1Encoding.DL), messageDigest)
+}
+
+/**
+ * The one `messageDigest` attribute's one value, or `null` if the set holds a non-
+ * attribute element, no `messageDigest`, more than one, or one carrying anything but a
+ * single OCTET STRING. BouncyCastle enforces the same shape via
+ * `getSingleValuedSignedAttribute`; re-stating it here keeps the fallback's guarantee
+ * from resting on where BC happens to place that check.
+ */
+@Suppress("ReturnCount")
+private fun soleMessageDigestValue(attrs: ASN1Set): ByteArray? {
+    val parsed =
+        attrs.toArray().map { runCatching { Attribute.getInstance(it) }.getOrNull() ?: return null }
+    val values = parsed.singleOrNull { it.attrType == CMSAttributes.messageDigest }?.attrValues
+    if (values == null || values.size() != 1) return null
+    return (values.getObjectAt(0) as? ASN1OctetString)?.octets
 }
 
 /** SignerInfo ::= SEQUENCE { version, sid, digestAlgorithm, [0] signedAttrs, ... }. */
