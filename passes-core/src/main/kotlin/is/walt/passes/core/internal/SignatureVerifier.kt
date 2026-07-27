@@ -1,19 +1,35 @@
+// Each verification step is its own named private helper so the policy mapping in the
+// docblock below reads as a sequence; splitting the file would scatter one security
+// boundary across two.
+@file:Suppress("TooManyFunctions")
+
 package `is`.walt.passes.core.internal
 
 import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.SignatureStatus
 import `is`.walt.passes.core.TamperReason
+import org.bouncycastle.asn1.ASN1Encoding
+import org.bouncycastle.asn1.ASN1InputStream
+import org.bouncycastle.asn1.ASN1OctetString
+import org.bouncycastle.asn1.ASN1Sequence
+import org.bouncycastle.asn1.ASN1Set
+import org.bouncycastle.asn1.ASN1TaggedObject
+import org.bouncycastle.asn1.DLSet
+import org.bouncycastle.asn1.cms.CMSAttributes
 import org.bouncycastle.cert.X509CertificateHolder
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter
 import org.bouncycastle.cms.CMSProcessableByteArray
 import org.bouncycastle.cms.CMSSignedData
 import org.bouncycastle.cms.CMSSignerDigestMismatchException
+import org.bouncycastle.cms.DefaultCMSSignatureAlgorithmNameGenerator
 import org.bouncycastle.cms.SignerId
 import org.bouncycastle.cms.SignerInformation
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
 import org.bouncycastle.util.Selector
 import org.bouncycastle.util.Store
+import java.security.MessageDigest
+import java.security.Signature
 import java.security.cert.CertPathBuilder
 import java.security.cert.CertStore
 import java.security.cert.CollectionCertStoreParameters
@@ -41,8 +57,9 @@ import java.security.cert.X509Certificate
  *
  *  1. CMS structurally well-formed and the signed math evaluates against
  *     `manifestBytes` to "doesn't match" — either [SignerInformation.verify] returns
- *     `false` or BC raises [CMSSignerDigestMismatchException]. → [Failed]
- *     ([TamperReason.ManifestSignatureMismatch]).
+ *     `false` or BC raises [CMSSignerDigestMismatchException] — **and** the
+ *     wire-order fallback in [verifiesOverWireEncodedAttributes] also fails. →
+ *     [Failed] ([TamperReason.ManifestSignatureMismatch]).
  *  2. CMS structurally malformed, an unexpected BouncyCastle exception, or any
  *     cryptographic operation fails outside the digest-mismatch path. → [Failed]
  *     ([TamperReason.SignatureCryptoFailure]). The outer `runCatching` is the
@@ -140,15 +157,17 @@ private fun verifyAndClassify(
     val signerCert =
         firstSignerWithCert(signedData)
             ?: return SignatureVerifyResult.Failed(TamperReason.SignerCertificateMissing)
-    return finalizeVerification(signerCert, signedData, ctx)
+    return finalizeVerification(signerCert, signedData, signatureBytes, manifestBytes, ctx)
 }
 
 private fun finalizeVerification(
     signerCert: SignerWithHolder,
     signedData: CMSSignedData,
+    signatureBytes: ByteArray,
+    manifestBytes: ByteArray,
     ctx: VerifyContext,
 ): SignatureVerifyResult {
-    if (!verifyMath(signerCert.signer, signerCert.holder)) {
+    if (!verifyMath(signerCert.signer, signerCert.holder, signatureBytes, manifestBytes)) {
         return SignatureVerifyResult.Failed(TamperReason.ManifestSignatureMismatch)
     }
     val converter = JcaX509CertificateConverter().setProvider(BC_PROVIDER)
@@ -209,20 +228,115 @@ private fun firstSignerWithCert(signedData: CMSSignedData): SignerWithHolder? {
 private fun verifyMath(
     signer: SignerInformation,
     leafHolder: X509CertificateHolder,
+    signatureBytes: ByteArray,
+    manifestBytes: ByteArray,
 ): Boolean {
     val verifier =
         JcaSimpleSignerInfoVerifierBuilder()
             .setProvider(BC_PROVIDER)
             .build(leafHolder)
-    return try {
-        signer.verify(verifier)
-    } catch (_: CMSSignerDigestMismatchException) {
-        // BC raises this when the signed digest attribute doesn't match the recomputed
-        // digest of `manifestBytes`. That is exactly the mismatch arm; collapsing it
-        // back to a boolean keeps the policy mapping above readable.
-        false
+    val derVerified =
+        try {
+            signer.verify(verifier)
+        } catch (_: CMSSignerDigestMismatchException) {
+            // BC raises this when the signed digest attribute doesn't match the recomputed
+            // digest of `manifestBytes`. That is exactly the mismatch arm; collapsing it
+            // back to a boolean keeps the policy mapping above readable.
+            false
+        }
+    if (derVerified) return true
+    return verifiesOverWireEncodedAttributes(signer, leafHolder, signatureBytes, manifestBytes)
+}
+
+/**
+ * Fallback for signers that computed the signature over the `SignedAttributes` SET in
+ * the element order it appears on the wire rather than in sorted DER order.
+ *
+ * DER requires a SET OF to be sorted by the ascending byte order of its members'
+ * encodings, and [SignerInformation.verify] re-encodes with [ASN1Encoding.DER] before
+ * hashing — so it sorts. Real-world issuers exist whose tooling signs the unsorted
+ * order (observed: `contentType`, `messageDigest`, `signingTime`, whose lengths
+ * 0x18 / 0x23 / 0x1c are not ascending). BC then hashes different bytes than the
+ * signer did and reports a mismatch on a perfectly sound pass. OpenSSL, Apple Wallet
+ * and Google Wallet all verify over the bytes as received, which is why only this
+ * kernel rejected those passes as [TamperReason.ManifestSignatureMismatch].
+ *
+ * **This does not weaken the trust claim.** The DER path is still tried first, and this
+ * fallback independently re-establishes both halves of the CMS binding:
+ *
+ *  1. the `messageDigest` signed attribute must equal the digest of `manifestBytes`
+ *     under the signer's own digest algorithm, compared with the constant-time
+ *     [MessageDigest.isEqual]. This check is what makes bypassing
+ *     [SignerInformation.verify] safe: BC normally enforces it, and without re-doing it
+ *     here a tampered `manifest.json` would still carry an intact attribute signature
+ *     and slip through.
+ *  2. the signature must verify, under the leaf's public key, over the exact attribute
+ *     bytes as they appear in the archive.
+ *
+ * Together those are precisely the check OpenSSL performs. Any real modification to the
+ * manifest or to the attributes still fails.
+ *
+ * Fails closed: any structural surprise (absent attributes, missing digest, multi-signer
+ * envelope, indefinite-length BER) returns `false` and the caller reports tampering.
+ */
+@Suppress("ReturnCount")
+private fun verifiesOverWireEncodedAttributes(
+    signer: SignerInformation,
+    leafHolder: X509CertificateHolder,
+    signatureBytes: ByteArray,
+    manifestBytes: ByteArray,
+): Boolean {
+    val signedAttrs = signer.signedAttributes ?: return false
+    val declaredDigest =
+        (
+            signedAttrs.get(CMSAttributes.messageDigest)
+                ?.attributeValues?.firstOrNull() as? ASN1OctetString
+        )?.octets ?: return false
+    val actualDigest =
+        MessageDigest.getInstance(signer.digestAlgOID, BC_PROVIDER).digest(manifestBytes)
+    if (!MessageDigest.isEqual(declaredDigest, actualDigest)) return false
+
+    val wireAttrs = wireEncodedSignedAttributes(signatureBytes) ?: return false
+    val signerInfo = signer.toASN1Structure()
+    val signatureName =
+        DefaultCMSSignatureAlgorithmNameGenerator()
+            .getSignatureName(signerInfo.digestAlgorithm, signerInfo.digestEncryptionAlgorithm)
+    val leaf = JcaX509CertificateConverter().setProvider(BC_PROVIDER).getCertificate(leafHolder)
+    return Signature.getInstance(signatureName, BC_PROVIDER).run {
+        initVerify(leaf.publicKey)
+        update(wireAttrs)
+        verify(signer.signature)
     }
 }
+
+/**
+ * Re-reads the `[0] IMPLICIT SignedAttributes` of the sole SignerInfo straight out of
+ * the CMS blob and re-tags it as a SET, preserving the parsed element order.
+ * [ASN1Encoding.DL] is what keeps that order — [ASN1Encoding.DER] would re-sort and
+ * reproduce the very bytes the caller already tried.
+ *
+ * Returns `null` on anything other than a single-signer, definite-length envelope,
+ * matching the single-signer trust claim documented on [firstSignerWithCert].
+ */
+@Suppress("ReturnCount")
+private fun wireEncodedSignedAttributes(signatureBytes: ByteArray): ByteArray? {
+    val contentInfo =
+        ASN1InputStream(signatureBytes).use { it.readObject() } as? ASN1Sequence ?: return null
+    val signedData =
+        (contentInfo.getObjectAt(1) as? ASN1TaggedObject)
+            ?.baseObject?.toASN1Primitive() as? ASN1Sequence ?: return null
+    // signerInfos is the final field of SignedData, after the optional [0]/[1] sets.
+    val signerInfos = signedData.getObjectAt(signedData.size() - 1) as? ASN1Set ?: return null
+    if (signerInfos.size() != 1) return null
+    val signerInfo = signerInfos.getObjectAt(0) as? ASN1Sequence ?: return null
+    val tagged = signerInfo.getObjectAt(SIGNED_ATTRS_INDEX) as? ASN1TaggedObject ?: return null
+    if (tagged.tagNo != 0) return null
+    val attrs = ASN1Set.getInstance(tagged, false)
+    return runCatching { DLSet(attrs.toArray()).getEncoded(ASN1Encoding.DL) }.getOrNull()
+}
+
+/** SignerInfo ::= SEQUENCE { version, sid, digestAlgorithm, [0] signedAttrs, ... }. */
+private const val SIGNED_ATTRS_INDEX = 3
 
 private fun collectIncludedCerts(
     signedData: CMSSignedData,
