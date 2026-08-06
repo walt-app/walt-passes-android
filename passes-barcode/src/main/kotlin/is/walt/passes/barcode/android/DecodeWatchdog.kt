@@ -14,8 +14,14 @@ import kotlinx.coroutines.withContext
  * container that sends the platform codec into a long parse. Either would starve the decode
  * process without a hard wall-clock bound. On expiry the watchdog terminates the isolated
  * process; the main process then observes the dropped binder as a
- * [android.os.RemoteException] and surfaces
- * [is.walt.passes.core.DecodeFailureReason.DecoderUnavailable].
+ * [android.os.RemoteException]. A killed sandbox cannot report its own death, so
+ * [BarcodeDecodeClient] attributes that drop to
+ * [is.walt.passes.core.DecodeFailureReason.DecodeTimedOut] when the full [timeoutMs] had
+ * elapsed, and to `DecoderUnavailable` otherwise (wpass-qw3).
+ *
+ * The budget bounds DECODE work only. Class loading, native codec init, and ZXing reader
+ * first-touch are paid in [BarcodeDecodeService.onCreate], before `onBind` returns, so a cold
+ * sandbox on a loaded machine cannot spend the budget on warm-up it was never meant to cover.
  *
  * Killing the process (rather than cancelling the coroutine) is deliberate: coroutine
  * cancellation is cooperative and only fires at suspension points, but the decode is a

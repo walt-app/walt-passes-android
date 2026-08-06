@@ -4,6 +4,7 @@ import android.os.IBinder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.os.RemoteException
+import android.os.SystemClock
 import `is`.walt.passes.barcode.android.BarcodeDecodeBinderProxy.Companion.CODE_DECODE
 import `is`.walt.passes.barcode.android.BarcodeDecodeBinderProxy.Companion.TAG_DECODED
 import `is`.walt.passes.barcode.android.BarcodeDecodeBinderProxy.Companion.TAG_FAILED
@@ -26,17 +27,27 @@ import kotlinx.coroutines.withContext
  * Failure-mode posture mirrors `passes-pdf`'s `PdfRendererClient`:
  *
  *  - A [RemoteException] from [IBinder.transact] is the designed runtime failure mode for a
- *    decode process that went away (e.g. killed by a future bounded-decode watchdog). It is
- *    folded into [DecodeFailureReason.DecoderUnavailable] — "the isolated decode process
- *    could not be bound or terminated before returning a result."
- *  - A `false` return from [IBinder.transact] is treated the same way, defensively: the
- *    only path that returns false is the proxy failing to read the PFD out of the request
- *    parcel (a same-build wire-invariant violation). Folding it in avoids decoding an empty
- *    reply parcel where `readInt()` returns 0 (which equals [TAG_DECODED]) and surfacing a
- *    phantom decoded result.
+ *    decode process that went away — including the [DecodeWatchdog] killing the sandbox on
+ *    budget expiry. Which of the two it was is decided here, by elapsed time (wpass-qw3): the
+ *    sandbox SIGKILLs itself, so it cannot report its own timeout, and the only observable
+ *    that separates "the decoder was never there" from "the decoder ran out of time" is
+ *    whether the full [decodeBudgetMs] elapsed before the binder dropped. At or past the
+ *    budget folds to [DecodeFailureReason.DecodeTimedOut] (a load signal — the same image may
+ *    decode fine on retry); anything earlier stays [DecodeFailureReason.DecoderUnavailable]
+ *    (a crash or an absent decoder — retry will not help). The budget is read from
+ *    [BarcodeDecodeConfig], the same constant the sandbox arms its watchdog with, so the two
+ *    sides cannot drift apart.
+ *  - A `false` return from [IBinder.transact] folds to [DecodeFailureReason.DecoderUnavailable]
+ *    defensively, and is never timeout-attributed: the only path that returns false is the
+ *    proxy failing to read the PFD out of the request parcel (a same-build wire-invariant
+ *    violation), which is immediate and means no decode was ever attempted. Folding it in
+ *    avoids decoding an empty reply parcel where `readInt()` returns 0 (which equals
+ *    [TAG_DECODED]) and surfacing a phantom decoded result.
  *  - A malformed reply parcel — unrecognised tag, missing payload on a [TAG_DECODED] reply,
  *    or unrecognised wire code — also folds to [DecodeFailureReason.DecoderUnavailable]
- *    rather than throwing. This is the one place the posture diverges from `passes-pdf`'s
+ *    rather than throwing, and is likewise never timeout-attributed: the sandbox answered, so
+ *    whatever went wrong is not a timeout regardless of how long it took. This is the one
+ *    place the posture diverges from `passes-pdf`'s
  *    fail-fast `PdfRendererClient`: here the reply's sender is the isolated decode process,
  *    which this feature's threat model assumes may be compromised, so the reply shape is
  *    attacker-controlled and must be treated like the payload string — never trusted. A
@@ -49,6 +60,8 @@ import kotlinx.coroutines.withContext
  */
 internal class BarcodeDecodeClient(
     private val binder: IBinder,
+    private val decodeBudgetMs: Long = BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS,
+    private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
 ) : BarcodeDecodeBinder {
     override suspend fun decode(image: ParcelFileDescriptor): BarcodeDecodeResult =
         withContext(Dispatchers.IO) {
@@ -56,11 +69,14 @@ internal class BarcodeDecodeClient(
             val reply = Parcel.obtain()
             try {
                 data.writeTypedObject(image, 0)
+                // Stamped immediately before the transaction: the elapsed window must cover the
+                // decode only, not the bind that preceded it (which pays sandbox cold start).
+                val startedAtMs = elapsedRealtimeMs()
                 val accepted =
                     try {
                         binder.transact(CODE_DECODE, data, reply, 0)
                     } catch (_: RemoteException) {
-                        return@withContext decoderUnavailable()
+                        return@withContext decoderWentAway(startedAtMs)
                     }
                 if (!accepted) {
                     return@withContext decoderUnavailable()
@@ -84,6 +100,18 @@ internal class BarcodeDecodeClient(
             TAG_NO_BARCODE -> BarcodeDecodeResult.NoBarcodeFound
             TAG_FAILED -> BarcodeDecodeResult.DecodeFailed(DecodeFailureReasonWire.decode(reply.readInt()))
             else -> error("Unknown decode reply tag: $tag")
+        }
+
+    /**
+     * The binder dropped mid-transaction. Attribute it by how long the decode had been running:
+     * the sandbox's own watchdog kills at [decodeBudgetMs], so reaching that mark is the
+     * signature of a timeout, while an earlier death is a crash or an absent decoder.
+     */
+    private fun decoderWentAway(startedAtMs: Long): BarcodeDecodeResult =
+        if (elapsedRealtimeMs() - startedAtMs >= decodeBudgetMs) {
+            BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut)
+        } else {
+            decoderUnavailable()
         }
 
     private fun decoderUnavailable(): BarcodeDecodeResult =

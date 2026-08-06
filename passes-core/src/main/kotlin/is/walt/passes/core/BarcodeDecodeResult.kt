@@ -55,6 +55,15 @@ public enum class DecodeFailureReason {
     /** A symbol was found but its symbology is outside the [ScannableFormat] roster. */
     UnsupportedBarcodeFormat,
 
-    /** The isolated decode process could not be bound or terminated before returning a result. */
+    /** The isolated decode process could not be bound, or went away before returning a result. */
     DecoderUnavailable,
+
+    /**
+     * The decode exceeded its wall-clock budget and the isolated process was terminated by its
+     * watchdog. Split from [DecoderUnavailable] (wpass-qw3) because the two call for opposite
+     * responses: an unavailable decoder will not succeed on retry, a timed-out one is a load
+     * signal and the same image may decode fine later. Conflating them cost a real misdiagnosis
+     * on both this kernel and walt-passes-ios, which made the same split (`decodeTimedOut`).
+     */
+    DecodeTimedOut,
 }

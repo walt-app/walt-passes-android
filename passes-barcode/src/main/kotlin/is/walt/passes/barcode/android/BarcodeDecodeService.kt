@@ -2,10 +2,12 @@ package `is`.walt.passes.barcode.android
 
 import android.app.Service
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import `is`.walt.passes.core.BarcodeDecodeResult
 import `is`.walt.passes.core.DecodeFailureReason
+import java.io.ByteArrayOutputStream
 import kotlin.coroutines.cancellation.CancellationException
 
 /**
@@ -32,11 +34,19 @@ import kotlin.coroutines.cancellation.CancellationException
  * decoder allocates, under a [DecodeWatchdog] that kills the process on a slow/hung input;
  * the symbol decode (wpass-zrt.4) reads the barcode off the produced bitmap. Only the pure
  * `{payload, format}` result crosses back — the bitmap is recycled inside the sandbox.
+ *
+ * [onCreate] warms both decoders before `onBind` returns (see [warmDecodePath]) so the
+ * watchdog budget bounds decode work rather than the sandbox's cold start.
  */
 public class BarcodeDecodeService : Service() {
     private val config: BarcodeDecodeConfig = BarcodeDecodeConfig()
     private val watchdog: DecodeWatchdog = DecodeWatchdog(config.decodeTimeoutMs)
     private val symbolDecoder: BarcodeSymbolDecoder = ZxingBarcodeSymbolDecoder()
+
+    override fun onCreate() {
+        super.onCreate()
+        warmDecodePath(config, symbolDecoder)
+    }
 
     override fun onBind(intent: Intent): IBinder = BarcodeDecodeBinderProxy(buildImpl())
 
@@ -46,6 +56,41 @@ public class BarcodeDecodeService : Service() {
                 doDecode(image, config, watchdog, symbolDecoder)
         }
 }
+
+/**
+ * Pay the sandbox's cold-start cost here, in `onCreate`, so [DecodeWatchdog]'s budget covers
+ * decode work and nothing else (wpass-qw3). A freshly forked isolated process loads
+ * `ImageDecoder`'s native codec support and every ZXing reader class on first touch,
+ * interpreted and un-JIT'd; on a loaded machine that alone consumed most of the budget and the
+ * watchdog killed benign decodes. Because the host has no bind timeout, moving the cost ahead
+ * of `onBind` tightens what the guard bounds rather than loosening the guard.
+ *
+ * The probe is Walt-generated, never caller-supplied, and runs the production path end to end:
+ * encode a blank bitmap, put it through [decodeBoundedBitmap], then through [symbolDecoder].
+ * Sized past ZXing's 40px hybrid-binarizer floor so the real binarizer path warms too. Any
+ * failure is swallowed — warm-up is an optimization, and a service that refuses to start would
+ * turn a slow decode into no decode at all.
+ */
+internal fun warmDecodePath(
+    config: BarcodeDecodeConfig,
+    symbolDecoder: BarcodeSymbolDecoder,
+) {
+    runCatching {
+        val probe = Bitmap.createBitmap(WARM_UP_PROBE_PX, WARM_UP_PROBE_PX, Bitmap.Config.ARGB_8888)
+        try {
+            val encoded = ByteArrayOutputStream()
+            probe.compress(Bitmap.CompressFormat.PNG, 100, encoded)
+            val decoded = decodeBoundedBitmap(encoded.toByteArray(), config)
+            if (decoded is BoundedDecodeResult.Decoded) decoded.bitmap.recycle()
+            symbolDecoder.decode(probe)
+        } finally {
+            probe.recycle()
+        }
+    }
+}
+
+/** Above ZXing's 40px floor for the hybrid binarizer, so warm-up touches the real path. */
+private const val WARM_UP_PROBE_PX = 64
 
 /**
  * One decode: read and bound-decode [image] to a bitmap under [watchdog], hand the bitmap to

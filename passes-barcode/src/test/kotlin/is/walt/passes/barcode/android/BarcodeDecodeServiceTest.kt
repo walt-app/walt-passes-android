@@ -24,6 +24,9 @@ import org.robolectric.annotation.Config
  *  - a Throwable from either the bounded decode or the symbol decode is contained as
  *    `DecodeFailed(ImageDecodeFailed)` rather than escaping;
  *  - the source descriptor is closed on every outcome.
+ *
+ * Also covers [warmDecodePath], the `onCreate` warm-up that keeps cold start out of the
+ * watchdog budget (wpass-qw3).
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -115,6 +118,32 @@ class BarcodeDecodeServiceTest {
         assertThat(result).isEqualTo(BoundedDecodeResult.Rejected(DecodeFailureReason.ImageTooLarge))
         assertThat(readEnd.fileDescriptor.valid()).isTrue()
         readEnd.close()
+    }
+
+    @Test
+    fun warmDecodePathRunsTheSymbolDecoderOffTheDecodeBudget() {
+        // The warm-up must actually touch ZXing — a no-op would leave the reader classes to
+        // load inside the watchdog budget, which is the wpass-qw3 failure.
+        var probedWidth = 0
+        var probedHeight = 0
+
+        warmDecodePath(config) { bitmap ->
+            probedWidth = bitmap.width
+            probedHeight = bitmap.height
+            BarcodeDecodeResult.NoBarcodeFound
+        }
+
+        // Both stay 0 if the decoder was never called; 40 is ZXing's hybrid-binarizer floor,
+        // below which the warm-up would touch a binarizer path the real decode never uses.
+        assertThat(probedWidth).isAtLeast(40)
+        assertThat(probedHeight).isAtLeast(40)
+    }
+
+    @Test
+    fun warmDecodePathContainsFailures() {
+        // Warm-up is an optimization. A throw here would take down onCreate and turn a slow
+        // decode into no decode at all, so nothing may escape.
+        warmDecodePath(config) { error("warm-up blew up") }
     }
 
     // --------------------------------------------------------------------- helpers
