@@ -22,7 +22,7 @@ androidxTestRunner = "1.7.0"
 androidxTestRules = "1.7.0"
 sqlcipher = "4.17.0"
 androidxStartup = "1.2.0"
-xerial = "3.53.2.0"
+xerial = "3.53.2.1"
 
 [libraries]
 # Gradle plugins (consumed by build-logic convention plugins).
