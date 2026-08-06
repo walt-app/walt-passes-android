@@ -14,11 +14,18 @@ updates:
     # passes-android is the trust-claim repo. Major-version bumps to AGP, Kotlin,
     # AndroidX core, SQLCipher, BouncyCastle, and Compose all warrant manual review;
     # let dependabot handle minor/patch and surface majors as separate PRs.
+    #
+    # Kotlin and AGP additionally ignore MINOR bumps: walt-android composite-builds
+    # this repo, and Gradle runs one AGP and one Kotlin metadata version per build —
+    # so those two move in lockstep with the consumer, by hand, never from a bot PR.
+    # Patch bumps stay automatic; they are metadata- and plugin-compatible.
     ignore:
       - dependency-name: "com.android.tools.build:gradle"
-        update-types: ["version-update:semver-major"]
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "org.jetbrains.kotlin:*"
-        update-types: ["version-update:semver-major"]
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "androidx.core:core-ktx"
         update-types: ["version-update:semver-major"]
       - dependency-name: "net.zetetic:sqlcipher-android"
