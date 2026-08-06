@@ -104,11 +104,18 @@ class BarcodeDecodeBinderRoundTripTest {
 
     @Test
     fun clientBudgetDefaultsToTheBudgetTheSandboxArmsItsWatchdogWith() = runTest {
-        // Host-side timeout attribution is only sound while both sides read the same number.
+        // Host-side timeout attribution is only sound while the client's default IS the constant
+        // the sandbox arms from — a client that stopped referencing it would attribute against a
+        // threshold nothing enforces. The at-budget reading alone cannot catch that (a smaller
+        // default still reads as timed-out at 5000); the reading one millisecond below is what
+        // pins it. Retuning the constant itself moves both sides together, which is intended.
         val atBudget = clockReading(0L, BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
-        val client = BarcodeDecodeClient(DeadBinder(), elapsedMs = atBudget)
-        assertThat(client.decode(pipeRead))
+        assertThat(BarcodeDecodeClient(DeadBinder(), elapsedMs = atBudget).decode(pipeRead))
             .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
+
+        val justUnder = clockReading(0L, BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS - 1)
+        assertThat(BarcodeDecodeClient(DeadBinder(), elapsedMs = justUnder).decode(pipeRead))
+            .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
     }
 
     @Test

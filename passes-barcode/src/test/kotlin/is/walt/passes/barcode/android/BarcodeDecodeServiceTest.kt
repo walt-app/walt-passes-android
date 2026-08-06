@@ -154,16 +154,6 @@ class BarcodeDecodeServiceTest {
     }
 
     @Test
-    fun configDefaultDecodeTimeoutMatchesTheSharedConstant() {
-        // Narrow on purpose: this catches only an edit to the default parameter expression.
-        // The service arming its watchdog from this config is NOT reachable from a unit test —
-        // that end of the handshake is proven on-device by the instrumented slow-loris case,
-        // which asserts a real decode was killed at this budget.
-        assertThat(BarcodeDecodeConfig().decodeTimeoutMs)
-            .isEqualTo(BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
-    }
-
-    @Test
     fun warmDecodePathContainsFailures() {
         // Warm-up is an optimization. A throw here would take down onCreate and turn a slow
         // decode into no decode at all, so nothing may escape.

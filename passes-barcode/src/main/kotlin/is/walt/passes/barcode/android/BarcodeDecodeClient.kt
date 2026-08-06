@@ -45,9 +45,9 @@ import kotlinx.coroutines.withContext
  *  - A malformed reply parcel — unrecognised tag, missing payload on a [TAG_DECODED] reply,
  *    or unrecognised wire code — also folds to [DecodeFailureReason.DecoderUnavailable]
  *    rather than throwing, and is likewise never timeout-attributed: the sandbox answered, so
- *    whatever went wrong is not a timeout regardless of how long it took. This is the one
- *    place the posture diverges from `passes-pdf`'s
- *    fail-fast `PdfRendererClient`: here the reply's sender is the isolated decode process,
+ *    whatever went wrong is not a timeout regardless of how long it took. This is the one place
+ *    the posture diverges from `passes-pdf`'s fail-fast `PdfRendererClient`: here the reply's
+ *    sender is the isolated decode process,
  *    which this feature's threat model assumes may be compromised, so the reply shape is
  *    attacker-controlled and must be treated like the payload string — never trusted. A
  *    throw out of this result-returning API would be a DoS on the decode path; folding keeps

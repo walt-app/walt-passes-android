@@ -127,10 +127,8 @@ jobs:
       # One module per step, deliberately (wpass-qw3). Passing both tasks to one invocation let
       # org.gradle.parallel start both managed devices at once, so two emulators shared a
       # 4-core runner and the isolated-process decode blew its watchdog budget on API 36.
-      # Separate steps make the serialization structural rather than a Gradle scheduling
-      # accident. The cost is two Gradle invocations and two device provision/teardown cycles
-      # per API level; `--no-parallel` on one invocation would be cheaper but leaves the
-      # serialization up to Gradle's scheduler, and gives no per-module step attribution.
+      # Separate steps make the serialization structural rather than a Gradle scheduling flag,
+      # at the cost of a second Gradle invocation and device cycle per API level.
       - name: Run connected tests (passes-storage)
         id: storage-connected
         run: ./gradlew :passes-storage:api${{ matrix.api }}googleDebugAndroidTest --stacktrace

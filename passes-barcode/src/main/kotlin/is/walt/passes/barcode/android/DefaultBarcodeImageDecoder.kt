@@ -32,23 +32,16 @@ import kotlinx.coroutines.withTimeoutOrNull
 internal class DefaultBarcodeImageDecoder(
     private val appContext: Context,
     private val deps: Deps = Deps(),
-    private val config: BarcodeDecodeConfig = BarcodeDecodeConfig(),
 ) : BarcodeImageDecoder {
     internal data class Deps(
-        // Takes the config so the client's timeout-attribution threshold is the one THIS decoder
-        // holds. Reading the constant here instead would let a non-default config disagree with
-        // the threshold it is attributed against — the drift the shared constant exists to stop.
-        val sessionFactoryFor: (Context, BarcodeDecodeConfig) -> IsolatedWorkerSessionFactory<BarcodeDecodeBinder> =
-            { ctx, cfg ->
-                AndroidIsolatedWorkerSessionFactory(ctx, BarcodeDecodeService::class.java) {
-                    BarcodeDecodeClient(it, cfg.decodeTimeoutMs)
-                }
-            },
+        val sessionFactoryFor: (Context) -> IsolatedWorkerSessionFactory<BarcodeDecodeBinder> = { ctx ->
+            AndroidIsolatedWorkerSessionFactory(ctx, BarcodeDecodeService::class.java) { BarcodeDecodeClient(it) }
+        },
         val openPfd: (BarcodeImageSource) -> ParcelFileDescriptor? = ::defaultOpenPfd,
     )
 
     private val sessionFactory: IsolatedWorkerSessionFactory<BarcodeDecodeBinder> by lazy {
-        deps.sessionFactoryFor(appContext, config)
+        deps.sessionFactoryFor(appContext)
     }
 
     override suspend fun decode(source: BarcodeImageSource): BarcodeDecodeResult {
@@ -85,7 +78,7 @@ internal class DefaultBarcodeImageDecoder(
     private suspend fun connectWithinBudget(): ConnectResult<BarcodeDecodeBinder>? {
         var connected: ConnectResult<BarcodeDecodeBinder>? = null
         val result =
-            withTimeoutOrNull(config.bindTimeoutMs) {
+            withTimeoutOrNull(DEFAULT_BIND_TIMEOUT_MS) {
                 sessionFactory.connect().also { connected = it }
             }
         if (result == null) {
@@ -97,6 +90,15 @@ internal class DefaultBarcodeImageDecoder(
     }
 
     internal companion object {
+        /**
+         * Liveness backstop on the bind, NOT a performance bound. Lives here rather than on
+         * [BarcodeDecodeConfig] because it bounds the host's wait, not anything the sandbox
+         * enforces. Deliberately loose — several times the worst cold start observed on a loaded
+         * 2-vCPU emulator — so a slow sandbox is never mistaken for a dead one. Tightening it
+         * would recreate the flake it exists to bound.
+         */
+        const val DEFAULT_BIND_TIMEOUT_MS: Long = 20_000L
+
         /**
          * Open [source] as a [ParcelFileDescriptor] without reading its bytes into this
          * process. Mirrors the PDF importer's source discipline: the `content://` scheme

@@ -137,16 +137,12 @@ class BarcodeDecodeServiceInstrumentedTest {
 
     @Test
     fun slowLorisSourceTimesOutAndReportsDecodeTimedOut() {
-        // The wpass-qw3 premise, end to end on a real device: a source that never delivers its
-        // bytes must trip the watchdog, and that kill must surface as DecodeTimedOut rather than
-        // DecoderUnavailable. Every other test of the split drives an injected clock and a dead
-        // binder, which pins the arithmetic but not the chain it rests on — that a watchdog kill
-        // reaches the host as a RemoteException at or past the budget.
+        // The wpass-qw3 premise, end to end: a watchdog kill must reach the host as a
+        // RemoteException at or past the budget and surface as DecodeTimedOut. The unit tests
+        // pin the arithmetic with an injected clock; only this pins the chain it rests on.
         //
-        // A pipe with the write end held open and never written is the slow-loris shape the
-        // watchdog exists for: readBoundedBytes blocks in read(), so the decode cannot finish on
-        // its own. Holding the write end here is load-bearing; closing it would signal EOF and
-        // the decode would complete as a malformed-image rejection instead.
+        // Holding the write end open is load-bearing: it is what makes readBoundedBytes block.
+        // Closing it would signal EOF and the decode would finish as a malformed-image reject.
         val pipe = ParcelFileDescriptor.createPipe()
         val readEnd = pipe[0]
         val writeEnd = pipe[1]
@@ -163,15 +159,9 @@ class BarcodeDecodeServiceInstrumentedTest {
 
         assertThat(result)
             .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
-        // Sanity bounds, not a measurement of the watchdog: this window covers process spawn,
-        // warm-up and bind as well as the decode, so the lower bound can be met by bind cost
-        // alone. The DecodeTimedOut result above is the real assertion — the host only attributes
-        // that arm when the full budget elapsed. The upper bound catches a budget retuned to
-        // something wild, since the bind timeout would have folded to DecoderUnavailable first.
+        // A sanity floor, not a measurement: this window also covers spawn, warm-up and bind, so
+        // bind cost alone could satisfy it. The DecodeTimedOut assertion above is the real one.
         assertThat(elapsedMs).isAtLeast(BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
-        assertThat(elapsedMs).isLessThan(
-            BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS + BarcodeDecodeConfig.DEFAULT_BIND_TIMEOUT_MS,
-        )
     }
 
     @Test

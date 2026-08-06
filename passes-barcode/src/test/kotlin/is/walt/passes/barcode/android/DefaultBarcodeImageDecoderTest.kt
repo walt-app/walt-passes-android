@@ -135,7 +135,7 @@ class DefaultBarcodeImageDecoderTest {
         // capture the sandbox would stay bound with nothing holding a reference to it.
         val pfd = TrackingPfd(pipeReadEnd())
         val session = RecordingSession(StaticDecodeBinder(BarcodeDecodeResult.NoBarcodeFound))
-        val factory = LateSessionFactory(BarcodeDecodeConfig.DEFAULT_BIND_TIMEOUT_MS + 1, session)
+        val factory = LateSessionFactory(DefaultBarcodeImageDecoder.DEFAULT_BIND_TIMEOUT_MS + 1, session)
         val decoder = decoder(sessionFactory = factory, openPfd = { pfd })
 
         val result = decoder.decode(fileDescriptorSource())
@@ -163,7 +163,7 @@ class DefaultBarcodeImageDecoderTest {
         DefaultBarcodeImageDecoder(
             appContext = context,
             deps = DefaultBarcodeImageDecoder.Deps(
-                sessionFactoryFor = { _, _ -> sessionFactory },
+                sessionFactoryFor = { sessionFactory },
                 openPfd = openPfd,
             ),
         )
