@@ -36,7 +36,11 @@ import kotlinx.coroutines.withContext
  *    decode fine on retry); anything earlier stays [DecodeFailureReason.DecoderUnavailable]
  *    (a crash or an absent decoder — retry will not help). The budget is read from
  *    [BarcodeDecodeConfig], the same constant the sandbox arms its watchdog with, so the two
- *    sides cannot drift apart.
+ *    sides cannot drift apart on the *value*. They must also not drift on the *clock*:
+ *    [SystemClock.uptimeMillis] shares `CLOCK_MONOTONIC` with the `delay` the watchdog's kill
+ *    timer runs on, so both stop counting across device deep sleep. `elapsedRealtime` would
+ *    keep counting through a suspend the sandbox never experienced, and could report a
+ *    timeout the watchdog never fired.
  *  - A `false` return from [IBinder.transact] folds to [DecodeFailureReason.DecoderUnavailable]
  *    defensively, and is never timeout-attributed: the only path that returns false is the
  *    proxy failing to read the PFD out of the request parcel (a same-build wire-invariant
@@ -61,7 +65,7 @@ import kotlinx.coroutines.withContext
 internal class BarcodeDecodeClient(
     private val binder: IBinder,
     private val decodeBudgetMs: Long = BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS,
-    private val elapsedRealtimeMs: () -> Long = SystemClock::elapsedRealtime,
+    private val elapsedMs: () -> Long = SystemClock::uptimeMillis,
 ) : BarcodeDecodeBinder {
     override suspend fun decode(image: ParcelFileDescriptor): BarcodeDecodeResult =
         withContext(Dispatchers.IO) {
@@ -71,7 +75,7 @@ internal class BarcodeDecodeClient(
                 data.writeTypedObject(image, 0)
                 // Stamped immediately before the transaction: the elapsed window must cover the
                 // decode only, not the bind that preceded it (which pays sandbox cold start).
-                val startedAtMs = elapsedRealtimeMs()
+                val startedAtMs = elapsedMs()
                 val accepted =
                     try {
                         binder.transact(CODE_DECODE, data, reply, 0)
@@ -108,7 +112,7 @@ internal class BarcodeDecodeClient(
      * signature of a timeout, while an earlier death is a crash or an absent decoder.
      */
     private fun decoderWentAway(startedAtMs: Long): BarcodeDecodeResult =
-        if (elapsedRealtimeMs() - startedAtMs >= decodeBudgetMs) {
+        if (elapsedMs() - startedAtMs >= decodeBudgetMs) {
             BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut)
         } else {
             decoderUnavailable()

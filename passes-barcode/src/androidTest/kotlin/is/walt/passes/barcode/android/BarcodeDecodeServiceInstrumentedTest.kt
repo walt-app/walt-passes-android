@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
@@ -132,6 +133,38 @@ class BarcodeDecodeServiceInstrumentedTest {
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { decode(it) }
 
         assertThat(result).isInstanceOf(BarcodeDecodeResult.DecodeFailed::class.java)
+    }
+
+    @Test
+    fun slowLorisSourceTimesOutAndReportsDecodeTimedOut() {
+        // The wpass-qw3 premise, end to end on a real device: a source that never delivers its
+        // bytes must trip the watchdog, and that kill must surface as DecodeTimedOut rather than
+        // DecoderUnavailable. Every other test of the split drives an injected clock and a dead
+        // binder, which pins the arithmetic but not the chain it rests on — that a watchdog kill
+        // reaches the host as a RemoteException at or past the budget.
+        //
+        // A pipe with the write end held open and never written is the slow-loris shape the
+        // watchdog exists for: readBoundedBytes blocks in read(), so the decode cannot finish on
+        // its own. Holding the write end here is load-bearing; closing it would signal EOF and
+        // the decode would complete as a malformed-image rejection instead.
+        val pipe = ParcelFileDescriptor.createPipe()
+        val readEnd = pipe[0]
+        val writeEnd = pipe[1]
+
+        val elapsedMs: Long
+        val result: BarcodeDecodeResult
+        try {
+            val startedAt = SystemClock.uptimeMillis()
+            result = readEnd.use { decode(it) }
+            elapsedMs = SystemClock.uptimeMillis() - startedAt
+        } finally {
+            runCatching { writeEnd.close() }
+        }
+
+        assertThat(result)
+            .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
+        // The watchdog waited its budget rather than failing fast for some unrelated reason.
+        assertThat(elapsedMs).isAtLeast(BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
     }
 
     @Test

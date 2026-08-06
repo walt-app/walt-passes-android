@@ -8,6 +8,7 @@ import `is`.walt.passes.core.DecodeFailureReason
 import `is`.walt.passes.isolation.AndroidIsolatedWorkerSessionFactory
 import `is`.walt.passes.isolation.ConnectResult
 import `is`.walt.passes.isolation.IsolatedWorkerSessionFactory
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Default [BarcodeImageDecoder]. Orchestrates one decode: open the source as a file
@@ -31,6 +32,7 @@ import `is`.walt.passes.isolation.IsolatedWorkerSessionFactory
 internal class DefaultBarcodeImageDecoder(
     private val appContext: Context,
     private val deps: Deps = Deps(),
+    private val config: BarcodeDecodeConfig = BarcodeDecodeConfig(),
 ) : BarcodeImageDecoder {
     internal data class Deps(
         val sessionFactoryFor: (Context) -> IsolatedWorkerSessionFactory<BarcodeDecodeBinder> = { ctx ->
@@ -48,14 +50,40 @@ internal class DefaultBarcodeImageDecoder(
             deps.openPfd(source)
                 ?: return BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.SourceUnreadable)
         return try {
-            when (val conn = sessionFactory.connect()) {
-                ConnectResult.BindFailed ->
+            when (val conn = connectWithinBudget()) {
+                null, ConnectResult.BindFailed ->
                     BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable)
                 is ConnectResult.Connected -> conn.session.use { it.client.decode(pfd) }
             }
         } finally {
             runCatching { pfd.close() }
         }
+    }
+
+    /**
+     * Bind, or give up. `bindService` reports an outright refusal synchronously, but a bind that
+     * is accepted and whose service then dies before `onServiceConnected` never resumes at all —
+     * the facade has no deadline of its own (wpass-67l). Without this bound the decode path could
+     * hang indefinitely, and since wpass-qw3 moved sandbox warm-up into `onCreate` that window
+     * covers the warm-up too. Returns null on expiry, which the caller folds to
+     * `DecoderUnavailable` — accurate, because no decode was ever attempted.
+     *
+     * The `also` is what makes this leak-free: if `connect()` resolves in the same instant the
+     * timeout fires, `withTimeoutOrNull` discards the result, so the session is captured on the
+     * way out and closed here. Otherwise that race would strand a bound sandbox process.
+     */
+    private suspend fun connectWithinBudget(): ConnectResult<BarcodeDecodeBinder>? {
+        var connected: ConnectResult<BarcodeDecodeBinder>? = null
+        val result =
+            withTimeoutOrNull(config.bindTimeoutMs) {
+                sessionFactory.connect().also { connected = it }
+            }
+        if (result == null) {
+            (connected as? ConnectResult.Connected)?.session?.let { session ->
+                runCatching { session.close() }
+            }
+        }
+        return result
     }
 
     internal companion object {

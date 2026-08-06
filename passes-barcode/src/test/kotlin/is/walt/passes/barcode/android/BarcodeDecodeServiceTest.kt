@@ -140,6 +140,16 @@ class BarcodeDecodeServiceTest {
     }
 
     @Test
+    fun serviceWatchdogAndClientAttributionReadTheSameBudget() {
+        // Host-side timeout attribution is a shared-constant handshake across a process
+        // boundary with no wire check, so the value must be pinned on BOTH sides. The client
+        // half is pinned in BarcodeDecodeBinderRoundTripTest; this is the service half, which
+        // arms its watchdog from the default config rather than the constant directly.
+        assertThat(BarcodeDecodeConfig().decodeTimeoutMs)
+            .isEqualTo(BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
+    }
+
+    @Test
     fun warmDecodePathContainsFailures() {
         // Warm-up is an optimization. A throw here would take down onCreate and turn a slow
         // decode into no decode at all, so nothing may escape.

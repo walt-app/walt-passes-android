@@ -11,7 +11,8 @@ package `is`.walt.passes.barcode.android
  * checked from the decoded *header* (via `ImageDecoder.OnHeaderDecodedListener`) before the
  * backing bitmap is allocated; [allowedMimeTypes] rejects containers outside the still-image
  * roster at the same header step; [decodeTimeoutMs] is the watchdog budget that bounds a
- * slow-loris descriptor and terminates the sandbox on expiry ([DecodeWatchdog]).
+ * slow-loris descriptor and terminates the sandbox on expiry ([DecodeWatchdog]); and
+ * [bindTimeoutMs] bounds getting to the sandbox at all, so no decode can hang forever.
  *
  * Exposed as constants so tests and the service refer to the same numbers and changing a
  * default is a deliberate, test-breaking edit.
@@ -21,6 +22,7 @@ internal data class BarcodeDecodeConfig(
     val maxDimensionPx: Int = DEFAULT_MAX_DIMENSION_PX,
     val maxAreaPx: Long = DEFAULT_MAX_AREA_PX,
     val decodeTimeoutMs: Long = DEFAULT_DECODE_TIMEOUT_MS,
+    val bindTimeoutMs: Long = DEFAULT_BIND_TIMEOUT_MS,
     val allowedMimeTypes: Set<String> = DEFAULT_ALLOWED_MIME_TYPES,
 ) {
     companion object {
@@ -38,6 +40,16 @@ internal data class BarcodeDecodeConfig(
 
         /** Decode wall-clock budget; on expiry [DecodeWatchdog] kills the sandbox (slow-loris guard). */
         const val DEFAULT_DECODE_TIMEOUT_MS: Long = 5_000L
+
+        /**
+         * Liveness backstop on the bind, NOT a performance bound. `bindService` reports refusal
+         * synchronously but a bind that is accepted and then never completes (the sandbox dies
+         * during startup) would otherwise wait forever, which since wpass-qw3 also covers the
+         * `onCreate` warm-up. Deliberately loose — several times the worst cold start observed
+         * on a loaded 2-vCPU emulator — so that a slow sandbox is never mistaken for a dead one.
+         * Tightening this would re-create the flake it exists to bound.
+         */
+        const val DEFAULT_BIND_TIMEOUT_MS: Long = 20_000L
 
         /** Still-image containers a card photo realistically arrives in; others are refused before decode. */
         val DEFAULT_ALLOWED_MIME_TYPES: Set<String> =

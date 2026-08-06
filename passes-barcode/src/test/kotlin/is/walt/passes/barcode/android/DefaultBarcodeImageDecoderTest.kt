@@ -12,6 +12,7 @@ import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.isolation.ConnectResult
 import `is`.walt.passes.isolation.IsolatedWorkerSession
 import `is`.walt.passes.isolation.IsolatedWorkerSessionFactory
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,7 +25,8 @@ import org.robolectric.annotation.Config
  *
  *  - An unreadable / disallowed-scheme source short-circuits to `SourceUnreadable` *before*
  *    any bind is attempted.
- *  - A failed bind folds to `DecoderUnavailable`.
+ *  - A failed bind folds to `DecoderUnavailable`, as does one that is accepted and then never
+ *    completes (the bind is bounded so a dead sandbox cannot hang the import path).
  *  - The binder's result rounds back through `decode` unchanged (the wire arms are pinned
  *    separately by [BarcodeDecodeBinderRoundTripTest]).
  *  - The session is unbound and the source PFD is closed on *every* outcome (the bind-first
@@ -107,6 +109,22 @@ class DefaultBarcodeImageDecoderTest {
     }
 
     @Test
+    fun bindThatNeverCompletesFoldsToDecoderUnavailableAndClosesPfd() = runTest {
+        // bindService reporting refusal synchronously is the BindFailed case above. This is the
+        // other one: the bind is accepted and onServiceConnected never fires, which the shared
+        // facade waits on forever (wpass-67l). Since warm-up moved into onCreate, that window
+        // covers it, so the decoder must impose its own bound rather than hang the import.
+        val pfd = TrackingPfd(pipeReadEnd())
+        val factory = HangingSessionFactory()
+        val decoder = decoder(sessionFactory = factory, openPfd = { pfd })
+
+        val result = decoder.decode(fileDescriptorSource())
+
+        assertThat(result).isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
+        assertThat(pfd.closed).isTrue()
+    }
+
+    @Test
     fun nonContentSchemeUriIsRejectedByDefaultOpener() {
         // file:// is the canonical escape-hatch shape the scheme allowlist closes:
         // openFileDescriptor would otherwise resolve an arbitrary filesystem path.
@@ -147,6 +165,11 @@ class DefaultBarcodeImageDecoderTest {
             closed = true
             super.close()
         }
+    }
+
+    /** connect() that is accepted and then never resumes — the un-bounded bind shape. */
+    private class HangingSessionFactory : IsolatedWorkerSessionFactory<BarcodeDecodeBinder> {
+        override suspend fun connect(): ConnectResult<BarcodeDecodeBinder> = awaitCancellation()
     }
 
     private class RecordingSessionFactory(

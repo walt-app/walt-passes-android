@@ -106,7 +106,7 @@ class BarcodeDecodeBinderRoundTripTest {
     fun clientBudgetDefaultsToTheBudgetTheSandboxArmsItsWatchdogWith() = runTest {
         // Host-side timeout attribution is only sound while both sides read the same number.
         val atBudget = clockReading(0L, BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
-        val client = BarcodeDecodeClient(DeadBinder(), elapsedRealtimeMs = atBudget)
+        val client = BarcodeDecodeClient(DeadBinder(), elapsedMs = atBudget)
         assertThat(client.decode(pipeRead))
             .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
     }

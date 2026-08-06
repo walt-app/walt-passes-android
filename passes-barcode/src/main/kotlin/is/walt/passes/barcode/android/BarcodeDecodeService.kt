@@ -80,9 +80,19 @@ internal fun warmDecodePath(
         try {
             val encoded = ByteArrayOutputStream()
             probe.compress(Bitmap.CompressFormat.PNG, 100, encoded)
-            val decoded = decodeBoundedBitmap(encoded.toByteArray(), config)
-            if (decoded is BoundedDecodeResult.Decoded) decoded.bitmap.recycle()
-            symbolDecoder.decode(probe)
+            // Feed the symbol decoder the ImageDecoder-produced bitmap, exactly as doDecode
+            // does; handing it the source probe instead would skip a hop of the real path.
+            when (val decoded = decodeBoundedBitmap(encoded.toByteArray(), config)) {
+                is BoundedDecodeResult.Decoded ->
+                    try {
+                        symbolDecoder.decode(decoded.bitmap)
+                    } finally {
+                        decoded.bitmap.recycle()
+                    }
+                // The platform decoder is unavailable (the JVM test runtime, say). Warm ZXing
+                // off the probe rather than skipping it — the reader classes are the slow half.
+                is BoundedDecodeResult.Rejected -> symbolDecoder.decode(probe)
+            }
         } finally {
             probe.recycle()
         }

@@ -122,8 +122,7 @@ jobs:
 
       # Per-API task name matches the localDevices entries declared in each module's
       # build.gradle.kts. The DebugAndroidTest suffix runs the androidTest sources against
-      # the debug variant. passes-barcode runs the wpass-zrt.5 on-device security suite; its
-      # @Ignore'd scenarios (sandbox probe, parcel probe) skip rather than fail.
+      # the debug variant. passes-barcode runs the wpass-zrt.5 on-device security suite.
       #
       # One module per step, deliberately (wpass-qw3). Passing both tasks to one invocation let
       # org.gradle.parallel start both managed devices at once, so two emulators shared a
@@ -131,11 +130,14 @@ jobs:
       # Separate steps make the serialization structural rather than a Gradle scheduling
       # accident.
       - name: Run connected tests (passes-storage)
+        id: storage-connected
         run: ./gradlew :passes-storage:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
-      # Runs even when the storage leg failed: one module's failure must not hide the other's.
+      # Runs when the storage leg passed OR failed on its own tests, so one module's failure
+      # cannot hide the other's. Scoped to that step rather than `!cancelled()`, which would
+      # also run this after a setup step failed and report a confusing second failure.
       - name: Run connected tests (passes-barcode)
-        if: ${{ !cancelled() }}
+        if: ${{ success() || steps.storage-connected.conclusion == 'failure' }}
         run: ./gradlew :passes-barcode:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
       - name: Upload connected test reports
