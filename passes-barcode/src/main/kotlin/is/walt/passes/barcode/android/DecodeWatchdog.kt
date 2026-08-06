@@ -15,9 +15,7 @@ import kotlinx.coroutines.withContext
  * process without a hard wall-clock bound. On expiry the watchdog terminates the isolated
  * process; the main process then observes the dropped binder as a
  * [android.os.RemoteException]. A killed sandbox cannot report its own death, so
- * [BarcodeDecodeClient] attributes that drop to
- * [is.walt.passes.core.DecodeFailureReason.DecodeTimedOut] when the full [timeoutMs] had
- * elapsed, and to `DecoderUnavailable` otherwise (wpass-qw3).
+ * [BarcodeDecodeClient] attributes that drop by elapsed time (wpass-qw3).
  *
  * The budget bounds DECODE work only. Class loading, native codec init, and ZXing reader
  * first-touch are paid in [BarcodeDecodeService.onCreate], before `onBind` returns, so a cold

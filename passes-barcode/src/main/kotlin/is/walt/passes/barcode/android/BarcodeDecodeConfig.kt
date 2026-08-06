@@ -14,6 +14,11 @@ package `is`.walt.passes.barcode.android
  * slow-loris descriptor and terminates the sandbox on expiry ([DecodeWatchdog]); and
  * [bindTimeoutMs] bounds getting to the sandbox at all, so no decode can hang forever.
  *
+ * All caps except [bindTimeoutMs] are enforced INSIDE the sandbox, before the platform decoder
+ * allocates. [bindTimeoutMs] is the odd one out: a host-side liveness bound, applied before the
+ * sandbox exists at all. [decodeTimeoutMs] is read on both sides — armed in the sandbox, and
+ * used by the host to attribute a dropped binder.
+ *
  * Exposed as constants so tests and the service refer to the same numbers and changing a
  * default is a deliberate, test-breaking edit.
  */

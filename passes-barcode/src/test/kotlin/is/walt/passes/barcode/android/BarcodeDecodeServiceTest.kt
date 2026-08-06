@@ -121,30 +121,44 @@ class BarcodeDecodeServiceTest {
     }
 
     @Test
-    fun warmDecodePathRunsTheSymbolDecoderOffTheDecodeBudget() {
-        // The warm-up must actually touch ZXing — a no-op would leave the reader classes to
-        // load inside the watchdog budget, which is the wpass-qw3 failure.
-        var probedWidth = 0
-        var probedHeight = 0
+    fun warmDecodePathWarmsTheSymbolDecoderOnTheDecodedBitmap() {
+        // The warm-up must hand ZXing the ImageDecoder OUTPUT, exactly as doDecode does —
+        // warming it off the source probe instead would skip the codec hop and leave part of
+        // the cold start inside the watchdog budget. A marker bitmap of a distinctive size is
+        // what separates the two; asserting only "some 64x64 bitmap arrived" would stay green
+        // either way, since the probe is 64x64 too.
+        val marker = Bitmap.createBitmap(9, 7, Bitmap.Config.ARGB_8888)
+        var warmed: Bitmap? = null
 
-        warmDecodePath(config) { bitmap ->
-            probedWidth = bitmap.width
-            probedHeight = bitmap.height
-            BarcodeDecodeResult.NoBarcodeFound
+        warmDecodePath(config, { bitmap -> warmed = bitmap; BarcodeDecodeResult.NoBarcodeFound }) { _, _ ->
+            BoundedDecodeResult.Decoded(marker)
         }
 
-        // Both stay 0 if the decoder was never called; 40 is ZXing's hybrid-binarizer floor,
-        // below which the warm-up would touch a binarizer path the real decode never uses.
-        assertThat(probedWidth).isAtLeast(40)
-        assertThat(probedHeight).isAtLeast(40)
+        assertThat(warmed).isSameInstanceAs(marker)
+        assertThat(marker.isRecycled).isTrue()
     }
 
     @Test
-    fun serviceWatchdogAndClientAttributionReadTheSameBudget() {
-        // Host-side timeout attribution is a shared-constant handshake across a process
-        // boundary with no wire check, so the value must be pinned on BOTH sides. The client
-        // half is pinned in BarcodeDecodeBinderRoundTripTest; this is the service half, which
-        // arms its watchdog from the default config rather than the constant directly.
+    fun warmDecodePathStillWarmsZxingWhenThePlatformDecoderIsUnavailable() {
+        // Fallback arm: no bitmap to warm from, but the ZXing reader classes are the slow half
+        // of cold start, so they must still be touched rather than the warm-up skipped.
+        var probedWidth = 0
+
+        warmDecodePath(config, { bitmap -> probedWidth = bitmap.width; BarcodeDecodeResult.NoBarcodeFound }) { _, _ ->
+            BoundedDecodeResult.Rejected(DecodeFailureReason.ImageDecodeFailed)
+        }
+
+        // Stays 0 if the decoder was never called; 40 is ZXing's hybrid-binarizer floor, below
+        // which the warm-up would touch a binarizer path the real decode never uses.
+        assertThat(probedWidth).isAtLeast(40)
+    }
+
+    @Test
+    fun configDefaultDecodeTimeoutMatchesTheSharedConstant() {
+        // Narrow on purpose: this catches only an edit to the default parameter expression.
+        // The service arming its watchdog from this config is NOT reachable from a unit test —
+        // that end of the handshake is proven on-device by the instrumented slow-loris case,
+        // which asserts a real decode was killed at this budget.
         assertThat(BarcodeDecodeConfig().decodeTimeoutMs)
             .isEqualTo(BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
     }
@@ -153,7 +167,7 @@ class BarcodeDecodeServiceTest {
     fun warmDecodePathContainsFailures() {
         // Warm-up is an optimization. A throw here would take down onCreate and turn a slow
         // decode into no decode at all, so nothing may escape.
-        warmDecodePath(config) { error("warm-up blew up") }
+        warmDecodePath(config, { error("warm-up blew up") }) { _, _ -> error("codec blew up") }
     }
 
     // --------------------------------------------------------------------- helpers

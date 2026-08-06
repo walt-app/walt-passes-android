@@ -163,8 +163,15 @@ class BarcodeDecodeServiceInstrumentedTest {
 
         assertThat(result)
             .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
-        // The watchdog waited its budget rather than failing fast for some unrelated reason.
+        // Sanity bounds, not a measurement of the watchdog: this window covers process spawn,
+        // warm-up and bind as well as the decode, so the lower bound can be met by bind cost
+        // alone. The DecodeTimedOut result above is the real assertion — the host only attributes
+        // that arm when the full budget elapsed. The upper bound catches a budget retuned to
+        // something wild, since the bind timeout would have folded to DecoderUnavailable first.
         assertThat(elapsedMs).isAtLeast(BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
+        assertThat(elapsedMs).isLessThan(
+            BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS + BarcodeDecodeConfig.DEFAULT_BIND_TIMEOUT_MS,
+        )
     }
 
     @Test

@@ -62,8 +62,7 @@ public enum class DecodeFailureReason {
      * The decode exceeded its wall-clock budget and the isolated process was terminated by its
      * watchdog. Split from [DecoderUnavailable] (wpass-qw3) because the two call for opposite
      * responses: an unavailable decoder will not succeed on retry, whereas a timed-out one is a
-     * load signal and the same image may decode fine later. walt-passes-ios names the same arm
-     * `decodeTimedOut`.
+     * load signal and the same image may decode fine later.
      *
      * Retry is a user-initiated affordance, never automatic: an image crafted to exhaust the
      * budget costs a full sandbox spawn and the whole budget on every attempt, so an automatic

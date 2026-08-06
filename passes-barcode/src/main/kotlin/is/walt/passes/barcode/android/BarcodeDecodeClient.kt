@@ -34,13 +34,8 @@ import kotlinx.coroutines.withContext
  *    whether the full [decodeBudgetMs] elapsed before the binder dropped. At or past the
  *    budget folds to [DecodeFailureReason.DecodeTimedOut] (a load signal — the same image may
  *    decode fine on retry); anything earlier stays [DecodeFailureReason.DecoderUnavailable]
- *    (a crash or an absent decoder — retry will not help). The budget is read from
- *    [BarcodeDecodeConfig], the same constant the sandbox arms its watchdog with, so the two
- *    sides cannot drift apart on the *value*. They must also not drift on the *clock*:
- *    [SystemClock.uptimeMillis] shares `CLOCK_MONOTONIC` with the `delay` the watchdog's kill
- *    timer runs on, so both stop counting across device deep sleep. `elapsedRealtime` would
- *    keep counting through a suspend the sandbox never experienced, and could report a
- *    timeout the watchdog never fired.
+ *    (a crash or an absent decoder — retry will not help). What that comparison rests on is
+ *    documented on [decoderWentAway].
  *  - A `false` return from [IBinder.transact] folds to [DecodeFailureReason.DecoderUnavailable]
  *    defensively, and is never timeout-attributed: the only path that returns false is the
  *    proxy failing to read the PFD out of the request parcel (a same-build wire-invariant
@@ -110,6 +105,15 @@ internal class BarcodeDecodeClient(
      * The binder dropped mid-transaction. Attribute it by how long the decode had been running:
      * the sandbox's own watchdog kills at [decodeBudgetMs], so reaching that mark is the
      * signature of a timeout, while an earlier death is a crash or an absent decoder.
+     *
+     * Two things have to hold for that comparison to mean anything, and both are load-bearing:
+     *
+     *  - Same VALUE. [decodeBudgetMs] defaults to the [BarcodeDecodeConfig] field the sandbox
+     *    arms its watchdog from, so neither side can be retuned without the other.
+     *  - Same CLOCK. [SystemClock.uptimeMillis] shares `CLOCK_MONOTONIC` with the `delay` the
+     *    watchdog's kill timer runs on, so both stop counting across device deep sleep.
+     *    `elapsedRealtime` would keep counting through a suspend the sandbox never experienced
+     *    and could report a timeout the watchdog never fired.
      */
     private fun decoderWentAway(startedAtMs: Long): BarcodeDecodeResult =
         if (elapsedMs() - startedAtMs >= decodeBudgetMs) {

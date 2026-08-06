@@ -62,18 +62,20 @@ public class BarcodeDecodeService : Service() {
  * decode work and nothing else (wpass-qw3). A freshly forked isolated process loads
  * `ImageDecoder`'s native codec support and every ZXing reader class on first touch,
  * interpreted and un-JIT'd; on a loaded machine that alone consumed most of the budget and the
- * watchdog killed benign decodes. Because the host has no bind timeout, moving the cost ahead
- * of `onBind` tightens what the guard bounds rather than loosening the guard.
+ * watchdog killed benign decodes. The cost is MOVED, not saved: binds are per-decode, so the
+ * probe runs on every decode. Moving it out of the guarded window is the entire point, and it
+ * is only safe because the bind itself is now bounded (`DefaultBarcodeImageDecoder`).
  *
  * The probe is Walt-generated, never caller-supplied, and runs the production path end to end:
- * encode a blank bitmap, put it through [decodeBoundedBitmap], then through [symbolDecoder].
- * Sized past ZXing's 40px hybrid-binarizer floor so the real binarizer path warms too. Any
- * failure is swallowed — warm-up is an optimization, and a service that refuses to start would
- * turn a slow decode into no decode at all.
+ * encode a blank bitmap, put it through [boundedDecode], then hand the DECODED bitmap to
+ * [symbolDecoder] exactly as [doDecode] does. Sized past ZXing's 40px hybrid-binarizer floor so
+ * the real binarizer path warms too. Any failure is swallowed — warm-up is an optimization, and
+ * a service that refuses to start would turn a slow decode into no decode at all.
  */
 internal fun warmDecodePath(
     config: BarcodeDecodeConfig,
     symbolDecoder: BarcodeSymbolDecoder,
+    boundedDecode: (ByteArray, BarcodeDecodeConfig) -> BoundedDecodeResult = ::decodeBoundedBitmap,
 ) {
     runCatching {
         val probe = Bitmap.createBitmap(WARM_UP_PROBE_PX, WARM_UP_PROBE_PX, Bitmap.Config.ARGB_8888)
@@ -82,7 +84,7 @@ internal fun warmDecodePath(
             probe.compress(Bitmap.CompressFormat.PNG, 100, encoded)
             // Feed the symbol decoder the ImageDecoder-produced bitmap, exactly as doDecode
             // does; handing it the source probe instead would skip a hop of the real path.
-            when (val decoded = decodeBoundedBitmap(encoded.toByteArray(), config)) {
+            when (val decoded = boundedDecode(encoded.toByteArray(), config)) {
                 is BoundedDecodeResult.Decoded ->
                     try {
                         symbolDecoder.decode(decoded.bitmap)

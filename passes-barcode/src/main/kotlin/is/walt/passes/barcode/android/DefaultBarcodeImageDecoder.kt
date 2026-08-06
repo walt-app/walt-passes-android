@@ -35,14 +35,20 @@ internal class DefaultBarcodeImageDecoder(
     private val config: BarcodeDecodeConfig = BarcodeDecodeConfig(),
 ) : BarcodeImageDecoder {
     internal data class Deps(
-        val sessionFactoryFor: (Context) -> IsolatedWorkerSessionFactory<BarcodeDecodeBinder> = { ctx ->
-            AndroidIsolatedWorkerSessionFactory(ctx, BarcodeDecodeService::class.java) { BarcodeDecodeClient(it) }
-        },
+        // Takes the config so the client's timeout-attribution threshold is the one THIS decoder
+        // holds. Reading the constant here instead would let a non-default config disagree with
+        // the threshold it is attributed against — the drift the shared constant exists to stop.
+        val sessionFactoryFor: (Context, BarcodeDecodeConfig) -> IsolatedWorkerSessionFactory<BarcodeDecodeBinder> =
+            { ctx, cfg ->
+                AndroidIsolatedWorkerSessionFactory(ctx, BarcodeDecodeService::class.java) {
+                    BarcodeDecodeClient(it, cfg.decodeTimeoutMs)
+                }
+            },
         val openPfd: (BarcodeImageSource) -> ParcelFileDescriptor? = ::defaultOpenPfd,
     )
 
     private val sessionFactory: IsolatedWorkerSessionFactory<BarcodeDecodeBinder> by lazy {
-        deps.sessionFactoryFor(appContext)
+        deps.sessionFactoryFor(appContext, config)
     }
 
     override suspend fun decode(source: BarcodeImageSource): BarcodeDecodeResult {
@@ -68,9 +74,13 @@ internal class DefaultBarcodeImageDecoder(
      * covers the warm-up too. Returns null on expiry, which the caller folds to
      * `DecoderUnavailable` — accurate, because no decode was ever attempted.
      *
-     * The `also` is what makes this leak-free: if `connect()` resolves in the same instant the
-     * timeout fires, `withTimeoutOrNull` discards the result, so the session is captured on the
-     * way out and closed here. Otherwise that race would strand a bound sandbox process.
+     * The `also` narrows the teardown race. `connect()`'s own `invokeOnCancellation` unbinds
+     * while it is still suspended, but that hook is detached once it resumes — so a session that
+     * materializes just as the deadline fires would be discarded by `withTimeoutOrNull` still
+     * bound. Capturing on the way out lets it be closed here. What this does NOT cover is a
+     * continuation resumed after cancellation, whose value the dispatcher drops without running
+     * this block at all; closing that needs the facade to resume with an onCancellation handler
+     * (wpass-67l). The residue is one bound sandbox in a sub-millisecond window.
      */
     private suspend fun connectWithinBudget(): ConnectResult<BarcodeDecodeBinder>? {
         var connected: ConnectResult<BarcodeDecodeBinder>? = null
