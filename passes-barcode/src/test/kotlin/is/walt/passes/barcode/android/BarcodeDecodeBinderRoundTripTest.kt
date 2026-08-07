@@ -84,10 +84,37 @@ class BarcodeDecodeBinderRoundTripTest {
 
     @Test
     fun decodeFoldsRemoteExceptionIntoDecoderUnavailable() = runTest {
-        // A decode process that goes away (e.g. killed by a future bounded-decode watchdog)
-        // surfaces as RemoteException from transact; the client folds it to DecoderUnavailable.
-        val client = BarcodeDecodeClient(DeadBinder())
+        // A decode process that goes away surfaces as RemoteException from transact. Dying well
+        // inside the budget is an absent or crashed decoder, not a timeout.
+        val client = BarcodeDecodeClient(DeadBinder(), BUDGET_MS, clockReading(0L, BUDGET_MS - 1))
         assertThat(client.decode(pipeRead))
+            .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
+    }
+
+    @Test
+    fun decodeAtOrPastBudgetFoldsIntoDecodeTimedOut() = runTest {
+        // The watchdog kills the sandbox at the budget, so a binder that drops once the budget
+        // has elapsed is the signature of a timeout (wpass-qw3). The boundary is inclusive.
+        for (elapsed in listOf(BUDGET_MS, BUDGET_MS + 1, BUDGET_MS * 3)) {
+            val client = BarcodeDecodeClient(DeadBinder(), BUDGET_MS, clockReading(0L, elapsed))
+            assertThat(client.decode(pipeRead))
+                .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
+        }
+    }
+
+    @Test
+    fun clientBudgetDefaultsToTheBudgetTheSandboxArmsItsWatchdogWith() = runTest {
+        // Host-side timeout attribution is only sound while the client's default IS the constant
+        // the sandbox arms from — a client that stopped referencing it would attribute against a
+        // threshold nothing enforces. The at-budget reading alone cannot catch that (a smaller
+        // default still reads as timed-out at 5000); the reading one millisecond below is what
+        // pins it. Retuning the constant itself moves both sides together, which is intended.
+        val atBudget = clockReading(0L, BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
+        assertThat(BarcodeDecodeClient(DeadBinder(), elapsedMs = atBudget).decode(pipeRead))
+            .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
+
+        val justUnder = clockReading(0L, BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS - 1)
+        assertThat(BarcodeDecodeClient(DeadBinder(), elapsedMs = justUnder).decode(pipeRead))
             .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
     }
 
@@ -96,7 +123,9 @@ class BarcodeDecodeBinderRoundTripTest {
         // onTransact returning false (proxy could not read the request PFD) leaves the reply
         // parcel empty; decoding it as TAG_DECODED (empty parcel reads 0) would surface a
         // phantom decoded result, so the client must translate false into DecoderUnavailable.
-        val client = BarcodeDecodeClient(FalseBinder())
+        // The clock is parked past the budget: no decode was attempted, so elapsed time is
+        // irrelevant and this must never be attributed as a timeout.
+        val client = BarcodeDecodeClient(FalseBinder(), BUDGET_MS, clockReading(0L, BUDGET_MS * 2))
         assertThat(client.decode(pipeRead))
             .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
     }
@@ -106,7 +135,8 @@ class BarcodeDecodeBinderRoundTripTest {
         // A compromised sandbox could return a reply with an unrecognised tag (or a garbled
         // payload / wire code). The client treats the reply as untrusted and folds any parse
         // failure to DecoderUnavailable rather than throwing out of the result-returning API.
-        val client = BarcodeDecodeClient(GarbageReplyBinder())
+        // Past-budget clock again: the sandbox answered, so this is not a timeout however slow.
+        val client = BarcodeDecodeClient(GarbageReplyBinder(), BUDGET_MS, clockReading(0L, BUDGET_MS * 2))
         assertThat(client.decode(pipeRead))
             .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
     }
@@ -118,6 +148,12 @@ class BarcodeDecodeBinderRoundTripTest {
 
     private fun clientFor(impl: BarcodeDecodeBinder): BarcodeDecodeClient =
         BarcodeDecodeClient(BarcodeDecodeBinderProxy(impl))
+
+    /** Hands out [readings] in order, then repeats the last, so paths that read once still work. */
+    private fun clockReading(vararg readings: Long): () -> Long {
+        var index = 0
+        return { readings[minOf(index++, readings.lastIndex)] }
+    }
 
     /** Every transact throws RemoteException — the shape after the decode process is gone. */
     private class DeadBinder : Binder() {
@@ -136,6 +172,11 @@ class BarcodeDecodeBinderRoundTripTest {
             reply?.writeInt(Int.MAX_VALUE)
             return true
         }
+    }
+
+    private companion object {
+        /** Distinct from the production default so a test cannot pass by picking up the real one. */
+        const val BUDGET_MS = 1_234L
     }
 
     private class StaticImpl(

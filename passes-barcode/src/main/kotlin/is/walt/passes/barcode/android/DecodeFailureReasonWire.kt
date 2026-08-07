@@ -9,6 +9,13 @@ import `is`.walt.passes.core.DecodeFailureReason
  * there cannot silently mis-decode failures downstream in walt-android.
  *
  * [DecodeFailureReasonWireSurfaceTest] fails closed if the table drifts from the enum.
+ *
+ * No honest sandbox emits [DECODE_TIMED_OUT] — a watchdog-killed process cannot report its own
+ * death, so [BarcodeDecodeClient] attributes that arm host-side. The code is reserved here so
+ * the table stays total over the enum and a future sandbox-side report needs no renumber. A
+ * compromised sandbox can of course send it, which grants nothing it did not already have: it
+ * could always assert any of codes 0-4, and no consumer branches on the reason for a security
+ * decision.
  */
 internal object DecodeFailureReasonWire {
     const val SOURCE_UNREADABLE: Int = 0
@@ -16,6 +23,7 @@ internal object DecodeFailureReasonWire {
     const val IMAGE_TOO_LARGE: Int = 2
     const val UNSUPPORTED_BARCODE_FORMAT: Int = 3
     const val DECODER_UNAVAILABLE: Int = 4
+    const val DECODE_TIMED_OUT: Int = 5
 
     fun encode(reason: DecodeFailureReason): Int =
         when (reason) {
@@ -24,6 +32,7 @@ internal object DecodeFailureReasonWire {
             DecodeFailureReason.ImageTooLarge -> IMAGE_TOO_LARGE
             DecodeFailureReason.UnsupportedBarcodeFormat -> UNSUPPORTED_BARCODE_FORMAT
             DecodeFailureReason.DecoderUnavailable -> DECODER_UNAVAILABLE
+            DecodeFailureReason.DecodeTimedOut -> DECODE_TIMED_OUT
         }
 
     fun decode(code: Int): DecodeFailureReason =
@@ -33,6 +42,7 @@ internal object DecodeFailureReasonWire {
             IMAGE_TOO_LARGE -> DecodeFailureReason.ImageTooLarge
             UNSUPPORTED_BARCODE_FORMAT -> DecodeFailureReason.UnsupportedBarcodeFormat
             DECODER_UNAVAILABLE -> DecodeFailureReason.DecoderUnavailable
+            DECODE_TIMED_OUT -> DecodeFailureReason.DecodeTimedOut
             else -> error("Unknown DecodeFailureReason wire code: $code")
         }
 }

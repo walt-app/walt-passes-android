@@ -19,6 +19,7 @@ class DecodeFailureReasonWireSurfaceTest {
                 DecodeFailureReason.ImageTooLarge to DecodeFailureReasonWire.IMAGE_TOO_LARGE,
                 DecodeFailureReason.UnsupportedBarcodeFormat to DecodeFailureReasonWire.UNSUPPORTED_BARCODE_FORMAT,
                 DecodeFailureReason.DecoderUnavailable to DecodeFailureReasonWire.DECODER_UNAVAILABLE,
+                DecodeFailureReason.DecodeTimedOut to DecodeFailureReasonWire.DECODE_TIMED_OUT,
             )
         for ((reason, code) in expected) {
             assertThat(DecodeFailureReasonWire.encode(reason)).isEqualTo(code)
@@ -40,6 +41,7 @@ class DecodeFailureReasonWireSurfaceTest {
         assertThat(DecodeFailureReasonWire.IMAGE_TOO_LARGE).isEqualTo(2)
         assertThat(DecodeFailureReasonWire.UNSUPPORTED_BARCODE_FORMAT).isEqualTo(3)
         assertThat(DecodeFailureReasonWire.DECODER_UNAVAILABLE).isEqualTo(4)
+        assertThat(DecodeFailureReasonWire.DECODE_TIMED_OUT).isEqualTo(5)
     }
 
     @Test

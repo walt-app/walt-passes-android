@@ -11,6 +11,7 @@ import android.os.IBinder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
 import android.os.Process
+import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
@@ -132,6 +133,35 @@ class BarcodeDecodeServiceInstrumentedTest {
             ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY).use { decode(it) }
 
         assertThat(result).isInstanceOf(BarcodeDecodeResult.DecodeFailed::class.java)
+    }
+
+    @Test
+    fun slowLorisSourceTimesOutAndReportsDecodeTimedOut() {
+        // The wpass-qw3 premise, end to end: a watchdog kill must reach the host as a
+        // RemoteException at or past the budget and surface as DecodeTimedOut. The unit tests
+        // pin the arithmetic with an injected clock; only this pins the chain it rests on.
+        //
+        // Holding the write end open is load-bearing: it is what makes readBoundedBytes block.
+        // Closing it would signal EOF and the decode would finish as a malformed-image reject.
+        val pipe = ParcelFileDescriptor.createPipe()
+        val readEnd = pipe[0]
+        val writeEnd = pipe[1]
+
+        val elapsedMs: Long
+        val result: BarcodeDecodeResult
+        try {
+            val startedAt = SystemClock.uptimeMillis()
+            result = readEnd.use { decode(it) }
+            elapsedMs = SystemClock.uptimeMillis() - startedAt
+        } finally {
+            runCatching { writeEnd.close() }
+        }
+
+        assertThat(result)
+            .isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecodeTimedOut))
+        // A sanity floor, not a measurement: this window also covers spawn, warm-up and bind, so
+        // bind cost alone could satisfy it. The DecodeTimedOut assertion above is the real one.
+        assertThat(elapsedMs).isAtLeast(BarcodeDecodeConfig.DEFAULT_DECODE_TIMEOUT_MS)
     }
 
     @Test

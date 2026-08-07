@@ -104,6 +104,7 @@ class PublicApiSurfaceTest {
                 "ImageTooLarge",
                 "UnsupportedBarcodeFormat",
                 "DecoderUnavailable",
+                "DecodeTimedOut",
             )
     }
 }

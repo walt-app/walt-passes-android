@@ -8,6 +8,7 @@ import `is`.walt.passes.core.DecodeFailureReason
 import `is`.walt.passes.isolation.AndroidIsolatedWorkerSessionFactory
 import `is`.walt.passes.isolation.ConnectResult
 import `is`.walt.passes.isolation.IsolatedWorkerSessionFactory
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Default [BarcodeImageDecoder]. Orchestrates one decode: open the source as a file
@@ -48,8 +49,8 @@ internal class DefaultBarcodeImageDecoder(
             deps.openPfd(source)
                 ?: return BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.SourceUnreadable)
         return try {
-            when (val conn = sessionFactory.connect()) {
-                ConnectResult.BindFailed ->
+            when (val conn = connectWithinBudget()) {
+                null, ConnectResult.BindFailed ->
                     BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable)
                 is ConnectResult.Connected -> conn.session.use { it.client.decode(pfd) }
             }
@@ -58,7 +59,46 @@ internal class DefaultBarcodeImageDecoder(
         }
     }
 
+    /**
+     * Bind, or give up. `bindService` reports an outright refusal synchronously, but a bind that
+     * is accepted and whose service then dies before `onServiceConnected` never resumes at all —
+     * the facade has no deadline of its own (wpass-67l). Without this bound the decode path could
+     * hang indefinitely, and since wpass-qw3 moved sandbox warm-up into `onCreate` that window
+     * covers the warm-up too. Returns null on expiry, which the caller folds to
+     * `DecoderUnavailable` — accurate, because no decode was ever attempted.
+     *
+     * The `also` narrows the teardown race. `connect()`'s own `invokeOnCancellation` unbinds
+     * while it is still suspended, but that hook is detached once it resumes — so a session that
+     * materializes just as the deadline fires would be discarded by `withTimeoutOrNull` still
+     * bound. Capturing on the way out lets it be closed here. What this does NOT cover is a
+     * continuation resumed after cancellation, whose value the dispatcher drops without running
+     * this block at all; closing that needs the facade to resume with an onCancellation handler
+     * (wpass-67l). The residue is one bound sandbox in a sub-millisecond window.
+     */
+    private suspend fun connectWithinBudget(): ConnectResult<BarcodeDecodeBinder>? {
+        var connected: ConnectResult<BarcodeDecodeBinder>? = null
+        val result =
+            withTimeoutOrNull(DEFAULT_BIND_TIMEOUT_MS) {
+                sessionFactory.connect().also { connected = it }
+            }
+        if (result == null) {
+            (connected as? ConnectResult.Connected)?.session?.let { session ->
+                runCatching { session.close() }
+            }
+        }
+        return result
+    }
+
     internal companion object {
+        /**
+         * Liveness backstop on the bind, NOT a performance bound. Lives here rather than on
+         * [BarcodeDecodeConfig] because it bounds the host's wait, not anything the sandbox
+         * enforces. Deliberately loose — several times the worst cold start observed on a loaded
+         * 2-vCPU emulator — so a slow sandbox is never mistaken for a dead one. Tightening it
+         * would recreate the flake it exists to bound.
+         */
+        const val DEFAULT_BIND_TIMEOUT_MS: Long = 20_000L
+
         /**
          * Open [source] as a [ParcelFileDescriptor] without reading its bytes into this
          * process. Mirrors the PDF importer's source discipline: the `content://` scheme

@@ -12,7 +12,11 @@ import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.isolation.ConnectResult
 import `is`.walt.passes.isolation.IsolatedWorkerSession
 import `is`.walt.passes.isolation.IsolatedWorkerSessionFactory
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
@@ -24,7 +28,8 @@ import org.robolectric.annotation.Config
  *
  *  - An unreadable / disallowed-scheme source short-circuits to `SourceUnreadable` *before*
  *    any bind is attempted.
- *  - A failed bind folds to `DecoderUnavailable`.
+ *  - A failed bind folds to `DecoderUnavailable`, as does one that is accepted and then never
+ *    completes (the bind is bounded so a dead sandbox cannot hang the import path).
  *  - The binder's result rounds back through `decode` unchanged (the wire arms are pinned
  *    separately by [BarcodeDecodeBinderRoundTripTest]).
  *  - The session is unbound and the source PFD is closed on *every* outcome (the bind-first
@@ -107,6 +112,40 @@ class DefaultBarcodeImageDecoderTest {
     }
 
     @Test
+    fun bindThatNeverCompletesFoldsToDecoderUnavailableAndClosesPfd() = runTest {
+        // bindService reporting refusal synchronously is the BindFailed case above. This is the
+        // other one: the bind is accepted and onServiceConnected never fires, which the shared
+        // facade waits on forever (wpass-67l). Since warm-up moved into onCreate, that window
+        // covers it, so the decoder must impose its own bound rather than hang the import.
+        val pfd = TrackingPfd(pipeReadEnd())
+        val factory = HangingSessionFactory()
+        val decoder = decoder(sessionFactory = factory, openPfd = { pfd })
+
+        val result = decoder.decode(fileDescriptorSource())
+
+        assertThat(result).isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
+        assertThat(pfd.closed).isTrue()
+    }
+
+    @Test
+    fun sessionArrivingAfterTheBindDeadlineIsClosedNotStranded() = runTest {
+        // The teardown race the `also` capture exists for: connect() resolves, but only after
+        // withTimeoutOrNull has given up, so the result is discarded while the session is bound.
+        // NonCancellable makes that ordering deterministic under virtual time. Without the
+        // capture the sandbox would stay bound with nothing holding a reference to it.
+        val pfd = TrackingPfd(pipeReadEnd())
+        val session = RecordingSession(StaticDecodeBinder(BarcodeDecodeResult.NoBarcodeFound))
+        val factory = LateSessionFactory(DefaultBarcodeImageDecoder.DEFAULT_BIND_TIMEOUT_MS + 1, session)
+        val decoder = decoder(sessionFactory = factory, openPfd = { pfd })
+
+        val result = decoder.decode(fileDescriptorSource())
+
+        assertThat(result).isEqualTo(BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.DecoderUnavailable))
+        assertThat(session.closed).isTrue()
+        assertThat(pfd.closed).isTrue()
+    }
+
+    @Test
     fun nonContentSchemeUriIsRejectedByDefaultOpener() {
         // file:// is the canonical escape-hatch shape the scheme allowlist closes:
         // openFileDescriptor would otherwise resolve an arbitrary filesystem path.
@@ -146,6 +185,22 @@ class DefaultBarcodeImageDecoderTest {
         override fun close() {
             closed = true
             super.close()
+        }
+    }
+
+    /** connect() that is accepted and then never resumes — the un-bounded bind shape. */
+    private class HangingSessionFactory : IsolatedWorkerSessionFactory<BarcodeDecodeBinder> {
+        override suspend fun connect(): ConnectResult<BarcodeDecodeBinder> = awaitCancellation()
+    }
+
+    /** connect() that outlives the deadline uncancellably, then hands back a live session. */
+    private class LateSessionFactory(
+        private val afterMs: Long,
+        private val session: RecordingSession,
+    ) : IsolatedWorkerSessionFactory<BarcodeDecodeBinder> {
+        override suspend fun connect(): ConnectResult<BarcodeDecodeBinder> {
+            withContext(NonCancellable) { delay(afterMs) }
+            return ConnectResult.Connected(session)
         }
     }
 

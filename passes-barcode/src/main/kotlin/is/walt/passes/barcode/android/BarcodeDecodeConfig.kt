@@ -13,6 +13,11 @@ package `is`.walt.passes.barcode.android
  * roster at the same header step; [decodeTimeoutMs] is the watchdog budget that bounds a
  * slow-loris descriptor and terminates the sandbox on expiry ([DecodeWatchdog]).
  *
+ * Every field here is enforced INSIDE the sandbox. [decodeTimeoutMs] is additionally read by the
+ * host, which compares elapsed time against it to attribute a dropped binder — see
+ * [BarcodeDecodeClient]. The host's own bind bound is not a sandbox cap and lives with the host
+ * code, on [DefaultBarcodeImageDecoder].
+ *
  * Exposed as constants so tests and the service refer to the same numbers and changing a
  * default is a deliberate, test-breaking edit.
  */
