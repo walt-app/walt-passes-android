@@ -128,8 +128,8 @@ private fun CodeCard(
     val face = if (tinted) faceTint else MaterialTheme.colorScheme.surface
     val ink = if (tinted) inkOn(faceTint) else MaterialTheme.colorScheme.onSurface
     // The payload is the POS fallback, not decorative meta: on a tint it takes full ink,
-    // because inkOn's worst case is already only 4.58:1 and any alpha would push the
-    // readback under WCAG AA. Untinted keeps the contrast-checked theme token.
+    // because INK_FLIP_LUMINANCE's worst case leaves no headroom for alpha. Untinted
+    // keeps the contrast-checked theme token.
     val payloadInk = if (tinted) ink else MaterialTheme.colorScheme.onSurfaceVariant
 
     Surface(

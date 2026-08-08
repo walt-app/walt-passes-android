@@ -9,8 +9,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -213,6 +215,25 @@ class ScannableCardTrustSurfaceTest {
         }
         // The label is wrapped in FSI/PDI, so look up by the isolated form. Mirrors how
         // the security-sheet tests assert isolated-form display of user-supplied strings.
+        composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun fullScreenCodeImageCarriesNoDescriptionSoTalkBackReadsTheLabelOnce() {
+        // The detail surface composes the label as its own Text directly beneath the code,
+        // so the code image must carry no contentDescription — otherwise TalkBack reads the
+        // label twice. The trap is a one-word default: routing this back through
+        // ScannableCardView (showPayloadCaption = false) sends card.label into the image
+        // again, and the by-text assertions above stay green because a contentDescription
+        // is not a text node. Both forms checked: the image would carry the raw label,
+        // while the Text carries the FSI/PDI-isolated one.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(card = qrFixture(label = "Library card"))
+            }
+        }
+        composeRule.onAllNodesWithContentDescription("Library card").assertCountEquals(0)
+        composeRule.onAllNodesWithContentDescription("⁨Library card⁩").assertCountEquals(0)
         composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
     }
 
