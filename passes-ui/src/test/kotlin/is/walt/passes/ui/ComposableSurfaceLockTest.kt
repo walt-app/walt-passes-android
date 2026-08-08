@@ -42,11 +42,16 @@ class ComposableSurfaceLockTest {
 
     @Test
     fun phoneConfirmSheetHasExactlySixUserVisibleParameters() {
+        // (intent, passType, telemetry, onConfirm, onDismiss, emphasisStyle) — same shape
+        // as B3UrlConfirmSheet. No color/tint parameter: ADR 0003 D4 keeps the sheets on
+        // the host theme so no pass- or consumer-chosen color can dim the cancel button.
         assertUserVisibleParamCount("SecuritySheetsKt", "PhoneConfirmSheet", expected = 6)
     }
 
     @Test
     fun emailConfirmSheetHasExactlySixUserVisibleParameters() {
+        // (intent, passType, telemetry, onConfirm, onDismiss, emphasisStyle) — same shape
+        // and the same no-color rule as the phone sheet above.
         assertUserVisibleParamCount("SecuritySheetsKt", "EmailConfirmSheet", expected = 6)
     }
 

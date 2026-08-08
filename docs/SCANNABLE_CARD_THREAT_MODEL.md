@@ -92,18 +92,6 @@ homogeneous-list register and nothing else. A future consumer wanting a wallet
 list that also drops the detail-surface caption is amending this row, not
 filing a refactor.
 
-> **Dormant (wpass-80y, 2026-08-08).** The consumer no longer exercises this
-> concession: the 26.08.08 rules block quoted in the "colour carries no trust
-> meaning" row below says "No previews on list cards", and the redesign removes
-> the code tile, barcode band, image badge and photo thumbnail from every list
-> card face. The concession is not withdrawn - `CompactCodeView` stays, and a
-> host may still render an extracted code at list scale - but it is
-> unexercised, and condition 2's "neutral (never issuer-colored) card surface"
-> is replaced by the class tint that the "colour carries no trust meaning" row
-> grants. Conditions 1 and 3 govern
-> unchanged for any host that takes the concession up again, and the accepted
-> residual risk below applies only while it is exercised.
-
 **C1 / C2 — list-face code render concession (wpass-tjc.2; consumer epic
 wlt-mx2d).** The redesigned wallet list renders a scannable card's — and a
 composite artifact's extracted — ACTUAL code on its list card face, through the
@@ -138,6 +126,19 @@ recipient remains the authority on whether the code is credit-worthy (Threat
 9). A consumer wanting to render a list-face code without the condition-2
 eyebrow taxonomy, or wanting pkpass barcodes at list scale, is amending this
 row, not filing a PR.
+
+> **Dormant (wpass-80y, 2026-08-08).** The consumer no longer exercises this
+> list-face code render concession (the wallet-row concession above is
+> unaffected and stays live): the 26.08.08 rules block quoted in the "colour
+> carries no trust meaning" row below says "No previews on list cards", and the
+> redesign removes the code tile, barcode band, image badge and photo thumbnail
+> from every list card face. The concession is not withdrawn - `CompactCodeView`
+> stays, and a host may still render an extracted code at list scale - but it is
+> unexercised, and condition 2's "neutral (never issuer-colored) card surface"
+> is replaced by the class tint that the "colour carries no trust meaning" row
+> grants. Conditions 1 and 3 govern unchanged for any host that takes the
+> concession up again, and the accepted residual risk above applies only while
+> it is exercised.
 
 **Redesign context — where the C1 list distinction now lives (wpass-tjc.4;
 consumer epic wlt-mx2d).** The redesigned wallet list changes what
@@ -255,7 +256,9 @@ list cards. What is not granted, and would be an amendment rather than a PR:
 deriving a colour from signature status, verification outcome, or issuer
 identity anywhere in the kernel; re-adding a colour field to a kernel artifact
 model or storage table; or a `faceTint` reaching the code panel or the page
-render. See also the still-open `ScannableCardRowTile` accent question
+render. The document-side mirror of this row is ADR 0005 D1.C, which makes the
+same argument for the PDF / image tower and withdraws its neutral-surface rule.
+See also the still-open `ScannableCardRowTile` accent question
 (`wpass-80y.4`), which this row is the precondition for: its leading strip is
 pinned to `unverifiedArtifact.accent` by a rationale ("that would re-create the
 verified-band read at list scale") that premise 1 above no longer supports.

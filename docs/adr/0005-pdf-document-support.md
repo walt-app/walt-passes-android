@@ -884,10 +884,10 @@ contract, and what it deliberately gives up versus docked D5:
 - `TrustCaptionPlacement` is `Docked | HostedTypeRow`. There is no
   `showCaption: Boolean`: the placement is the audited carrier-of-provenance
   choice, pinned by `documentViewTrustCaptionParamIsThePlacementType`. The param
-  count lock moves from 9 to 10
-  (`documentViewHasExactlyElevenUserVisibleParameters`; 10 at the time, bumped
-  to 11 when `wpass-80y.2` added `faceTint`), superseding the 9-param
-  assertion in the prior (composite) addendum.
+  count lock moves from 9 to 10, superseding the 9-param assertion in the prior
+  (composite) addendum. The lock is now
+  `documentViewHasExactlyElevenUserVisibleParameters`, having gone to 11 when
+  `wpass-80y.2` added `faceTint`.
 
 **Why this is bounded.** D5 already accepts all PDFs as `Provenance.UserProvided`
 and never shows a "verified" signal; the document tower has no verified-vs-

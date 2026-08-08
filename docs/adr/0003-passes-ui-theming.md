@@ -353,4 +353,4 @@ What changes and what does not:
 |-------|----------------------------------------------------------------------------------------------|
 | Ink on a tinted face clears WCAG AA | `ScannableCardTrustSurfaceTest.inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase` (both palette rows, the luminance extremes, and the mid-tones a 0.5 flip gets wrong) |
 | A tint cannot suppress a trust-claim surface | `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` + its dark-tint twin; `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint` |
-| The security-sheet family takes no tint | `ComposableSurfaceLockTest.b3UrlConfirmSheetHasExactlySixUserVisibleParameters` + the `phoneConfirmSheet…` / `emailConfirmSheet…` twins (six params, none of them a color) |
+| The security-sheet family takes no tint | `ComposableSurfaceLockTest.b3UrlConfirmSheetHasExactlySixUserVisibleParameters` + the `phoneConfirmSheet…` / `emailConfirmSheet…` twins. These are count locks: adding a tint breaks the count, but swapping one of the six for a color would not. The enumerations in each test's comment are what a reviewer reads against |
