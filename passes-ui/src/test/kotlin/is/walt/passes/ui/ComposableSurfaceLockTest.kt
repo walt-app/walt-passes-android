@@ -183,7 +183,7 @@ class ComposableSurfaceLockTest {
         // SCANNABLE_CARD_THREAT_MODEL.md. The strong type (not a Boolean) is pinned by
         // scannableCardScreenTrustCaptionParamIsThePlacementType. `faceTint` (wpass-80y.1)
         // colors the card face only — it cannot reach the code panel, which is pinned to
-        // literal white by codePanelIsLiterallyWhiteNotAThemeTokenOrTheTint. Adding a SIXTH
+        // literal white by codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint. A SIXTH
         // parameter — e.g. a per-element `showBarcode` / `showPayloadCaption` suppressor, or
         // a panel-color override — would breach the surface contract; review the threat
         // model before changing this number.

@@ -92,6 +92,18 @@ homogeneous-list register and nothing else. A future consumer wanting a wallet
 list that also drops the detail-surface caption is amending this row, not
 filing a refactor.
 
+> **Dormant (wpass-80y, 2026-08-08).** The consumer no longer exercises this
+> concession: the 26.08.08 rules block quoted in the "colour carries no trust
+> meaning" row below says "No previews on list cards", and the redesign removes
+> the code tile, barcode band, image badge and photo thumbnail from every list
+> card face. The concession is not withdrawn - `CompactCodeView` stays, and a
+> host may still render an extracted code at list scale - but it is
+> unexercised, and condition 2's "neutral (never issuer-colored) card surface"
+> is replaced by the class tint that the "colour carries no trust meaning" row
+> grants. Conditions 1 and 3 govern
+> unchanged for any host that takes the concession up again, and the accepted
+> residual risk below applies only while it is exercised.
+
 **C1 / C2 — list-face code render concession (wpass-tjc.2; consumer epic
 wlt-mx2d).** The redesigned wallet list renders a scannable card's — and a
 composite artifact's extracted — ACTUAL code on its list card face, through the
@@ -204,7 +216,7 @@ signed pass can wear. It rests on these instead:
 **What this means at the kernel surface.** `ScannableCardScreen(faceTint = …)`
 (wpass-80y.1) and `DocumentView(faceTint = …)` (wpass-80y.2) exist so the
 consumer can tint the card face without reimplementing these surfaces. Both are
-presentation-only and bounded the same way:
+presentation-only, and both are bounded by the same four rules:
 
 - The tint reaches the card face only. The panel behind a code stays
   `SCAN_CODE_PANEL` (literally white in both themes) and the rasterised page /
@@ -225,6 +237,17 @@ presentation-only and bounded the same way:
   (walt-android's `WalletColorRepository`, keyed per wallet entry), so the
   kernel never learns why a colour was chosen and has nothing to leak in
   Threats 7 / 8.
+
+The two surfaces are not identical below those four rules, and the divergence
+is recorded rather than smoothed over: `DocumentView` treats a fully
+transparent tint as "no tint" (`documentFaceIsTinted` gates on
+`isSpecified && alpha > 0f`, pinned by
+`fullyTransparentTintFallsBackToTheDefaultFrame`), while `ScannableCardScreen`
+gates on `isSpecified` alone, so a specified fully transparent tint paints a
+transparent face and derives ink from it. Both KDocs say "pass an opaque
+color", and neither surface can lose its trust caption either way, so this is a
+legibility hazard for a careless consumer rather than a trust-signal hole.
+Aligning the scannable gate with the document one is `wpass-80y.5`.
 
 **Bound of this row.** What is granted is a consumer-chosen face tint on the
 two detail surfaces named above, plus the consumer's freedom to colour its own
@@ -558,7 +581,7 @@ from Walt, Google Wallet, the merchant's own app, or a printed plastic card.
 **Status.** Out of mission. Documented here so future contributors do not
 propose adding it without amending this row.
 
-### 10. Color picker as injection vector — n/a
+### 10. Color picker as injection vector - Out of scope (consumer-side)
 
 **What.** Hostile inputs to a color picker have historically been a vector in
 browser CSS / SVG parsers (named-color injection, `var(--…)` escapes). A
@@ -744,7 +767,7 @@ can trace back here.
 | Control | Pinned by                                  |
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
-| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFourUserVisibleParameters` + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged` |
+| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyFourUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged` |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |

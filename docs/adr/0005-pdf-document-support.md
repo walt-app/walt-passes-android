@@ -21,7 +21,7 @@ A new `PassDocument` data class lives alongside `Pass`. Documents have no `PassT
 
 A separate `documents` table is added to the existing `walt_passes.db` SQLCipher database (schema v1 to v2). Same database key, same backup-exclusion rules, same irreversible-delete contract.
 
-A separate "Documents" lane appears below the passes list in `passes-ui`. Users see passes and documents as related-but-distinct concepts. (Amended by [D1.L](#d1l-consumers-may-render-documents-inline-in-a-unified-wallet-list): a consumer may instead render documents inline in a unified list, under stated conditions. [D1.C](#d1c-colour-carries-no-trust-meaning-documents-take-a-class-tint) amends the neutral-surface rule that later addenda attached to this row.)
+A separate "Documents" lane appears below the passes list in `passes-ui`. Users see passes and documents as related-but-distinct concepts. (Amended by [D1.L](#d1l-consumers-may-render-documents-inline-in-a-unified-wallet-list): a consumer may instead render documents inline in a unified list, under stated conditions. [D1.C](#d1c-color-carries-no-trust-meaning-documents-take-a-class-tint) amends the neutral-surface rule that later addenda attached to this row.)
 
 Rationale: the trust contract differs structurally. Mixing PDFs into the `Pass` model would put a "Verified" pill API path within reach of code that should never offer it. Sibling separation moves that risk from "policed at every call site forever" to "physically impossible."
 
@@ -885,7 +885,8 @@ contract, and what it deliberately gives up versus docked D5:
   `showCaption: Boolean`: the placement is the audited carrier-of-provenance
   choice, pinned by `documentViewTrustCaptionParamIsThePlacementType`. The param
   count lock moves from 9 to 10
-  (`documentViewHasExactlyTenUserVisibleParameters`), superseding the 9-param
+  (`documentViewHasExactlyElevenUserVisibleParameters`; 10 at the time, bumped
+  to 11 when `wpass-80y.2` added `faceTint`), superseding the 9-param
   assertion in the prior (composite) addendum.
 
 **Why this is bounded.** D5 already accepts all PDFs as `Provenance.UserProvided`
@@ -914,7 +915,7 @@ zoom level" guarantees stand verbatim.
 
 | Decision | Test                                                                                                  |
 |----------|-------------------------------------------------------------------------------------------------------|
-| D5.T     | `DocumentSurfaceLockTest.documentViewHasExactlyTenUserVisibleParameters` + `documentViewTrustCaptionParamIsThePlacementType` (placement is the audited choice, not a Boolean) |
+| D5.T     | `DocumentSurfaceLockTest.documentViewHasExactlyElevenUserVisibleParameters` + `documentViewTrustCaptionParamIsThePlacementType` (placement is the audited choice, not a Boolean) |
 | D5.T     | `DocumentTrustSurfaceTest.documentViewHostedTypeRowOmitsKernelCaption` (HostedTypeRow renders no kernel caption); `documentTrustCaptionRendersTheVerbatimTrustText` (the docked-mode caption still renders verbatim) |
 | Consumer | walt-android `wlt-3cer`: the details section renders a "Pass type" row enumerating the artifact class |
 | Scope    | `FullScreenDocumentView` shape lock unchanged (7 params); Z.8 full-screen caption tests stay green |
@@ -950,10 +951,10 @@ What this addendum records is the presentation posture:
 > The no-verified-affordance and detail-surface-provenance postures stand. See
 > the D1 addendum below.
 
-## Addendum 2026-08-08: D1 - colour is not a trust signal; documents may render inline
+## Addendum 2026-08-08: D1 - color is not a trust signal; documents may render inline
 
 Tracks: kernel `wpass-80y.3` (this addendum), `wpass-80y.2` (the `faceTint`
-parameter). Cross-repo consumers: walt-android `wlt-38v8` (colour system),
+parameter). Cross-repo consumers: walt-android `wlt-38v8` (color system),
 `wlt-o72.6` (inline document rows, held open since 2026-05-14 for this text).
 
 Two long-standing UI expressions of D1 are amended here. Both are presentation;
@@ -961,12 +962,12 @@ the D1 contract they were expressing - a document is a structural sibling of a
 `Pass`, with no `PassType`, no `SignatureStatus`, and no path to a "Verified"
 pill - is untouched by either, and is what D1 actually protects.
 
-### D1.C Colour carries no trust meaning; documents take a class tint
+### D1.C Color carries no trust meaning; documents take a class tint
 
 D1 gave documents a separate lane, and the 2026-07-18 list-surface addendum gave
-them neutral card faces, because at the time colour *was* the issuer signal:
-letting a user-provided document take issuer colour would have let it present as
-an issuer-signed pass. The consumer's 26.08.08 revision decouples colour from
+them neutral card faces, because at the time color *was* the issuer signal:
+letting a user-provided document take issuer color would have let it present as
+an issuer-signed pass. The consumer's 26.08.08 revision decouples color from
 the issuer entirely - "Colour means class. Nothing else. The pass file's
 backgroundColor is read, never rendered." - and applies a class tint to every
 artifact class, user-reassignable per item. The neutral-surface rule loses its
@@ -977,11 +978,11 @@ What replaces it as the argument that a document cannot present as verified:
 1. No document surface, at list or detail scale, renders a signature affordance
    or verified indicator - D5 has always been "PDF signatures are not verified
    and no signed indicator is surfaced", so the document tower has no
-   verified-vs-unverified ladder for a colour to imitate in the first place.
+   verified-vs-unverified ladder for a color to imitate in the first place.
 2. Provenance is stated in words on the detail surface: the non-suppressible
    `DocumentTrustCaption` (D5, Z.4 / Z.8), or the host "Pass type" row under the
    audited D5.T concession. Text, not chrome.
-3. Colour is a per-class default that the user can reassign at will, so it
+3. Color is a per-class default that the user can reassign at will, so it
    cannot encode provenance even accidentally. A Bronze PDF is a user
    preference and is explicitly not a violation.
 
@@ -991,9 +992,9 @@ Bounded deliberately: the tint reaches the frame only - the rasterised page and
 the decoded image are real content and render identically tinted or not, and
 identically in light and dark - and it cannot suppress the trust caption or
 change the render request. D2 / D3 / D4 are untouched: no new render, decode, or
-extraction surface. No `Document` arm carries a colour field and none may be
-added; which colour an item carries is consumer state
-(walt-android's `WalletColorRepository`). Deriving a colour from signature
+extraction surface. No `Document` arm carries a color field and none may be
+added; which color an item carries is consumer state
+(walt-android's `WalletColorRepository`). Deriving a color from signature
 status, verification outcome, or issuer identity anywhere in the kernel is an
 amendment to this row, not a PR. The mirror row for scannable cards is
 "colour carries no trust meaning" in `SCANNABLE_CARD_THREAT_MODEL.md`; the two
@@ -1037,5 +1038,5 @@ is amending D5.T, not filing a PR.
 | Decision | Test                                                                                          |
 |----------|-------------------------------------------------------------------------------------------------|
 | D1.C     | `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm`; `faceTintLeavesThePageRenderRequestUnchanged` (tint reaches the frame, not the render); `fullyTransparentTintFallsBackToTheDefaultFrame` |
-| D1.C     | `DocumentSurfaceLockTest.documentViewHasExactlyElevenUserVisibleParameters` (the tint is the audited 11th param; no colour field on any `Document` arm) |
+| D1.C     | `DocumentSurfaceLockTest.documentViewHasExactlyElevenUserVisibleParameters` (the tint is the audited 11th param; no color field on any `Document` arm) |
 | D1.L     | Consumer-side: walt-android's wallet-list tests (no signature affordance on a document row; render-time merge only). The kernel cannot verify a consumer's list at runtime - same posture as D5.T. |

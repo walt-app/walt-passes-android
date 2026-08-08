@@ -312,7 +312,8 @@ The D4 boundaries are otherwise unchanged, and two are load-bearing:
 ## Addendum 2026-08-08: Card color is class-based and user-assigned, not issuer-derived
 
 Tracks: kernel `wpass-80y.3` (this addendum), `wpass-80y.1` (the
-`ScannableCardScreen` tint). Consumer epic: walt-android `wlt-38v8`.
+`ScannableCardScreen` tint), `wpass-80y.2` (the `DocumentView` tint, in
+`passes-document-ui`). Consumer epic: walt-android `wlt-38v8`.
 
 The consumer's 26.08.08 revision decouples card color from the issuer: "Colour
 means class. Nothing else. The pass file's backgroundColor is read, never
@@ -345,3 +346,11 @@ What changes and what does not:
 - **Color carries no trust meaning.** Recorded in full in
   `SCANNABLE_CARD_THREAT_MODEL.md` ("colour carries no trust meaning") and
   ADR 0005 D1.C; this addendum is the theming-side pointer to them.
+
+### Tests pinning this addendum
+
+| Claim | Test                                                                                       |
+|-------|----------------------------------------------------------------------------------------------|
+| Ink on a tinted face clears WCAG AA | `ScannableCardTrustSurfaceTest.inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase` (both palette rows, the luminance extremes, and the mid-tones a 0.5 flip gets wrong) |
+| A tint cannot suppress a trust-claim surface | `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` + its dark-tint twin; `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint` |
+| The security-sheet family takes no tint | `ComposableSurfaceLockTest.b3UrlConfirmSheetHasExactlySixUserVisibleParameters` + the `phoneConfirmSheet…` / `emailConfirmSheet…` twins (six params, none of them a color) |
