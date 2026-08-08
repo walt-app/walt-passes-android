@@ -12,6 +12,9 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
@@ -45,13 +48,23 @@ import org.robolectric.annotation.Config
  * render identically tinted or not, and (per the section 04 note in Walt's 26.08.08 design)
  * identically in light and dark, which is exactly the rule real content already follows.
  *
- * The load-bearing test is [faceTintLeavesThePageRenderRequestUnchanged]: what reaches the
- * isolated renderer must not move when a tint is passed. Its on-device counterpart —
- * `DocumentViewInstrumentedTest.faceTintDoesNotChangeTheLaidOutPageSize`, which pins the
- * rendered page's *geometry* — lives in `androidTest` because neither the SharedMemory
- * round-trip nor pixel layout is reachable under this Robolectric setup. The rest assert
- * the tint is not a surface suppressor: everything the untinted surface renders still
- * renders under a tint, including the non-suppressible trust caption.
+ * The primary pin is on-device: `DocumentViewInstrumentedTest.faceTintDoesNotChangeTheLaidOut
+ * PageSize` compares the rendered page's geometry tinted vs untinted, which is where a tint
+ * that inset, clipped, or reshaped the content would show. It lives in `androidTest` because
+ * neither the SharedMemory round-trip nor pixel layout is reachable under this Robolectric
+ * setup — a page never leaves the Loading arm here.
+ *
+ * What the unit tests add is the layer below that: [faceTintLeavesThePageRenderRequestUnchanged]
+ * guards what reaches the isolated renderer, including that the request stays derived from
+ * [TARGET_PAGE_WIDTH_DP] / [TARGET_PAGE_HEIGHT_DP] rather than from the slot. Note the
+ * asymmetry that makes the second half of that test the load-bearing half: while the request
+ * is constant-derived, its size *cannot* vary with a tint by construction, so tint-invariance
+ * alone would only catch a tint reaching the page index or source rect. The constant-derived
+ * assertion is what fails if a future change makes the request slot-derived — at which point
+ * the tint could start moving it and the invariance assertion starts meaning something.
+ *
+ * The rest assert the tint is not a surface suppressor: everything the untinted surface
+ * renders still renders under a tint, including the non-suppressible trust caption.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -89,25 +102,27 @@ class DocumentFaceTintTest {
 
     @Test
     fun faceTintLeavesThePageRenderRequestUnchanged() {
-        // The constraint the parameter has to earn: a tint colors the frame and must not
-        // reach the render. Every argument the pager hands the isolated renderer — page
-        // index, requested pixel size, source rect — has to be identical to the untinted
-        // composition's. Both surfaces are composed once, in equally-sized slots, because
-        // the rule allows one setContent per test; equal slots are also what makes the
-        // comparison mean anything.
+        // Every argument the pager hands the isolated renderer — page index, requested
+        // pixel size, source rect — has to be identical to the untinted composition's.
+        // Both surfaces are composed once, in DELIBERATELY DIFFERENT slot sizes: the
+        // request is supposed to be slot-independent, so differing slots turn the equality
+        // below into a check on that too, and the one-setContent-per-rule limit means
+        // this is the only shot at composing both.
         val untinted = RecordingRenderer()
         val tinted = RecordingRenderer()
+        var density: Density? = null
         composeRule.setContent {
+            density = LocalDensity.current
             ThemedHost {
                 Column {
-                    Slot {
+                    Slot(width = SLOT_W, height = SLOT_H) {
                         DocumentView(
                             doc = pdfFixture("untinted", PAGE_COUNT),
                             pdfFile = openPdfFd(),
                             renderer = untinted,
                         )
                     }
-                    Slot {
+                    Slot(width = SLOT_W / 2, height = SLOT_H / 2) {
                         DocumentView(
                             doc = pdfFixture("tinted", PAGE_COUNT),
                             pdfFile = openPdfFd(),
@@ -124,6 +139,21 @@ class DocumentFaceTintTest {
             .that(untinted.requests())
             .isNotEmpty()
         assertThat(tinted.requests()).isEqualTo(untinted.requests())
+
+        // The load-bearing half. While the request is derived from these fixed constants
+        // its SIZE cannot vary with a tint by construction, so the equality above only
+        // catches a tint that reached the page index or source rect. This is what fails if
+        // a future change derives the request from the slot instead (as
+        // FullScreenDocumentView already does via BoxWithConstraints) — the point at which
+        // a tint could start moving it and the equality above starts carrying weight.
+        val d = requireNotNull(density) { "composition never ran" }
+        val expectedWidth = with(d) { TARGET_PAGE_WIDTH_DP.dp.toPx().toInt() }
+        val expectedHeight = with(d) { TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt() }
+        untinted.requests().forEach { request ->
+            assertWithMessage("render request %s must be constant-derived, not slot-derived", request)
+                .that(request.widthPx to request.heightPx)
+                .isEqualTo(expectedWidth to expectedHeight)
+        }
     }
 
     @Test
@@ -183,21 +213,61 @@ class DocumentFaceTintTest {
         composeRule.onNodeWithText(TRUST_CAPTION_TEXT).assertIsDisplayed()
     }
 
+    @Test
+    fun fullyTransparentTintFallsBackToTheDefaultFrame() {
+        // Color.isSpecified is true for Color.Transparent, so the naive gate would take
+        // the tinted branch and paint nothing — a consumer handing over a cleared or
+        // not-yet-loaded color would lose the document-surface tone entirely rather than
+        // get the documented default. Pixel capture is unavailable here, so the pin is on
+        // the resolution itself; the surface must still compose intact either way.
+        assertThat(documentFaceIsTinted(Color.Transparent)).isFalse()
+        assertThat(documentFaceIsTinted(Color.Unspecified)).isFalse()
+        assertThat(documentFaceIsTinted(denim)).isTrue()
+        assertThat(documentFaceIsTinted(denim.copy(alpha = 0.5f))).isTrue()
+
+        composeRule.setContent {
+            ThemedHost {
+                Slot {
+                    DocumentView(
+                        doc = pdfFixture("transparent", PAGE_COUNT),
+                        pdfFile = openPdfFd(),
+                        renderer = RecordingRenderer(),
+                        faceTint = Color.Transparent,
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        composeRule.onNodeWithText(TRUST_CAPTION_TEXT).assertIsDisplayed()
+    }
+
     // -- helpers -------------------------------------------------------------------
 
     /**
-     * A fixed, identical slot for each surface under comparison. `DocumentView` fills the
-     * bounds it is given, so without this the two compositions would differ by layout
-     * rather than by the one variable under test.
+     * A fixed slot. `DocumentView` fills the bounds it is given, so without this the
+     * surfaces under comparison would size themselves off the root rather than off
+     * something the test controls.
      */
     @Composable
-    private fun Slot(content: @Composable () -> Unit) {
-        Box(modifier = Modifier.size(SLOT_W, SLOT_H)) { content() }
+    private fun Slot(
+        width: Dp = SLOT_W,
+        height: Dp = SLOT_H,
+        content: @Composable () -> Unit,
+    ) {
+        Box(modifier = Modifier.size(width, height)) { content() }
     }
 
-    /** Records every `(page, widthPx, heightPx, sourceRect)` the pager asks the renderer for. */
+    /** One call into the isolated renderer: everything the tint must not be able to move. */
+    private data class Request(
+        val page: Int,
+        val widthPx: Int,
+        val heightPx: Int,
+        val sourceRect: RenderSourceRect,
+    )
+
     private class RecordingRenderer : PdfRendererBinder {
-        private val seen = Collections.synchronizedSet(mutableSetOf<String>())
+        private val seen = Collections.synchronizedSet(mutableSetOf<Request>())
 
         override suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult =
             ProbeResult.Ok(pageCount = PAGE_COUNT)
@@ -209,13 +279,13 @@ class DocumentFaceTintTest {
             heightPx: Int,
             sourceRect: RenderSourceRect,
         ): RenderResult {
-            seen += "$page/$widthPx/$heightPx/$sourceRect"
+            seen += Request(page, widthPx, heightPx, sourceRect)
             // Rejected keeps the test free of SharedMemory plumbing, which does not
             // round-trip under Robolectric; the request itself is what is under test.
             return RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
         }
 
-        fun requests(): Set<String> = seen.toSet()
+        fun requests(): Set<Request> = seen.toSet()
     }
 
     private object RejectingDecoder : ImageDecodeBinder {

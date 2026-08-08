@@ -67,19 +67,19 @@ import `is`.walt.passes.ui.core.toComposeColor
  * the ADR 0005 D5 "Pass type" row addendum. Defaults to [TrustCaptionPlacement.Docked] (the
  * verbatim docked caption) so every existing caller is unchanged.
  *
- * [faceTint] colors the frame the page render or the decoded photo sits on, in both arms.
- * The tint reaches the frame ONLY: the rasterised PDF page and the decoded image are real
- * content, so they render identically tinted or not, and identically in light and dark
- * (wpass-80y.2 / Walt wlt-38v8). The tint is presentation only — the kernel never learns
- * why a color was chosen and stores nothing; which color an item carries is the consumer's
- * (walt-android's `WalletColorRepository`, keyed per wallet entry), and no [Document] arm
- * carries a color field.
+ * [faceTint] is presentation only — the kernel never learns why a color was chosen and
+ * stores nothing; which color an item carries is the consumer's (walt-android's
+ * `WalletColorRepository`, keyed per wallet entry), and no [Document] arm carries a color
+ * field (wpass-80y.2 / Walt wlt-38v8).
  *
- * @param faceTint color of the frame behind the page render / decoded image. Defaults to
- *   [Color.Unspecified], which keeps the flush-to-slot
+ * @param faceTint color of the frame the page render / decoded image sits on, in both
+ *   arms. The tint reaches the frame ONLY: the rasterised PDF page and the decoded image
+ *   are real content, so they render identically tinted or not, and identically in light
+ *   and dark. Defaults to [Color.Unspecified], which keeps the flush-to-slot
  *   [is.walt.passes.document.ui.theme.DocumentSemantics.laneBackground] frame every existing
- *   caller gets today. Pass an opaque color: a translucent tint composites over host paint
- *   the kernel cannot see.
+ *   caller gets today; a fully transparent tint means "no tint" and falls back to the same
+ *   default rather than leaving the frame unpainted. Pass an opaque color: a translucent
+ *   tint composites over host paint the kernel cannot see.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -380,30 +380,44 @@ private fun ImageDocumentView(
 }
 
 /**
- * Paints the frame the page render / decoded image sits on, shared by both arms so the
- * PDF and image surfaces cannot drift apart on the one thing [DocumentView.faceTint]
- * touches.
+ * Paints the frame the page render / decoded image sits on, shared by both arms so the PDF
+ * and image surfaces cannot drift apart on the one thing [DocumentView] `faceTint` touches.
  *
- * This paints the frame and NOTHING else: it is a background, so it never clips, tints,
- * or filters the content drawn into the Box. That is the wpass-80y.2 constraint — the
- * rasterised page and the decoded photo are real content and render identically tinted or
- * not, and identically in light and dark.
+ * Background only: it never clips or filters the content drawn into the Box, which is what
+ * makes the frame-not-content constraint structural rather than a convention.
  *
- * The rounded card shape arrives with the tint rather than unconditionally: an untinted
- * frame is the host's own [is.walt.passes.document.ui.theme.DocumentSemantics.laneBackground]
- * tone bleeding to the slot edge, and rounding that would change the layout of every
- * consumer already shipping the surface. Corner radius comes with the opt-in that asks
- * for a card.
+ * Two things are deliberate. A fully transparent tint falls back to the default rather than
+ * taking the tinted branch and painting nothing — [Color.isSpecified] is true for
+ * [Color.Transparent], so a consumer handing over a cleared or not-yet-loaded color would
+ * otherwise lose the document-surface tone entirely and show host paint through the
+ * letterbox bars. And the rounded card shape arrives with the tint rather than
+ * unconditionally: an untinted frame is the host's own
+ * [is.walt.passes.document.ui.theme.DocumentSemantics.laneBackground] tone bleeding to the
+ * slot edge, and rounding it would change the appearance of every consumer already shipping
+ * the surface (paint only — a shape on a background never moves layout). Corner radius comes
+ * with the opt-in that asks for a card.
  */
 @Composable
 private fun Modifier.documentFace(faceTint: Color): Modifier =
-    if (faceTint.isSpecified) {
+    if (documentFaceIsTinted(faceTint)) {
         background(faceTint, RoundedCornerShape(FACE_RADIUS))
     } else {
         background(LocalDocumentSemantics.current.laneBackground.toComposeColor())
     }
 
-/** Card radius from the 26.08.08 design's card anatomy spec (radius 20, padding 18). */
+/**
+ * Whether [faceTint] is a tint the frame should actually take. Internal (not private) so a
+ * test can pin the [Color.Transparent] fallback: the branch it guards is invisible to a
+ * composition assertion, since both arms paint *something* and neither changes the tree.
+ */
+internal fun documentFaceIsTinted(faceTint: Color): Boolean =
+    faceTint.isSpecified && faceTint.alpha > 0f
+
+/**
+ * Card radius from the 26.08.08 design's card anatomy spec. Duplicated as `CARD_RADIUS` in
+ * `passes-ui`'s `ScannableCardScreen`, which fulfils the same spec for the scannable face;
+ * hoisting both onto one shared token is wpass-nbr.
+ */
 private val FACE_RADIUS = 20.dp
 
 // wpass-jil: the kernel's neutral default open-full-screen affordance, docked below the
@@ -482,5 +496,8 @@ private fun DocumentPage(
 // via BoxWithConstraints), the inline surface is fixed 1x and ContentScale.Fit masks
 // any over/under-render — the BoxWithConstraints cost isn't worth it for a thumbnail-
 // sized slot.
-private const val TARGET_PAGE_WIDTH_DP: Int = 360
-private const val TARGET_PAGE_HEIGHT_DP: Int = 480
+// Internal (not private) so DocumentFaceTintTest can pin that the request really is
+// derived from these and not from the slot; a slot-derived request would make the
+// tint-invariance it asserts depend on layout the test does not control.
+internal const val TARGET_PAGE_WIDTH_DP: Int = 360
+internal const val TARGET_PAGE_HEIGHT_DP: Int = 480
