@@ -352,10 +352,10 @@ defense-in-depth, mirroring `B3UrlConfirmSheet` and the
 
 **What.** During create-time URI preview (C4), the dialog renders the raw
 `payload` so the user can see what they typed. The detail surface
-(`ScannableCardScreen`) also renders the payload as a human-readable caption
-below the barcode (GH #102 — fallback for when a point-of-sale scanner cannot
-read the code; opt-in via `ScannableCardView.showPayloadCaption`). The same
-bidi/control-char attack applies to both displays.
+(`ScannableCardScreen`) also renders the payload as a human-readable readback
+on its card face, below the code panel (GH #102 — fallback for when a
+point-of-sale scanner cannot read the code). The same bidi/control-char attack
+applies to both displays.
 
 **Mitigation.** C3: `passes-core` rejects payloads containing Cf/Cc codepoints
 *before* any preview is shown or any caption is rendered. Neither the dialog
