@@ -75,7 +75,11 @@ only when, all three of the following hold:
    same neutral token the carousel tile's leading strip uses). Per-card
    user-chosen colour was removed from the kernel (`wpass-q5p`); routing it
    through this strip at list scale would have re-created the trust-conflation
-   risk row 1 names.
+   risk row 1 names. **Under review (`wpass-80y.4`):** that last sentence
+   assumed colour was trust-bearing. The "colour carries no trust meaning" row
+   below removes the premise, so whether this strip may take the item's class
+   tint is now an open contract question, not a settled prohibition. The strip
+   stays on `unverifiedArtifact.accent` until `wpass-80y.4` resolves it.
 3. The detail surface (`ScannableCardScreen`) retains the bottom-docked
    non-suppressible `ScannableCardTrustCaption`. The trust caption shifts from
    list-row to detail-surface only; a user who taps a row to *use* the artifact
@@ -123,10 +127,29 @@ recipient remains the authority on whether the code is credit-worthy (Threat
 eyebrow taxonomy, or wanting pkpass barcodes at list scale, is amending this
 row, not filing a PR.
 
+> **Dormant (wpass-80y, 2026-08-08).** The consumer no longer exercises this
+> list-face code render concession (the wallet-row concession above is
+> unaffected and stays live): the 26.08.08 rules block quoted in the "colour
+> carries no trust meaning" row below says "No previews on list cards", and the
+> redesign removes the code tile, barcode band, image badge and photo thumbnail
+> from every list card face. The concession is not withdrawn - `CompactCodeView`
+> stays, and a host may still render an extracted code at list scale - but it is
+> unexercised, and condition 2's "neutral (never issuer-colored) card surface"
+> is replaced by the class tint that the "colour carries no trust meaning" row
+> grants. Conditions 1 and 3 govern unchanged for any host that takes the
+> concession up again, and the accepted residual risk above applies only while
+> it is exercised.
+
 **Redesign context — where the C1 list distinction now lives (wpass-tjc.4;
 consumer epic wlt-mx2d).** The redesigned wallet list changes what
 distinguishes card classes, and the change is recorded here so the
 verified-band confusion class can be checked against it:
+
+> **Partly superseded (wpass-80y, 2026-08-08).** The first bullet's
+> issuer-colour posture no longer holds: colour is decoupled from the issuer
+> and applied to every artifact class. The second bullet (no verified
+> affordance at list scale) stands and is now load-bearing. See the
+> "colour carries no trust meaning" row below.
 
 - **Issuer `pass.json` colors now drive pkpass list-card faces** (previously
   parsed but unused off the pass front; ADR 0003 D4 addendum). Issuer color
@@ -144,6 +167,101 @@ verified-band confusion class can be checked against it:
   `WalletListTest` "no signature dot" invariant extends to every card class
   under `wlt-mx2d` (pin lands with the consumer redesign; until then the
   existing scannable-row invariant holds).
+
+**C1 / C2 - colour carries no trust meaning, for any class (wpass-80y;
+consumer epic wlt-38v8).** The C1 / C2 text above, and the redesign row that
+precedes it, treated colour as trust-adjacent: issuer colour was permitted on
+pkpass cards because it read as pass identity, and forbidden on document,
+scannable, and composite cards because taking it was what would let a
+user-authored artifact present as issuer-signed. The consumer's 26.08.08
+revision removes that premise entirely. Its rules block, verbatim:
+
+> Colour means class. Nothing else. The pass file's backgroundColor is read,
+> never rendered.
+> Card stock is identical in light and dark. No previews on list cards.
+> Expired washes out (#EFEAE3) instead of tinting. Any item is reassignable:
+> Details > Color.
+> No card presents as verified - signature is stated in words, on detail.
+
+Three changes matter to this document. Colour is (a) decoupled from the issuer,
+so every pkpass renders the same class tint regardless of `pass.json`
+`backgroundColor`, which is parsed but not rendered at that surface; (b)
+applied to every artifact class, so documents, scannables and composites now
+carry a tint where the neutral-surface rule previously forbade one; and (c)
+user-reassignable per item from a picker on the detail surface, so any artifact
+can carry any of the seven palette colours.
+
+**The verified-band confusion class is still closed, from different premises.**
+It no longer rests on "a user-created artifact cannot wear the chrome a signed
+pass wears," because with per-item reassignment there is no chrome that only a
+signed pass can wear. It rests on these instead:
+
+1. **No surface presents as verified.** No list card of any class renders a
+   signature affordance, verified band, or pill (the consumer's last one was
+   deleted under `wlt-l9cb`), and no card face carries one at detail scale
+   either. There is no verified visual for a user-created card to imitate -
+   the same structural argument the second "Redesign context" bullet makes,
+   now carrying the load the colour distinction used to share.
+2. **Signature status is stated in words, on the detail surface only.**
+   "Verified - signed by issuer" / "Unverified - unsigned by issuer" /
+   "User provided pass, issuer cannot be verified". Text, not chrome, so it
+   cannot be imitated by a colour choice; `wlt-mx2d.7`'s
+   no-false-forensic-claims rule holds verbatim.
+3. **Colour is uniform per class by default and overridable by the user.** A
+   Bronze PDF or a Teal pkpass is a user preference, and this document says so
+   out loud: it is not a violation, not a spoof, and not something a consumer
+   should guard against. Colour that any user can reassign at will cannot
+   encode provenance even accidentally - which is precisely why it is safe to
+   grant, and precisely why nothing may be inferred from it.
+
+**What this means at the kernel surface.** `ScannableCardScreen(faceTint = …)`
+(wpass-80y.1) and `DocumentView(faceTint = …)` (wpass-80y.2) exist so the
+consumer can tint the card face without reimplementing these surfaces. Both are
+presentation-only, and both are bounded by the same four rules:
+
+- The tint reaches the card face only. The panel behind a code stays
+  `SCAN_CODE_PANEL` (literally white in both themes) and the rasterised page /
+  decoded image render identically tinted or not. Real content stays
+  theme-independent and scannable; the unchanged-posture claim in C5 / Threat 14
+  is untouched.
+- Neither parameter can suppress the barcode, the payload readback, or the
+  trust caption. `faceTint` is not a second route to the C2 bypass that the
+  `HostedTypeRow` concession audits: the caption placement is still the only
+  audited carrier-of-provenance choice.
+- Ink on a tinted face is derived from the tint's luminance (`inkOn`), pinned
+  at ≥ 4.5:1. Legibility of the in-words provenance signal cannot be tuned away
+  by a hostile or careless tint - which is what keeps premise 2 above true for
+  an arbitrary consumer colour.
+- **The kernel stores no colour.** `wpass-q5p` removed `ScannableCard.color`,
+  `ScannableColor` and the storage column; no `Document` arm has ever carried
+  one. They stay removed. Which colour an item carries is consumer state
+  (walt-android's `WalletColorRepository`, keyed per wallet entry), so the
+  kernel never learns why a colour was chosen and has nothing to leak in
+  Threats 7 / 8.
+
+The two surfaces are not identical below those four rules, and the divergence
+is recorded rather than smoothed over: `DocumentView` treats a fully
+transparent tint as "no tint" (`documentFaceIsTinted` gates on
+`isSpecified && alpha > 0f`, pinned by
+`fullyTransparentTintFallsBackToTheDefaultFrame`), while `ScannableCardScreen`
+gates on `isSpecified` alone, so a specified fully transparent tint paints a
+transparent face and derives ink from it. Both KDocs say "pass an opaque
+color", and neither surface can lose its trust caption either way, so this is a
+legibility hazard for a careless consumer rather than a trust-signal hole.
+Aligning the scannable gate with the document one is `wpass-80y.5`.
+
+**Bound of this row.** What is granted is a consumer-chosen face tint on the
+two detail surfaces named above, plus the consumer's freedom to colour its own
+list cards. What is not granted, and would be an amendment rather than a PR:
+deriving a colour from signature status, verification outcome, or issuer
+identity anywhere in the kernel; re-adding a colour field to a kernel artifact
+model or storage table; or a `faceTint` reaching the code panel or the page
+render. The document-side mirror of this row is ADR 0005 D1.C, which makes the
+same argument for the PDF / image tower and withdraws its neutral-surface rule.
+See also the still-open `ScannableCardRowTile` accent question
+(`wpass-80y.4`), which this row is the precondition for: its leading strip is
+pinned to `unverifiedArtifact.accent` by a rationale ("that would re-create the
+verified-band read at list scale") that premise 1 above no longer supports.
 
 **C2 — host "Pass type" row concession (detail surface).** A consumer (Walt,
 `wlt-3cer`) consolidates the provenance signal into a single "Pass type" row
@@ -303,11 +421,12 @@ risk are in the C2 "Pass type" row concession subsection above.
 
 **Status.** Mitigated structurally, with the detail-surface layer reducible to a
 host "Pass type" row under the bounded `HostedTypeRow` concession (C1 list-level
-distinction then carries the load). Under the `wlt-mx2d` redesign the
-list-level distinction is carried per the "Redesign context" row above: neutral
-surface + class eyebrow on non-pass cards, issuer color on pkpass cards only,
-and no verified affordance on any list card. This is the load-bearing concern
-of the entire epic; every downstream child must trace back to this row.
+distinction then carries the load). Under the `wlt-38v8` colour system the
+list-level distinction is carried per the "colour carries no trust meaning" row
+above: a class tint that any user can reassign, a class eyebrow, and no verified
+affordance on any card of any class - colour distinguishes nothing on its own
+and is not relied on to. This is the load-bearing concern of the entire epic;
+every downstream child must trace back to this row.
 
 ### 2. Hostile URI payload encoded into a QR that another device auto-acts on — Spoofing / Elevation of privilege
 
@@ -465,7 +584,7 @@ from Walt, Google Wallet, the merchant's own app, or a printed plastic card.
 **Status.** Out of mission. Documented here so future contributors do not
 propose adding it without amending this row.
 
-### 10. Color picker as injection vector — n/a
+### 10. Color picker as injection vector - Out of scope (consumer-side)
 
 **What.** Hostile inputs to a color picker have historically been a vector in
 browser CSS / SVG parsers (named-color injection, `var(--…)` escapes). A
@@ -475,10 +594,20 @@ unexpected.
 **Mitigation.** The kernel no longer exposes a per-card user colour at all
 (`wpass-q5p` removed `ScannableCard.color` and `ScannableColor`). With no
 colour field on the artifact, the kernel has no colour parsing or storage
-surface to attack, and the consumer's create flow no longer presents a colour
-picker.
+surface to attack.
 
-**Status.** Removed at the kernel; no parsing surface remains.
+**Updated by wpass-80y.** A colour picker exists again, but consumer-side: Walt
+persists per-item overrides in its own `WalletColorRepository` and passes the
+result to `ScannableCardScreen(faceTint)` / `DocumentView(faceTint)` as an
+already-constructed Compose `Color`. The kernel parses no colour string, stores
+no colour, and validates none - a `Color` is an opaque packed value with no
+parse step to attack, and nothing the kernel does with it (paint the face,
+derive ink from its luminance) branches on its value beyond contrast. Picker
+input hygiene is the consumer's, filed under `wlt-38v8`; a hostile value can at
+worst produce an ugly card, since ink contrast is derived and pinned.
+
+**Status.** No parsing or storage surface at the kernel; picker and persistence
+are consumer-side.
 
 ### 11. Future TOTP / HMAC-OATH secret leakage — Explicit non-feature
 
@@ -604,6 +733,12 @@ threat row above.
   feature, file separately.
 - **No "Verified" or "Trusted" badge on any ScannableCardTile** under any
   combination of consumer theming. C2 forbids it.
+- **No colour-derived trust signal anywhere in the kernel.** No surface may pick
+  or vary a colour from signature status, verification outcome, or issuer
+  identity, and no kernel artifact model or storage table may carry a colour
+  field. Colour enters the kernel only as a consumer-supplied `faceTint` on the
+  two detail surfaces, and nothing may be inferred from it. Re-opens the
+  "colour carries no trust meaning" row.
 - **No server-side validation of payloads against merchant APIs.** Re-opens
   row 9 and adds an entirely new key-custody / network surface.
 - **No TOTP / HMAC-OATH / rotating-secret support.** Re-opens row 11.
@@ -635,7 +770,7 @@ can trace back here.
 | Control | Pinned by                                  |
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
-| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyThreeUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFourUserVisibleParameters` + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer` |
+| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyFourUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged` |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |
