@@ -302,3 +302,46 @@ The D4 boundaries are otherwise unchanged, and two are load-bearing:
   renders on any list card; the trust ladder stays on detail surfaces. The
   security-sheet family and other off-pass surfaces remain issuer-color-free
   exactly as D4 records.
+
+> **Superseded (wpass-80y, 2026-08-08).** The extension of D4 to the wallet-list
+> pass card face is withdrawn - the consumer no longer renders issuer color at
+> list scale. The two load-bearing boundaries above survive in stronger form:
+> color now functions as neither issuer identity nor class signal anywhere, and
+> off-pass surfaces stay issuer-color-free. See the addendum below.
+
+## Addendum 2026-08-08: Card color is class-based and user-assigned, not issuer-derived
+
+Tracks: kernel `wpass-80y.3` (this addendum), `wpass-80y.1` (the
+`ScannableCardScreen` tint). Consumer epic: walt-android `wlt-38v8`.
+
+The consumer's 26.08.08 revision decouples card color from the issuer: "Colour
+means class. Nothing else. The pass file's backgroundColor is read, never
+rendered." Every pkpass renders the same class tint regardless of `pass.json`,
+every other artifact class gets its own class tint, and the user can reassign
+any item's color from a picker on the detail surface. This reverses the
+2026-07-18 addendum above, which had extended D4's issuer-color override onto
+the wallet-list pass card face.
+
+What changes and what does not:
+
+- **D4 itself is unchanged.** `Pass.colors` still overrides the theme on the
+  kernel pass surface (`PassFront`) and nowhere else. What is withdrawn is the
+  2026-07-18 *extension* of that override to the consumer's list card face,
+  along with its contrast guard and white-issuer hairline special case. A
+  consumer that renders its own card faces is free to ignore `PassColors`; a
+  consumer that composes `PassFront` still gets D4's behavior.
+- **Colors reach kernel surfaces as consumer-supplied tints.**
+  `ScannableCardScreen(faceTint)` (`wpass-80y.1`) and `DocumentView(faceTint)`
+  (`wpass-80y.2`) take an already-constructed `Color`. The kernel stores none,
+  parses none, and infers nothing from one. Ink on a tinted face is derived from
+  the tint's luminance (`inkOn`), pinned at ≥ 4.5:1, so an arbitrary consumer
+  color cannot render the in-words trust text illegible - the theming analogue
+  of D5's "trust-claim composables have no off switch."
+- **The security-sheet family is untouched.** `B3UrlConfirmSheet`,
+  `PhoneConfirmSheet` and `EmailConfirmSheet` read `MaterialTheme.colorScheme`
+  and `LocalPassesSemantics` only. They take no tint parameter and must not: the
+  "adversarial pass darkens cancel button into invisibility" attack D4 names
+  applies verbatim to a user- or consumer-chosen color.
+- **Color carries no trust meaning.** Recorded in full in
+  `SCANNABLE_CARD_THREAT_MODEL.md` ("colour carries no trust meaning") and
+  ADR 0005 D1.C; this addendum is the theming-side pointer to them.

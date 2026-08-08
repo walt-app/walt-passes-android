@@ -21,7 +21,7 @@ A new `PassDocument` data class lives alongside `Pass`. Documents have no `PassT
 
 A separate `documents` table is added to the existing `walt_passes.db` SQLCipher database (schema v1 to v2). Same database key, same backup-exclusion rules, same irreversible-delete contract.
 
-A separate "Documents" lane appears below the passes list in `passes-ui`. Users see passes and documents as related-but-distinct concepts.
+A separate "Documents" lane appears below the passes list in `passes-ui`. Users see passes and documents as related-but-distinct concepts. (Amended by [D1.L](#d1l-consumers-may-render-documents-inline-in-a-unified-wallet-list): a consumer may instead render documents inline in a unified list, under stated conditions. [D1.C](#d1c-colour-carries-no-trust-meaning-documents-take-a-class-tint) amends the neutral-surface rule that later addenda attached to this row.)
 
 Rationale: the trust contract differs structurally. Mixing PDFs into the `Pass` model would put a "Verified" pill API path within reach of code that should never offer it. Sibling separation moves that risk from "policed at every call site forever" to "physically impossible."
 
@@ -944,3 +944,98 @@ What this addendum records is the presentation posture:
 - The composite code-on-card-face posture is recorded as a C1/C2 concession
   in `SCANNABLE_CARD_THREAT_MODEL.md` ("list-face code render"); this
   addendum and that row cross-reference each other deliberately.
+
+> **Partly superseded (wpass-80y, 2026-08-08).** Documents now take a class
+> tint rather than staying neutral, and list cards carry no content preview.
+> The no-verified-affordance and detail-surface-provenance postures stand. See
+> the D1 addendum below.
+
+## Addendum 2026-08-08: D1 - colour is not a trust signal; documents may render inline
+
+Tracks: kernel `wpass-80y.3` (this addendum), `wpass-80y.2` (the `faceTint`
+parameter). Cross-repo consumers: walt-android `wlt-38v8` (colour system),
+`wlt-o72.6` (inline document rows, held open since 2026-05-14 for this text).
+
+Two long-standing UI expressions of D1 are amended here. Both are presentation;
+the D1 contract they were expressing - a document is a structural sibling of a
+`Pass`, with no `PassType`, no `SignatureStatus`, and no path to a "Verified"
+pill - is untouched by either, and is what D1 actually protects.
+
+### D1.C Colour carries no trust meaning; documents take a class tint
+
+D1 gave documents a separate lane, and the 2026-07-18 list-surface addendum gave
+them neutral card faces, because at the time colour *was* the issuer signal:
+letting a user-provided document take issuer colour would have let it present as
+an issuer-signed pass. The consumer's 26.08.08 revision decouples colour from
+the issuer entirely - "Colour means class. Nothing else. The pass file's
+backgroundColor is read, never rendered." - and applies a class tint to every
+artifact class, user-reassignable per item. The neutral-surface rule loses its
+premise and is withdrawn for documents.
+
+What replaces it as the argument that a document cannot present as verified:
+
+1. No document surface, at list or detail scale, renders a signature affordance
+   or verified indicator - D5 has always been "PDF signatures are not verified
+   and no signed indicator is surfaced", so the document tower has no
+   verified-vs-unverified ladder for a colour to imitate in the first place.
+2. Provenance is stated in words on the detail surface: the non-suppressible
+   `DocumentTrustCaption` (D5, Z.4 / Z.8), or the host "Pass type" row under the
+   audited D5.T concession. Text, not chrome.
+3. Colour is a per-class default that the user can reassign at will, so it
+   cannot encode provenance even accidentally. A Bronze PDF is a user
+   preference and is explicitly not a violation.
+
+The kernel's part is `DocumentView(faceTint = …)` (`wpass-80y.2`), which exists
+so the consumer tints the document detail surface instead of reimplementing it.
+Bounded deliberately: the tint reaches the frame only - the rasterised page and
+the decoded image are real content and render identically tinted or not, and
+identically in light and dark - and it cannot suppress the trust caption or
+change the render request. D2 / D3 / D4 are untouched: no new render, decode, or
+extraction surface. No `Document` arm carries a colour field and none may be
+added; which colour an item carries is consumer state
+(walt-android's `WalletColorRepository`). Deriving a colour from signature
+status, verification outcome, or issuer identity anywhere in the kernel is an
+amendment to this row, not a PR. The mirror row for scannable cards is
+"colour carries no trust meaning" in `SCANNABLE_CARD_THREAT_MODEL.md`; the two
+cross-reference each other deliberately.
+
+### D1.L Consumers may render documents inline in a unified wallet list
+
+D1's stated UI expression - "A separate 'Documents' lane appears below the
+passes list in `passes-ui`" - has been inaccurate for walt-android since
+`wlt-o72.1` (2026-05-14), which replaced `DocumentsLane` with inline
+`DocumentSummaryRow` entries interleaved with passes in one list. That
+divergence is recorded consumer-side in walt-android
+`docs/decisions-and-learnings.md`; this row is the kernel-side amendment
+`wlt-o72.6` was holding for, and it generalises rather than blessing one
+consumer.
+
+A consumer MAY render documents inline in a unified wallet list, or in a
+separate lane, provided:
+
+1. **The sibling data-model contract holds.** The merge is render-time only.
+   A document row is built from `DocumentRow` / `PdfDocument` (or the image /
+   composite arms), never by widening it into a `Pass` or a shared supertype
+   with one. No `PassType`, no `SignatureStatus`, no verified-pill path.
+2. **The row carries no signature or verified affordance**, and none can be
+   themed onto it - D5 forbids a signed indicator for documents at every
+   surface, and the unified list is where a document sits closest to a pkpass.
+3. **Detail-surface provenance is unchanged**: the docked non-suppressible
+   caption, or the host "Pass type" row under D5.T. Dropping `DocumentsLane`
+   drops its list-level caption, so the detail surface is where the in-words
+   signal lives - the same shift the C1 / C2 wallet-row concession records for
+   scannable cards.
+
+`DocumentsLane` remains in `passes-document-ui` and remains the recommended
+surface for a host that wants the kernel to carry the list-level presentation;
+it is no longer the only conforming one. A consumer that renders documents
+inline AND drops the detail-surface provenance signal without a "Pass type" row
+is amending D5.T, not filing a PR.
+
+### Tests pinning this addendum
+
+| Decision | Test                                                                                          |
+|----------|-------------------------------------------------------------------------------------------------|
+| D1.C     | `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm`; `faceTintLeavesThePageRenderRequestUnchanged` (tint reaches the frame, not the render); `fullyTransparentTintFallsBackToTheDefaultFrame` |
+| D1.C     | `DocumentSurfaceLockTest.documentViewHasExactlyElevenUserVisibleParameters` (the tint is the audited 11th param; no colour field on any `Document` arm) |
+| D1.L     | Consumer-side: walt-android's wallet-list tests (no signature affordance on a document row; render-time merge only). The kernel cannot verify a consumer's list at runtime - same posture as D5.T. |
