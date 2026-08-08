@@ -6,6 +6,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -13,6 +14,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableCardCreateInput
@@ -232,6 +234,35 @@ class ScannableCardTrustSurfaceTest {
         }
         composeRule.onNodeWithText("Created by you").assertIsDisplayed()
         composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+    }
+
+    @Test
+    fun codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint() {
+        // wpass-80y.1: faceTint colors the card face; the panel directly behind the code
+        // is real content and stays literally white in both themes so the code scans in
+        // dark mode. Rerouting the panel to a theme token — or to the tint — must fail
+        // here, not in the field. Pixel capture is unavailable under this Robolectric
+        // setup, so the pin is the internal constant the panel routes through, mirroring
+        // CompactCodeViewTest.backingIsLiterallyWhiteNotAThemeToken.
+        assertThat(SCAN_CODE_PANEL).isEqualTo(Color.White)
+    }
+
+    @Test
+    fun faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption() {
+        // The tint is presentation only: it is not a surface suppressor. Every element
+        // the untinted surface renders must still render under a tint — in particular the
+        // non-suppressible C2 caption and the GH #102 payload readback.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(
+                    card = qrFixture(label = "Library card"),
+                    faceTint = Color(0xFFBFEEEA),
+                )
+            }
+        }
+        composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
     }
 
     @Test

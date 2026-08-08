@@ -56,9 +56,11 @@ import `is`.walt.passes.ui.internal.toMonochromeBitmap
  * user-selectable caption beneath the barcode — fallback for when a point-of-sale
  * scanner cannot read the code (GH issue #102). The caption is FSI/PDI isolated as
  * defense-in-depth on top of the create-boundary Cf/Cc rejection (C3 in
- * `docs/SCANNABLE_CARD_THREAT_MODEL.md`). Default false; only [ScannableCardScreen]
- * opts in. The tile / row registers keep it off because their identification-sized
- * preview leaves no room for a legible caption.
+ * `docs/SCANNABLE_CARD_THREAT_MODEL.md`). Default false, and no kernel surface opts in:
+ * [ScannableCardScreen] renders the same readback on its card face so the white code
+ * panel stays a pure scan target, and the tile / row registers keep it off because their
+ * identification-sized preview leaves no room for a legible caption. It stays available
+ * for hosts composing their own detail surface from this view.
  */
 @Composable
 public fun ScannableCardView(

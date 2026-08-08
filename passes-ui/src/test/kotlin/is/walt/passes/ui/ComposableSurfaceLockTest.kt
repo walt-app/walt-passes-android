@@ -174,20 +174,23 @@ class ComposableSurfaceLockTest {
     }
 
     @Test
-    fun scannableCardScreenHasExactlyFourUserVisibleParameters() {
-        // (card, modifier, showLabel, trustCaption). `showLabel` (wpass-1wu.1 / Walt
-        // wlt-tct) gates ONLY the top label Text. `trustCaption` (wpass-gv6) is a
+    fun scannableCardScreenHasExactlyFiveUserVisibleParameters() {
+        // (card, modifier, showLabel, trustCaption, faceTint). `showLabel` (wpass-1wu.1 /
+        // Walt wlt-tct) gates ONLY the label Text. `trustCaption` (wpass-gv6) is a
         // TrustCaptionPlacement selecting how provenance is carried: Docked renders the
         // verbatim caption; HostedTypeRow drops it so the host carries provenance via its
         // own "Pass type" details row, under the bounded C2 concession in
         // SCANNABLE_CARD_THREAT_MODEL.md. The strong type (not a Boolean) is pinned by
-        // scannableCardScreenTrustCaptionParamIsThePlacementType. Adding a FIFTH parameter
-        // — e.g. a per-element `showBarcode` / `showPayloadCaption` suppressor — would
-        // breach the surface contract; review the threat model before changing this number.
+        // scannableCardScreenTrustCaptionParamIsThePlacementType. `faceTint` (wpass-80y.1)
+        // colors the card face only — it cannot reach the code panel, which is pinned to
+        // literal white by codePanelIsLiterallyWhiteNotAThemeTokenOrTheTint. Adding a SIXTH
+        // parameter — e.g. a per-element `showBarcode` / `showPayloadCaption` suppressor, or
+        // a panel-color override — would breach the surface contract; review the threat
+        // model before changing this number.
         assertUserVisibleParamCount(
             "ScannableCardScreenKt",
             "ScannableCardScreen",
-            expected = 4,
+            expected = 5,
         )
     }
 
@@ -244,7 +247,7 @@ class ComposableSurfaceLockTest {
             "CompactCodeViewKt" to "CompactCodeView",
         ).forEach { (file, name) ->
             val klass = Class.forName("is.walt.passes.ui.$file")
-            val matches = klass.methods.filter { it.name == name || it.name.startsWith("$name-") }
+            val matches = klass.declaredComposableOverloads(name)
             assertWithMessage("$name should have exactly one declared overload")
                 .that(matches.size)
                 .isEqualTo(1)
@@ -267,16 +270,23 @@ class ComposableSurfaceLockTest {
 
     private fun findComposable(fileClassSimpleName: String, methodName: String): Method {
         val klass = Class.forName("is.walt.passes.ui.$fileClassSimpleName")
-        // Kotlin's value-class name mangling appends `-<hash>` to a JVM method name
-        // when the function takes a value-class parameter. `passes-core` exposes
-        // several value classes (`PassLocale`, `PassInstant`, `ImageBytes`,
-        // `ColorValue`), so most of these composables compile to e.g.
-        // `PassFront-I15CzMI`. Match either the bare name or the mangled prefix.
-        return klass.methods
-            .filter { it.name == methodName || it.name.startsWith("$methodName-") }
+        return klass.declaredComposableOverloads(methodName)
             .maxByOrNull { it.parameterCount }
             ?: error("Composable $fileClassSimpleName.$methodName not found")
     }
+
+    /**
+     * Source-declared overloads of [methodName], excluding the synthetic `$default`
+     * bridges Kotlin emits for defaulted parameters.
+     *
+     * Kotlin's value-class name mangling appends `-<hash>` to a JVM method name when the
+     * function takes a value-class parameter (`PassLocale`, `ImageBytes`, Compose's
+     * `Color`, …), so `PassFront` compiles to e.g. `PassFront-I15CzMI` — and its default
+     * bridge to `PassFront-I15CzMI$default`, which the mangled-prefix match would
+     * otherwise pick up as a second overload with an inflated parameter count.
+     */
+    private fun Class<*>.declaredComposableOverloads(methodName: String): List<Method> =
+        methods.filter { (it.name == methodName || it.name.startsWith("$methodName-")) && !it.isSynthetic }
 
     private fun userVisibleParameterCount(method: Method): Int {
         // Compose appends `Composer $composer` and `int $changed` (and `int $changed1`
