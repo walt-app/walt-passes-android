@@ -33,17 +33,19 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun documentViewHasExactlyTenUserVisibleParameters() {
+    fun documentViewHasExactlyElevenUserVisibleParameters() {
         // (doc, pdfFile, renderer, imageFile, imageDecoder, modifier, telemetry,
-        // trustCaption, onOpenFullScreen, fullScreenAffordance). Bumping from 9 to 10 is
-        // the deliberate wpass-gv6 change: `trustCaption` is a TrustCaptionPlacement
-        // selecting how provenance is carried — Docked renders the verbatim caption;
-        // HostedTypeRow drops it so the host carries provenance via its own "Pass type"
-        // details row, under the bounded D5 concession (ADR 0005 "Pass type" row addendum).
-        // The strong type (not a Boolean) is pinned by documentViewTrustCaptionParamIsThe
-        // PlacementType. Adding an ELEVENTH parameter that suppressed the page, the image,
-        // or some other surface element would breach D5/D8; review the ADR first.
-        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 10)
+        // trustCaption, onOpenFullScreen, fullScreenAffordance, faceTint). `trustCaption`
+        // (wpass-gv6) is a TrustCaptionPlacement selecting how provenance is carried —
+        // Docked renders the verbatim caption; HostedTypeRow drops it so the host carries
+        // provenance via its own "Pass type" details row, under the bounded D5 concession
+        // (ADR 0005 "Pass type" row addendum). The strong type (not a Boolean) is pinned by
+        // documentViewTrustCaptionParamIsThePlacementType. Bumping from 10 to 11 is the
+        // deliberate wpass-80y.2 change: `faceTint` colors the frame the page render sits
+        // on and cannot reach the content, pinned by faceTintLeavesThePageRenderRequest
+        // Unchanged. Adding a TWELFTH parameter that suppressed the page, the image, or
+        // some other surface element would breach D5/D8; review the ADR first.
+        assertUserVisibleParamCount("DocumentViewKt", "DocumentView", expected = 11)
     }
 
     @Test
@@ -140,7 +142,7 @@ class DocumentSurfaceLockTest {
             "FullScreenDocumentViewKt" to "FullScreenDocumentView",
         ).forEach { (file, name) ->
             val klass = Class.forName("is.walt.passes.document.ui.$file")
-            val matches = klass.methods.filter { it.name == name || it.name.startsWith("$name-") }
+            val matches = klass.declaredComposableOverloads(name)
             assertWithMessage("$name should have exactly one declared overload")
                 .that(matches.size)
                 .isEqualTo(1)
@@ -151,14 +153,21 @@ class DocumentSurfaceLockTest {
 
     private fun findComposable(fileClassSimpleName: String, methodName: String): Method {
         val klass = Class.forName("is.walt.passes.document.ui.$fileClassSimpleName")
-        // Kotlin's value-class name mangling appends `-<hash>` to a JVM method name
-        // when the function takes a value-class parameter. Match either the bare name
-        // or the mangled prefix.
-        return klass.methods
-            .filter { it.name == methodName || it.name.startsWith("$methodName-") }
+        return klass.declaredComposableOverloads(methodName)
             .maxByOrNull { it.parameterCount }
             ?: error("Composable $fileClassSimpleName.$methodName not found")
     }
+
+    /**
+     * Source-declared overloads of [methodName]. The `-<hash>` suffix is Kotlin's
+     * value-class name mangling (`DocumentView` takes a `Color`); the synthetic filter
+     * drops the `$default` bridge that mangling would otherwise smuggle in under that
+     * same prefix, with an inflated parameter count.
+     */
+    private fun Class<*>.declaredComposableOverloads(methodName: String): List<Method> =
+        methods.filter {
+            (it.name == methodName || it.name.startsWith("$methodName-")) && !it.isSynthetic
+        }
 
     private fun userVisibleParameterCount(method: Method): Int {
         // Compose appends `Composer $composer` and `int $changed` (and `int $changed1`
