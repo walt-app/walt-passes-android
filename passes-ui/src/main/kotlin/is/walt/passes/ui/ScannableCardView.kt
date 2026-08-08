@@ -68,25 +68,15 @@ public fun ScannableCardView(
     modifier: Modifier = Modifier,
     showPayloadCaption: Boolean = false,
 ) {
-    val bitmap = remember(card.payload, card.format) {
-        when (val result = BarcodeEncoder.encode(card.payload, card.format)) {
-            is EncodeResult.Success -> result.matrix.toMonochromeBitmap()
-            is EncodeResult.Failure -> null
-        }
-    }
-
     if (!showPayloadCaption) {
-        BarcodeImage(card.format, bitmap, imageDescription = card.label, modifier = modifier)
+        ScannableCodeImage(card, imageDescription = card.label, modifier = modifier)
     } else {
         Column(
             modifier = modifier,
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(CAPTION_GAP),
         ) {
-            // Drop the image's contentDescription so TalkBack reads the caption,
-            // not the duplicate label. clearAndSetSemantics would dedupe too but
-            // would zap the caption.
-            BarcodeImage(card.format, bitmap, imageDescription = null, modifier = Modifier)
+            ScannableCodeImage(card, imageDescription = null, modifier = Modifier)
             SelectionContainer {
                 Text(
                     text = isolated(card.payload),
@@ -98,6 +88,28 @@ public fun ScannableCardView(
             }
         }
     }
+}
+
+/**
+ * The encoded code alone. [imageDescription] is null wherever the composing surface
+ * already announces the label or the payload in its own text — TalkBack would otherwise
+ * read the label twice. `clearAndSetSemantics` would dedupe too, but would zap the
+ * neighbouring caption. Encoder failures still carry the failure description, which
+ * [BarcodeImage] owns.
+ */
+@Composable
+internal fun ScannableCodeImage(
+    card: ScannableCard,
+    imageDescription: String?,
+    modifier: Modifier = Modifier,
+) {
+    val bitmap = remember(card.payload, card.format) {
+        when (val result = BarcodeEncoder.encode(card.payload, card.format)) {
+            is EncodeResult.Success -> result.matrix.toMonochromeBitmap()
+            is EncodeResult.Failure -> null
+        }
+    }
+    BarcodeImage(card.format, bitmap, imageDescription, modifier)
 }
 
 @Composable

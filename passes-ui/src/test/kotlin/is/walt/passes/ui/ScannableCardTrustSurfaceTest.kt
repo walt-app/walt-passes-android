@@ -7,6 +7,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -15,6 +17,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
+import kotlin.math.max
+import kotlin.math.min
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableCardCreateInput
@@ -263,6 +268,48 @@ class ScannableCardTrustSurfaceTest {
         composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
         composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
         composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun darkFaceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption() {
+        // Sibling of the light-tint case above so both inkOn branches compose. The
+        // palette's tints are light, but the parameter accepts any color and the ink flip
+        // is a real branch — exercising only one would leave half the surface untested.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(
+                    card = qrFixture(label = "Library card"),
+                    faceTint = Color(0xFF00837E),
+                )
+            }
+        }
+        composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
+    fun inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase() {
+        // The stated justification for accepting an arbitrary consumer tint is that ink
+        // is contrast-derived; without this the claim rests on whichever swatch a smoke
+        // test happened to pick. Covers both design palette rows (light tints, mid-tone
+        // accents), the mid-tones a naive 0.5 luminance flip would get wrong, and the
+        // luminance extremes.
+        val tints = listOf(
+            // Card tints — Clay, Bronze, Moss, Teal, Denim, Violet, Rose.
+            0xFFFFD8D5, 0xFFFBDDC3, 0xFFDAEAC8, 0xFFBFEEEA, 0xFFCEE6FF, 0xFFE8DCFE, 0xFFFFD6E4,
+            // Their accents — mid-tones, which is where the flip point actually matters.
+            0xFFB14E4B, 0xFFA55D00, 0xFF5B7F1D, 0xFF00837E, 0xFF2A75BA, 0xFF805DB0, 0xFFAB4D74,
+            // Extremes and a mid-tone sitting between the true tie point and 0.5.
+            0xFF000000, 0xFFFFFFFF, 0xFF2E8B7F, 0xFF767676,
+        ).map { Color(it) }
+
+        tints.forEach { tint ->
+            val ratio = contrastRatio(inkOn(tint), tint)
+            assertWithMessage("ink on tint %s scored %s:1", tint.toArgb().toUInt().toString(16), ratio)
+                .that(ratio)
+                .isAtLeast(WCAG_AA_NORMAL_TEXT)
+        }
     }
 
     @Test
@@ -527,5 +574,16 @@ class ScannableCardTrustSurfaceTest {
                 "Update encoderRejectedEan13Fixture before changing the data class."
         }
         return ctor.callBy(args.mapKeys { (name, _) -> byName.getValue(name) })
+    }
+
+    /** WCAG 2.x relative-luminance contrast ratio, ordered lighter-over-darker. */
+    private fun contrastRatio(a: Color, b: Color): Float {
+        val lighter = max(a.luminance(), b.luminance())
+        val darker = min(a.luminance(), b.luminance())
+        return (lighter + 0.05f) / (darker + 0.05f)
+    }
+
+    private companion object {
+        const val WCAG_AA_NORMAL_TEXT = 4.5f
     }
 }

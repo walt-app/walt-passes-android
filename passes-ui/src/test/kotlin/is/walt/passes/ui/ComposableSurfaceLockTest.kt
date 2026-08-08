@@ -276,14 +276,10 @@ class ComposableSurfaceLockTest {
     }
 
     /**
-     * Source-declared overloads of [methodName], excluding the synthetic `$default`
-     * bridges Kotlin emits for defaulted parameters.
-     *
-     * Kotlin's value-class name mangling appends `-<hash>` to a JVM method name when the
-     * function takes a value-class parameter (`PassLocale`, `ImageBytes`, Compose's
-     * `Color`, …), so `PassFront` compiles to e.g. `PassFront-I15CzMI` — and its default
-     * bridge to `PassFront-I15CzMI$default`, which the mangled-prefix match would
-     * otherwise pick up as a second overload with an inflated parameter count.
+     * Source-declared overloads of [methodName]. The `-<hash>` suffix is Kotlin's
+     * value-class name mangling (`PassFront-I15CzMI`); the synthetic filter drops the
+     * `$default` bridge that mangling would otherwise smuggle in under that same prefix,
+     * with an inflated parameter count.
      */
     private fun Class<*>.declaredComposableOverloads(methodName: String): List<Method> =
         methods.filter { (it.name == methodName || it.name.startsWith("$methodName-")) && !it.isSynthetic }

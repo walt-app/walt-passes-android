@@ -39,22 +39,15 @@ import `is`.walt.passes.ui.core.isolated
  * [CODE_QUIET_ZONE] adds visual breathing room inside the panel and the QR/1D
  * `ContentScale` split in [ScannableCardView] is unchanged.
  *
- * ## Face tint vs. code panel
- *
- * [faceTint] colors the card face only. The panel directly behind the code is
- * [SCAN_CODE_PANEL] — literally white in both themes, never a theme token and never the
- * tint — because the code is real content and must stay theme-independent and scannable
- * in dark mode. This mirrors `CompactCodeView`'s `COMPACT_CODE_BACKING` guarantee, so
- * both the list-face and detail-face renders of a code share one white-backing rule.
- * Routing the panel off that constant, or letting the tint reach it, is amending the
- * contract rather than refactoring it.
+ * [faceTint] colors the card face only; the panel behind the code stays
+ * [SCAN_CODE_PANEL], which carries that guarantee and the argument for it.
  *
  * The tint is presentation only. The kernel never learns why a color was chosen and
  * stores nothing: which color an item carries is the consumer's (walt-android's
  * `WalletColorRepository`, keyed per wallet entry). `ScannableCard` deliberately carries
- * no color field — wpass-q5p removed it and it stays removed. Label and payload ink is
- * derived from the tint's luminance so an arbitrary consumer tint stays legible in both
- * themes; that is a contrast guarantee, not a brand token.
+ * no color field — wpass-q5p removed it and it stays removed. Ink on the face is derived
+ * from the tint's luminance via [inkOn] so an arbitrary consumer tint stays legible in
+ * both themes; that is a contrast guarantee, not a brand token.
  *
  * Trust contract: by default ([TrustCaptionPlacement.Docked]) the caption is composed at
  * the bottom of the screen (C2 in `docs/SCANNABLE_CARD_THREAT_MODEL.md`), structurally
@@ -87,7 +80,9 @@ import `is`.walt.passes.ui.core.isolated
  *   provenance via its own "Pass type" details row under the C2 concession (wpass-gv6).
  * @param faceTint color of the card face behind the code panel. Defaults to
  *   [Color.Unspecified], which keeps the `MaterialTheme.colorScheme.surface` face every
- *   existing caller gets today (wpass-80y.1 / Walt wlt-38v8).
+ *   existing caller gets today (wpass-80y.1 / Walt wlt-38v8). Pass an opaque color: ink
+ *   is derived from the nominal value, so a translucent tint composites over host paint
+ *   the kernel cannot see and the derived ink may not match what the user sees.
  */
 @Composable
 public fun ScannableCardScreen(
@@ -104,7 +99,7 @@ public fun ScannableCardScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .padding(24.dp),
+                .padding(SCREEN_MARGIN),
             contentAlignment = Alignment.Center,
         ) {
             CodeCard(card = card, showLabel = showLabel, faceTint = faceTint)
@@ -122,10 +117,7 @@ public fun ScannableCardScreen(
     }
 }
 
-/**
- * The content-sized card: tinted face, literal-white code panel, then the label and
- * payload readback on the face. [faceTint] never reaches [SCAN_CODE_PANEL].
- */
+/** The content-sized card: tinted face, white code panel, then label and payload on the face. */
 @Composable
 private fun CodeCard(
     card: ScannableCard,
@@ -135,8 +127,10 @@ private fun CodeCard(
     val tinted = faceTint.isSpecified
     val face = if (tinted) faceTint else MaterialTheme.colorScheme.surface
     val ink = if (tinted) inkOn(faceTint) else MaterialTheme.colorScheme.onSurface
-    val metaInk =
-        if (tinted) ink.copy(alpha = META_INK_ALPHA) else MaterialTheme.colorScheme.onSurfaceVariant
+    // The payload is the POS fallback, not decorative meta: on a tint it takes full ink,
+    // because inkOn's worst case is already only 4.58:1 and any alpha would push the
+    // readback under WCAG AA. Untinted keeps the contrast-checked theme token.
+    val payloadInk = if (tinted) ink else MaterialTheme.colorScheme.onSurfaceVariant
 
     Surface(
         color = face,
@@ -151,8 +145,11 @@ private fun CodeCard(
                 color = SCAN_CODE_PANEL,
                 shape = RoundedCornerShape(PANEL_RADIUS),
             ) {
-                ScannableCardView(
+                // No image description: the label and payload below announce this card,
+                // so describing the image too would make TalkBack read the label twice.
+                ScannableCodeImage(
                     card = card,
+                    imageDescription = null,
                     modifier = Modifier.padding(CODE_QUIET_ZONE),
                 )
             }
@@ -180,7 +177,7 @@ private fun CodeCard(
                         text = isolated(card.payload),
                         style = MaterialTheme.typography.labelMedium,
                         fontFamily = FontFamily.Monospace,
-                        color = metaInk,
+                        color = payloadInk,
                         textAlign = TextAlign.Center,
                     )
                 }
@@ -193,26 +190,38 @@ private fun CodeCard(
  * Contrast-derived ink for text sitting on [ScannableCardScreen]'s face. Consumers may
  * pass any tint, so the flip keeps the label and payload legible rather than assuming a
  * light palette. Neutral black/white by design: `passes-ui` carries no brand values.
+ *
+ * Internal so a test can pin the guarantee across the tint range, since the swatches a
+ * smoke test happens to pick would only exercise one branch.
  */
-private fun inkOn(tint: Color): Color =
+internal fun inkOn(tint: Color): Color =
     if (tint.luminance() > INK_FLIP_LUMINANCE) Color.Black else Color.White
 
 /** Panel padding around the code. The scan quiet zone is in the matrix; this is visual. */
 private val CODE_QUIET_ZONE = 16.dp
 
+private val SCREEN_MARGIN = 24.dp
 private val CARD_RADIUS = 20.dp
 private val CARD_PADDING = 18.dp
 private val PANEL_RADIUS = 16.dp
 private val PANEL_TO_TEXT_GAP = 16.dp
 private val LABEL_TO_PAYLOAD_GAP = 4.dp
 
-private const val INK_FLIP_LUMINANCE = 0.5f
-private const val META_INK_ALPHA = 0.6f
+/**
+ * Where black and white ink tie on WCAG contrast: black scores `(L + 0.05) / 0.05` and
+ * white `1.05 / (L + 0.05)`, which cross at `L = sqrt(0.0525) - 0.05 ≈ 0.179`. Flipping
+ * at the intuitive 0.5 instead would hand every mid-tone tint the *worse* of the two —
+ * e.g. `#2E8B7F` (L ≈ 0.206) would take white at 4.1:1 over black at 5.1:1. The tie point
+ * is also the worst case: no tint scores below 4.58:1 against the ink chosen here.
+ */
+private const val INK_FLIP_LUMINANCE = 0.179f
 
 /**
- * Literally white, never a theme token and never [ScannableCardScreen]'s face tint — the
- * dark-mode scannability guarantee, matching `COMPACT_CODE_BACKING` on the list face.
- * Internal (not private) so the smoke test pins the value; rerouting the panel off this
- * constant is amending the contract, not a refactor.
+ * Literally white, never a theme token and never [ScannableCardScreen]'s face tint,
+ * because the code is real content and must stay theme-independent and scannable in dark
+ * mode. Mirrors `COMPACT_CODE_BACKING` so the list-face and detail-face renders of a code
+ * share one white-backing rule. Internal (not private) so the smoke test pins the value;
+ * rerouting the panel off this constant, or letting a tint reach it, is amending the
+ * contract rather than refactoring it.
  */
 internal val SCAN_CODE_PANEL: Color = Color.White
