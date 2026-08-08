@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -20,6 +21,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
@@ -63,6 +66,20 @@ import `is`.walt.passes.ui.core.toComposeColor
  * and the row may sit in a collapsed-by-default foldout — see `TrustCaptionPlacement` and
  * the ADR 0005 D5 "Pass type" row addendum. Defaults to [TrustCaptionPlacement.Docked] (the
  * verbatim docked caption) so every existing caller is unchanged.
+ *
+ * [faceTint] is presentation only — the kernel never learns why a color was chosen and
+ * stores nothing; which color an item carries is the consumer's (walt-android's
+ * `WalletColorRepository`, keyed per wallet entry), and no [Document] arm carries a color
+ * field (wpass-80y.2 / Walt wlt-38v8).
+ *
+ * @param faceTint color of the frame the page render / decoded image sits on, in both
+ *   arms. The tint reaches the frame ONLY: the rasterised PDF page and the decoded image
+ *   are real content, so they render identically tinted or not, and identically in light
+ *   and dark. Defaults to [Color.Unspecified], which keeps the flush-to-slot
+ *   [is.walt.passes.document.ui.theme.DocumentSemantics.laneBackground] frame every existing
+ *   caller gets today; a fully transparent tint means "no tint" and falls back to the same
+ *   default rather than leaving the frame unpainted. Pass an opaque color: a translucent
+ *   tint composites over host paint the kernel cannot see.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -77,6 +94,7 @@ public fun DocumentView(
     trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
     onOpenFullScreen: (() -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
+    faceTint: Color = Color.Unspecified,
 ) {
     when (doc) {
         is PdfDocument -> PdfDocumentView(
@@ -88,6 +106,7 @@ public fun DocumentView(
             trustCaption = trustCaption,
             onOpenFullScreen = onOpenFullScreen,
             fullScreenAffordance = fullScreenAffordance,
+            faceTint = faceTint,
         )
         is ImageDocument -> ImageDocumentView(
             documentId = doc.id,
@@ -96,6 +115,7 @@ public fun DocumentView(
             modifier = modifier,
             telemetry = telemetry,
             trustCaption = trustCaption,
+            faceTint = faceTint,
         )
         // wpass-8lu: a composite renders its IMAGE half through the same isolated image-decode
         // surface as a plain image (same imageFile / imageDecoder pair, no new DocumentView
@@ -112,6 +132,7 @@ public fun DocumentView(
             modifier = modifier,
             telemetry = telemetry,
             trustCaption = trustCaption,
+            faceTint = faceTint,
         )
     }
 }
@@ -186,8 +207,8 @@ private fun PdfDocumentView(
     trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
     onOpenFullScreen: (() -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
+    faceTint: Color = Color.Unspecified,
 ) {
-    val semantics = LocalDocumentSemantics.current
     val cache = remember(doc.id) { PdfThumbnailCache() }
     DisposableEffect(doc.id) {
         onDispose { cache.clear() }
@@ -209,14 +230,14 @@ private fun PdfDocumentView(
             TrustCaptionPlacement.HostedTypeRow -> Unit
         }
 
-        // `laneBackground` paints behind the pager only — the document-surface tone the
-        // page sits on (showing through ContentScale.Fit letterbox bars). The page region
-        // is a Box so a host-supplied affordance can float over its bottom edge.
+        // The face paints behind the pager only — the document-surface tone the page sits
+        // on (showing through ContentScale.Fit letterbox bars). The page region is a Box so
+        // a host-supplied affordance can float over its bottom edge.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .background(semantics.laneBackground.toComposeColor()),
+                .documentFace(faceTint),
         ) {
             // Page tap opens full screen; clickable and the pager's drag coexist (Compose
             // routes quick press-release to the click, horizontal drag to the pager).
@@ -300,8 +321,8 @@ private fun ImageDocumentView(
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
+    faceTint: Color = Color.Unspecified,
 ) {
-    val semantics = LocalDocumentSemantics.current
     Column(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -316,14 +337,14 @@ private fun ImageDocumentView(
             TrustCaptionPlacement.HostedTypeRow -> Unit
         }
 
-        // `laneBackground` paints behind the image only — the document-surface tone the image
-        // sits on (showing through the ContentScale.Fit letterbox bars), so the caption above
-        // reads as host chrome rather than part of the document surface, matching the PDF arm.
+        // The face paints behind the image only — the document-surface tone the image sits on
+        // (showing through the ContentScale.Fit letterbox bars), so the caption above reads as
+        // host chrome rather than part of the document surface, matching the PDF arm.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
-                .background(semantics.laneBackground.toComposeColor()),
+                .documentFace(faceTint),
         ) {
             val density = LocalDensity.current
             val requestWidthPx = with(density) {
@@ -357,6 +378,47 @@ private fun ImageDocumentView(
         }
     }
 }
+
+/**
+ * Paints the frame the page render / decoded image sits on, shared by both arms so the PDF
+ * and image surfaces cannot drift apart on the one thing [DocumentView] `faceTint` touches.
+ *
+ * Background only: it never clips or filters the content drawn into the Box, which is what
+ * makes the frame-not-content constraint structural rather than a convention.
+ *
+ * Two things are deliberate. A fully transparent tint falls back to the default rather than
+ * taking the tinted branch and painting nothing — [Color.isSpecified] is true for
+ * [Color.Transparent], so a consumer handing over a cleared or not-yet-loaded color would
+ * otherwise lose the document-surface tone entirely and show host paint through the
+ * letterbox bars. And the rounded card shape arrives with the tint rather than
+ * unconditionally: an untinted frame is the host's own
+ * [is.walt.passes.document.ui.theme.DocumentSemantics.laneBackground] tone bleeding to the
+ * slot edge, and rounding it would change the appearance of every consumer already shipping
+ * the surface (paint only — a shape on a background never moves layout). Corner radius comes
+ * with the opt-in that asks for a card.
+ */
+@Composable
+private fun Modifier.documentFace(faceTint: Color): Modifier =
+    if (documentFaceIsTinted(faceTint)) {
+        background(faceTint, RoundedCornerShape(FACE_RADIUS))
+    } else {
+        background(LocalDocumentSemantics.current.laneBackground.toComposeColor())
+    }
+
+/**
+ * Whether [faceTint] is a tint the frame should actually take. Internal (not private) so a
+ * test can pin the [Color.Transparent] fallback: the branch it guards is invisible to a
+ * composition assertion, since both arms paint *something* and neither changes the tree.
+ */
+internal fun documentFaceIsTinted(faceTint: Color): Boolean =
+    faceTint.isSpecified && faceTint.alpha > 0f
+
+/**
+ * Card radius from the 26.08.08 design's card anatomy spec. Duplicated as `CARD_RADIUS` in
+ * `passes-ui`'s `ScannableCardScreen`, which fulfils the same spec for the scannable face;
+ * hoisting both onto one shared token is wpass-nbr.
+ */
+private val FACE_RADIUS = 20.dp
 
 // wpass-jil: the kernel's neutral default open-full-screen affordance, docked below the
 // page. Label and colours come from DocumentSemantics; a host wanting a different
@@ -434,5 +496,8 @@ private fun DocumentPage(
 // via BoxWithConstraints), the inline surface is fixed 1x and ContentScale.Fit masks
 // any over/under-render — the BoxWithConstraints cost isn't worth it for a thumbnail-
 // sized slot.
-private const val TARGET_PAGE_WIDTH_DP: Int = 360
-private const val TARGET_PAGE_HEIGHT_DP: Int = 480
+// Internal (not private) so DocumentFaceTintTest can pin that the request really is
+// derived from these and not from the slot; a slot-derived request would make the
+// tint-invariance it asserts depend on layout the test does not control.
+internal const val TARGET_PAGE_WIDTH_DP: Int = 360
+internal const val TARGET_PAGE_HEIGHT_DP: Int = 480

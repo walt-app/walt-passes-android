@@ -4,6 +4,7 @@ import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.MaterialTheme
@@ -11,10 +12,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -459,6 +462,50 @@ class DocumentViewInstrumentedTest {
             .top
 
         assertThat(pageTop.value).isAtLeast(captionBottom.value)
+    }
+
+    @Test
+    fun faceTintDoesNotChangeTheLaidOutPageSize() {
+        // wpass-80y.2: `faceTint` colors the frame the page sits on, never the page. On
+        // device the rendered page is a real bitmap in a real layout, so this is where the
+        // constraint can be checked as geometry rather than as a render request (the unit
+        // test's `DocumentFaceTintTest.faceTintLeavesThePageRenderRequestUnchanged`).
+        // Two equally-sized slots, one tinted and one not: the page must lay out to the
+        // same size in both. A tint that inset, clipped, or reshaped the content — the
+        // natural way to break this while the frame still "looks right" — fails here.
+        composeRule.setContent {
+            ThemedHost {
+                Column {
+                    Box(modifier = Modifier.fillMaxWidth().height(300.dp)) {
+                        DocumentView(
+                            doc = doc(pageCount = 1),
+                            pdfFile = pipeRead,
+                            renderer = RecordingBinder(),
+                        )
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(300.dp)) {
+                        DocumentView(
+                            doc = doc(pageCount = 1),
+                            pdfFile = pipeRead,
+                            renderer = RecordingBinder(),
+                            // Denim, the palette's PDF default.
+                            faceTint = Color(0xFFCEE6FF),
+                        )
+                    }
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val pages = composeRule.onAllNodesWithContentDescription("Page 1 of 1")
+        pages.assertCountEquals(2)
+        val untinted = pages[0].getUnclippedBoundsInRoot()
+        val tinted = pages[1].getUnclippedBoundsInRoot()
+
+        assertThat((tinted.right - tinted.left).value)
+            .isEqualTo((untinted.right - untinted.left).value)
+        assertThat((tinted.bottom - tinted.top).value)
+            .isEqualTo((untinted.bottom - untinted.top).value)
     }
 
     private fun doc(pageCount: Int) = PdfDocument(
