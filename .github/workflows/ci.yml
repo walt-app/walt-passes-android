@@ -74,7 +74,8 @@ jobs:
       fail-fast: false
       matrix:
         api: [28, 31, 34, 36]
-    timeout-minutes: 45
+    # 70min covers three emulator cycles per leg; replace with observed wall-clock.
+    timeout-minutes: 70
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -133,12 +134,18 @@ jobs:
         id: storage-connected
         run: ./gradlew :passes-storage:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
-      # Runs when the storage leg passed OR failed on its own tests, so one module's failure
-      # cannot hide the other's. Scoped to that step rather than `!cancelled()`, which would
-      # also run this after a setup step failed and report a confusing second failure.
+      # Runs whenever the connected legs started, so one module's failure cannot hide
+      # another's. The `!= 'skipped'` keeps a setup failure from triggering a confusing second
+      # failure here, which a bare `!cancelled()` would.
       - name: Run connected tests (passes-barcode)
-        if: ${{ success() || steps.storage-connected.conclusion == 'failure' }}
+        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' }}
         run: ./gradlew :passes-barcode:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
+
+      # passes-ui carries the wpass-80y.5 face-tint pin, which reads painted pixels and so
+      # cannot run under Robolectric. Same condition and reasoning as the step above.
+      - name: Run connected tests (passes-ui)
+        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' }}
+        run: ./gradlew :passes-ui:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
       - name: Upload connected test reports
         if: always()
@@ -150,6 +157,8 @@ jobs:
             passes-storage/build/outputs/androidTest-results/
             passes-barcode/build/reports/androidTests/
             passes-barcode/build/outputs/androidTest-results/
+            passes-ui/build/reports/androidTests/
+            passes-ui/build/outputs/androidTest-results/
           if-no-files-found: ignore
 
   dependency-review:

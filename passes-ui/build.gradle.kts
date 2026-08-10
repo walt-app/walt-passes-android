@@ -6,6 +6,39 @@ plugins {
 
 android {
     namespace = "is.walt.passes.ui"
+
+    testOptions {
+        // Managed-device matrix for ScannableCardFaceTintInstrumentedTest (wpass-80y.5),
+        // mirroring passes-barcode / passes-storage. The face-tint pin has to read painted
+        // pixels, which Robolectric cannot do, so it only protects the seam if a real device
+        // runs it. Same API span as the sibling modules: 28 is the repo minSdk, 31/34/36
+        // track S, the LTS image, and head. The CI connected-tests job runs the matching
+        // apiNNgoogleDebugAndroidTest tasks.
+        managedDevices {
+            localDevices {
+                create("api28google") {
+                    device = "Pixel 2"
+                    apiLevel = 28
+                    systemImageSource = "google"
+                }
+                create("api31google") {
+                    device = "Pixel 2"
+                    apiLevel = 31
+                    systemImageSource = "google"
+                }
+                create("api34google") {
+                    device = "Pixel 2"
+                    apiLevel = 34
+                    systemImageSource = "google"
+                }
+                create("api36google") {
+                    device = "Pixel 2"
+                    apiLevel = 36
+                    systemImageSource = "google"
+                }
+            }
+        }
+    }
 }
 
 dependencies {
@@ -54,6 +87,12 @@ dependencies {
 
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.androidx.test.junit)
+    // Declared, not inherited. AndroidLibraryConventionPlugin names
+    // androidx.test.runner.AndroidJUnitRunner for every module, but without this the class
+    // arrives only as a transitive of ui-test-junit4 — at 1.5.0, behind the catalog's 1.7.0.
+    // A BOM bump that reshuffles those transitives would take out all four API legs with a
+    // runner-not-found that looks like a face-tint failure.
+    androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.truth)
 }

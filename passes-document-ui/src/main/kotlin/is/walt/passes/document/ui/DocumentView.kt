@@ -22,7 +22,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
@@ -36,6 +35,7 @@ import `is`.walt.passes.document.ImageDocument
 import `is`.walt.passes.document.PdfDocument
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.document.ui.theme.LocalDocumentSemantics
+import `is`.walt.passes.ui.core.faceIsTinted
 import `is`.walt.passes.ui.core.toComposeColor
 
 /**
@@ -386,12 +386,10 @@ private fun ImageDocumentView(
  * Background only: it never clips or filters the content drawn into the Box, which is what
  * makes the frame-not-content constraint structural rather than a convention.
  *
- * Two things are deliberate. A fully transparent tint falls back to the default rather than
- * taking the tinted branch and painting nothing — [Color.isSpecified] is true for
- * [Color.Transparent], so a consumer handing over a cleared or not-yet-loaded color would
- * otherwise lose the document-surface tone entirely and show host paint through the
- * letterbox bars. And the rounded card shape arrives with the tint rather than
- * unconditionally: an untinted frame is the host's own
+ * Two things are deliberate. What counts as a tint is [faceIsTinted], shared with the
+ * scannable face; the fallback keeps the document-surface tone rather than showing host
+ * paint through the letterbox bars. And the rounded card shape arrives with the tint rather
+ * than unconditionally: an untinted frame is the host's own
  * [is.walt.passes.document.ui.theme.DocumentSemantics.laneBackground] tone bleeding to the
  * slot edge, and rounding it would change the appearance of every consumer already shipping
  * the surface (paint only — a shape on a background never moves layout). Corner radius comes
@@ -399,19 +397,11 @@ private fun ImageDocumentView(
  */
 @Composable
 private fun Modifier.documentFace(faceTint: Color): Modifier =
-    if (documentFaceIsTinted(faceTint)) {
+    if (faceIsTinted(faceTint)) {
         background(faceTint, RoundedCornerShape(FACE_RADIUS))
     } else {
         background(LocalDocumentSemantics.current.laneBackground.toComposeColor())
     }
-
-/**
- * Whether [faceTint] is a tint the frame should actually take. Internal (not private) so a
- * test can pin the [Color.Transparent] fallback: the branch it guards is invisible to a
- * composition assertion, since both arms paint *something* and neither changes the tree.
- */
-internal fun documentFaceIsTinted(faceTint: Color): Boolean =
-    faceTint.isSpecified && faceTint.alpha > 0f
 
 /**
  * Card radius from the 26.08.08 design's card anatomy spec. Duplicated as `CARD_RADIUS` in

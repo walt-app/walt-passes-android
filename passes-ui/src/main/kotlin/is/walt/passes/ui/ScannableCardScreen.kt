@@ -15,7 +15,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.isSpecified
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -23,6 +22,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.ScannableCard
+import `is`.walt.passes.ui.core.faceIsTinted
 import `is`.walt.passes.ui.core.isolated
 
 /**
@@ -80,8 +80,9 @@ import `is`.walt.passes.ui.core.isolated
  *   provenance via its own "Pass type" details row under the C2 concession (wpass-gv6).
  * @param faceTint color of the card face behind the code panel. Defaults to
  *   [Color.Unspecified], which keeps the `MaterialTheme.colorScheme.surface` face every
- *   existing caller gets today (wpass-80y.1 / Walt wlt-38v8). Pass an opaque color: ink
- *   is derived from the nominal value, so a translucent tint composites over host paint
+ *   existing caller gets today (wpass-80y.1 / Walt wlt-38v8); a fully transparent tint means
+ *   "no tint" and falls back to the same default (see `faceIsTinted`). Pass an opaque color:
+ *   ink is derived from the nominal value, so a translucent tint composites over host paint
  *   the kernel cannot see and the derived ink may not match what the user sees.
  */
 @Composable
@@ -124,16 +125,15 @@ private fun CodeCard(
     showLabel: Boolean,
     faceTint: Color,
 ) {
-    val tinted = faceTint.isSpecified
-    val face = if (tinted) faceTint else MaterialTheme.colorScheme.surface
-    val ink = if (tinted) inkOn(faceTint) else MaterialTheme.colorScheme.onSurface
-    // The payload is the POS fallback, not decorative meta: on a tint it takes full ink,
-    // because INK_FLIP_LUMINANCE's worst case leaves no headroom for alpha. Untinted
-    // keeps the contrast-checked theme token.
-    val payloadInk = if (tinted) ink else MaterialTheme.colorScheme.onSurfaceVariant
+    val paint = facePaint(
+        faceTint = faceTint,
+        surface = MaterialTheme.colorScheme.surface,
+        onSurface = MaterialTheme.colorScheme.onSurface,
+        onSurfaceVariant = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
 
     Surface(
-        color = face,
+        color = paint.face,
         shape = RoundedCornerShape(CARD_RADIUS),
     ) {
         Column(
@@ -163,7 +163,7 @@ private fun CodeCard(
                         text = isolated(card.label),
                         style = MaterialTheme.typography.titleMedium
                             .copy(fontWeight = FontWeight.SemiBold),
-                        color = ink,
+                        color = paint.ink,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -177,13 +177,39 @@ private fun CodeCard(
                         text = isolated(card.payload),
                         style = MaterialTheme.typography.labelMedium,
                         fontFamily = FontFamily.Monospace,
-                        color = payloadInk,
+                        color = paint.payloadInk,
                         textAlign = TextAlign.Center,
                     )
                 }
             }
         }
     }
+}
+
+/** The three colors [ScannableCardScreen]'s card face resolves to. */
+internal data class FacePaint(val face: Color, val ink: Color, val payloadInk: Color)
+
+/**
+ * Resolves the card face's paint from the consumer's [faceTint], falling back to the theme
+ * tokens when there is no tint to take (including a fully transparent one — see
+ * [faceIsTinted]). The payload is the POS fallback, not decorative meta: on a tint it takes
+ * full ink, because INK_FLIP_LUMINANCE's worst case leaves no headroom for alpha. Untinted
+ * keeps the contrast-checked theme token.
+ *
+ * Internal and theme-token-injecting (not private, not reading `MaterialTheme` itself) so a
+ * test can pin the fallbacks: both branches paint *something* and neither changes the tree,
+ * so a composition assertion cannot see which one ran.
+ */
+internal fun facePaint(
+    faceTint: Color,
+    surface: Color,
+    onSurface: Color,
+    onSurfaceVariant: Color,
+): FacePaint = if (faceIsTinted(faceTint)) {
+    val tintInk = inkOn(faceTint)
+    FacePaint(face = faceTint, ink = tintInk, payloadInk = tintInk)
+} else {
+    FacePaint(face = surface, ink = onSurface, payloadInk = onSurfaceVariant)
 }
 
 /**

@@ -239,16 +239,21 @@ presentation-only, and both are bounded by the same four rules:
   kernel never learns why a colour was chosen and has nothing to leak in
   Threats 7 / 8.
 
-The two surfaces are not identical below those four rules, and the divergence
-is recorded rather than smoothed over: `DocumentView` treats a fully
-transparent tint as "no tint" (`documentFaceIsTinted` gates on
-`isSpecified && alpha > 0f`, pinned by
-`fullyTransparentTintFallsBackToTheDefaultFrame`), while `ScannableCardScreen`
-gates on `isSpecified` alone, so a specified fully transparent tint paints a
-transparent face and derives ink from it. Both KDocs say "pass an opaque
-color", and neither surface can lose its trust caption either way, so this is a
-legibility hazard for a careless consumer rather than a trust-signal hole.
-Aligning the scannable gate with the document one is `wpass-80y.5`.
+Both surfaces decide what counts as a tint the same way, and share one
+predicate to keep it that way: `passes-ui-core`'s `faceIsTinted` gates on
+`isSpecified && alpha > 0f`, so a fully transparent tint falls back to the
+documented untinted default on either arm rather than painting nothing (and, on
+the scannable arm, deriving ink from luminance 0). The two landed a day apart
+with independent gates and diverged on exactly that case; `wpass-80y.5` fixed
+the scannable side and hoisted the predicate so it cannot recur. The predicate
+is pinned by `FaceTintTest` in `passes-ui-core`; the scannable arm additionally
+pins that its face and ink resolve through it
+(`fullyTransparentTintFallsBackToTheDefaultFace`, via the injectable
+`facePaint`), while the document arm's frame is a `Modifier.background` whose
+branch no unit-level assertion can observe
+(`…FallsBackToTheDefaultFrame` checks only that the surface composes intact).
+The predicate decides legibility, not provenance: neither surface can lose its
+trust caption either way.
 
 **Bound of this row.** What is granted is a consumer-chosen face tint on the
 two detail surfaces named above, plus the consumer's freedom to colour its own
@@ -770,7 +775,7 @@ can trace back here.
 | Control | Pinned by                                  |
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
-| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyFourUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged` |
+| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyFourUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged`; `wpass-80y.5` pins the shared tint gate with `passes-ui-core`'s `FaceTintTest` plus `fullyTransparentTintFallsBackToTheDefaultFace` (scannable face and ink resolution, via `facePaint`) and `…DefaultFrame` (document arm composes intact) |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |

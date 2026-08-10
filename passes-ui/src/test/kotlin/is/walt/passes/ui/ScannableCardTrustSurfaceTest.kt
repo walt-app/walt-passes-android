@@ -310,6 +310,40 @@ class ScannableCardTrustSurfaceTest {
     }
 
     @Test
+    fun fullyTransparentTintFallsBackToTheDefaultFace() {
+        // A transparent tint must resolve to the theme fallbacks in all three slots: a face
+        // that still paints, and ink NOT derived from the tint (see faceIsTinted).
+        val transparent = facePaint(
+            faceTint = Color.Transparent,
+            surface = SURFACE,
+            onSurface = ON_SURFACE,
+            onSurfaceVariant = ON_SURFACE_VARIANT,
+        )
+        assertThat(transparent).isEqualTo(FacePaint(SURFACE, ON_SURFACE, ON_SURFACE_VARIANT))
+        assertThat(transparent).isEqualTo(
+            facePaint(Color.Unspecified, SURFACE, ON_SURFACE, ON_SURFACE_VARIANT),
+        )
+        // The tinted branch still takes the tint, so the fallback above is a fallback and not
+        // a surface that ignores faceTint outright.
+        assertThat(facePaint(TEAL, SURFACE, ON_SURFACE, ON_SURFACE_VARIANT).face).isEqualTo(TEAL)
+
+        // That CodeCard routes through facePaint is pinned on-device by
+        // ScannableCardFaceTintInstrumentedTest; Robolectric cannot capture pixels here.
+        // Below: the surface must still compose intact under a transparent tint.
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(
+                    card = qrFixture(label = "Library card"),
+                    faceTint = Color.Transparent,
+                )
+            }
+        }
+        composeRule.onNodeWithText("⁨Library card⁩").assertIsDisplayed()
+        composeRule.onNodeWithText("⁨WALT-MEMBER-12345⁩").assertIsDisplayed()
+        composeRule.onNodeWithText("Created by you").assertIsDisplayed()
+    }
+
+    @Test
     fun inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase() {
         // The stated justification for accepting an arbitrary consumer tint is that ink
         // is contrast-derived; without this the claim rests on whichever swatch a smoke
@@ -606,5 +640,12 @@ class ScannableCardTrustSurfaceTest {
 
     private companion object {
         const val WCAG_AA_NORMAL_TEXT = 4.5f
+
+        // Stand-ins for MaterialTheme's tokens, distinct from each other and from any tint,
+        // so facePaint's untinted branch cannot pass by coincidence.
+        val SURFACE = Color(0xFFFDFBF7)
+        val ON_SURFACE = Color(0xFF1A1A1A)
+        val ON_SURFACE_VARIANT = Color(0xFF5C5C5C)
+        val TEAL = Color(0xFFBFEEEA)
     }
 }
