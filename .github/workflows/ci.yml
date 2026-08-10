@@ -74,11 +74,7 @@ jobs:
       fail-fast: false
       matrix:
         api: [28, 31, 34, 36]
-    # Raised from 45 with the third module (wpass-80y.5). Each module is its own emulator
-    # cycle per the note below, so the budget scales with module count, and a timeout kill
-    # renders identically to a real test failure — the one thing this job must not be
-    # ambiguous about. Replace this estimate with the observed wall-clock once a few runs
-    # have landed, so the next module addition has a measurement rather than a guess.
+    # 70min covers three emulator cycles per leg; replace with observed wall-clock.
     timeout-minutes: 70
     steps:
       - name: Checkout
@@ -138,23 +134,17 @@ jobs:
         id: storage-connected
         run: ./gradlew :passes-storage:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
-      # Runs when the storage leg passed OR failed on its own tests, so one module's failure
-      # cannot hide the other's. Scoped to that step rather than `!cancelled()`, which would
-      # also run this after a setup step failed and report a confusing second failure.
+      # Runs whenever the connected legs started, so one module's failure cannot hide
+      # another's. The `!= 'skipped'` keeps a setup failure from triggering a confusing second
+      # failure here, which a bare `!cancelled()` would.
       - name: Run connected tests (passes-barcode)
-        if: ${{ success() || steps.storage-connected.conclusion == 'failure' }}
+        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' }}
         run: ./gradlew :passes-barcode:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
       # passes-ui carries the wpass-80y.5 face-tint pin, which reads painted pixels and so
-      # cannot run under Robolectric. Same one-module-per-step rule as above: its own
-      # invocation, not appended to another.
-      #
-      # The condition means "the connected legs actually started" — i.e. setup succeeded —
-      # so a module failure never hides a later module's result. Written against the FIRST
-      # connected step rather than enumerating every prior one, so it stays this size as
-      # modules are added instead of needing a new clause each time.
+      # cannot run under Robolectric. Same condition and reasoning as the step above.
       - name: Run connected tests (passes-ui)
-        if: ${{ steps.storage-connected.conclusion == 'success' || steps.storage-connected.conclusion == 'failure' }}
+        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' }}
         run: ./gradlew :passes-ui:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
       - name: Upload connected test reports

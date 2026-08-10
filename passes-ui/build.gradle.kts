@@ -91,9 +91,8 @@ dependencies {
     // androidx.test.runner.AndroidJUnitRunner for every module, but without this the class
     // arrives only as a transitive of ui-test-junit4 — at 1.5.0, behind the catalog's 1.7.0.
     // A BOM bump that reshuffles those transitives would take out all four API legs with a
-    // runner-not-found that looks like a face-tint failure. Mirrors passes-barcode.
+    // runner-not-found that looks like a face-tint failure.
     androidTestImplementation(libs.androidx.test.runner)
-    androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.truth)
 }
