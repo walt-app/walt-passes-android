@@ -55,42 +55,40 @@ The tile is also visually distinct from a verified-PKPASS tile by at least two
 of: border treatment, leading icon, color band, typography weight — picked for
 redundancy so theming a single dimension flat cannot collapse the distinction.
 
-**C1 / C2 — consumer-side concession (wallet-row register).** The kernel
-exposes a sibling composable `ScannableCardRowTile` (wpass-pnb; consumer epic
-wlt-6ub) for hosts that interleave scannable cards with passes / PDFs in a
-single homogeneous wallet list rather than in their own carousel lane. The row
-intentionally drops the carousel tile's four-distinguisher contract: there is
-no dashed outline, no smaller corner radius vs a `PassFront`-style tile, and no
-in-row "Created by you" caption. The concession is permitted strictly when, and
-only when, all three of the following hold:
+**C1 / C2 — consumer-side concession (wallet-row register): WITHDRAWN
+(`wpass-80y.4`, 2026-08-10).** This row permitted a homogeneous wallet-row
+register, `ScannableCardRowTile` (wpass-pnb; consumer epic wlt-6ub) — a flat
+label-led row with a neutral leading strip, for hosts interleaving scannable
+cards with passes / PDFs in one list instead of a dedicated carousel lane. It
+dropped the carousel tile's four-distinguisher contract, including the in-row
+"Created by you" caption, in exchange for three conditions: no signature
+affordance on the row, no leading strip styled to read as a verified-pass band,
+and the detail surface retaining the non-suppressible caption.
 
-1. The row owns no signature dot or other verified-pass affordance. Pinned at
-   the kernel surface by `ComposableSurfaceLockTest.scannableCardRowTileHas
-   ExactlyFourUserVisibleParameters` (count: 4 — `card`, `onClick`, `modifier`,
-   `leadingSlot` (a visual hook only, wpass-2a2); no `showSignatureBadge`) and
-   at the consumer (walt-android) by `WalletListTest`'s "no scannable-card row
-   owns a signature dot" invariant.
-2. The row owns no coloured leading strip styled to read as a verified-pass
-   band. The kernel surface uses the `unverifiedArtifact.accent` token (the
-   same neutral token the carousel tile's leading strip uses). Per-card
-   user-chosen colour was removed from the kernel (`wpass-q5p`); routing it
-   through this strip at list scale would have re-created the trust-conflation
-   risk row 1 names. **Under review (`wpass-80y.4`):** that last sentence
-   assumed colour was trust-bearing. The "colour carries no trust meaning" row
-   below removes the premise, so whether this strip may take the item's class
-   tint is now an open contract question, not a settled prohibition. The strip
-   stays on `unverifiedArtifact.accent` until `wpass-80y.4` resolves it.
-3. The detail surface (`ScannableCardScreen`) retains the bottom-docked
-   non-suppressible `ScannableCardTrustCaption`. The trust caption shifts from
-   list-row to detail-surface only; a user who taps a row to *use* the artifact
-   still sees "Created by you" before the scan target renders.
+**The concession is withdrawn because the surface it permitted no longer
+exists.** `ScannableCardRowTile` is deleted from `passes-ui`, along with its
+`leadingSlot` hook (wpass-2a2) and its surface-lock and behavioural tests. The
+26.08.08 redesign replaced the consumer's homogeneous row list with a stacked
+deck of class-tinted card faces (walt-android `WalletStack`, wlt-38v8.3), and
+no consumer composed the row tile at the point of deletion. A trust-reasoned
+surface that nothing ships is a liability in an audit trail: it invites a
+future contributor to adopt it on the strength of a concession argued for a
+list shape that is gone.
 
-The trade is bounded. `ScannableCardTile` and its four-distinguisher contract
-remain the kernel's recommended surface for hosts that present scannable cards
-in their own lane; `ScannableCardRowTile` is the alternative for the
-homogeneous-list register and nothing else. A future consumer wanting a wallet
-list that also drops the detail-surface caption is amending this row, not
-filing a refactor.
+Two things this withdrawal is **not**. It is not a finding that the row shape
+was unsafe — conditions 1 and 3 held for its whole life. And it is not a
+statement about colour: condition 2's "would re-create the verified-band read
+at list scale" rationale had already lost its premise to the "colour carries no
+trust meaning" row below, and the honest resolution of `wpass-80y.4` is that
+the question the condition posed became moot rather than answered.
+
+Reintroducing a homogeneous row register — kernel-side or by a consumer
+reimplementing one — is amending this document, not filing a refactor. It would
+have to re-argue conditions 1 and 3 from the current premises (see the "colour
+carries no trust meaning" row for what colour can and cannot carry) rather than
+restore this row as written. `ScannableCardTile` and its four-distinguisher
+contract remain the kernel's surface for hosts that present scannable cards in
+their own lane.
 
 **C1 / C2 — list-face code render concession (wpass-tjc.2; consumer epic
 wlt-mx2d).** The redesigned wallet list renders a scannable card's — and a
@@ -263,10 +261,10 @@ identity anywhere in the kernel; re-adding a colour field to a kernel artifact
 model or storage table; or a `faceTint` reaching the code panel or the page
 render. The document-side mirror of this row is ADR 0005 D1.C, which makes the
 same argument for the PDF / image tower and withdraws its neutral-surface rule.
-See also the still-open `ScannableCardRowTile` accent question
-(`wpass-80y.4`), which this row is the precondition for: its leading strip is
-pinned to `unverifiedArtifact.accent` by a rationale ("that would re-create the
-verified-band read at list scale") that premise 1 above no longer supports.
+The `ScannableCardRowTile` accent question this row was the precondition for is
+closed: `wpass-80y.4` found the tile had no consumer left and deleted it rather
+than deciding whether its leading strip could take an item's tint. See the
+withdrawn wallet-row concession above.
 
 **C2 — host "Pass type" row concession (detail surface).** A consumer (Walt,
 `wlt-3cer`) consolidates the provenance signal into a single "Pass type" row
@@ -294,8 +292,11 @@ docked-caption contract forbade:
 **Why this is bounded rather than an open hole.** The load-bearing mitigation for
 Threat 1 (visual conflation with a verified PKPASS) is C1 + C2 *combined*, and
 C1 is untouched: the wallet **list** still distinguishes the artifact class
-structurally — distinct lane / `ScannableCardRowTile` with no signature dot and
-no verified-styled band. The detail surface is reached only *after* the user has
+structurally, and no list card of any class carries a signature or verified
+affordance — so there is no verified visual at list scale for a user-created
+card to imitate (premise 1 of the "colour carries no trust meaning" row; the
+class is named by the card's type tile, and its tint carries nothing). The
+detail surface is reached only *after* the user has
 already seen that list-level distinction, and on a card they themselves created
 and can delete. The "Pass type" row, even collapsed, is a labelled, discoverable,
 consistent location for provenance. And Walt remains a display device, not an
@@ -308,8 +309,9 @@ acceptable for a user viewing their own self-created card.
 **Bound of the concession.** `HostedTypeRow` is permitted strictly for a host
 that (a) renders a "Pass type" row enumerating the artifact class on its detail
 surface, and (b) preserves the C1 list-level distinctions. The kernel cannot
-verify either at runtime — exactly as it cannot verify condition 3 of the
-wallet-row concession above — so the obligation shifts to the consumer and is
+verify either at runtime — the same structural limit that applied to the
+withdrawn wallet-row concession's condition 3 — so the obligation shifts to the
+consumer and is
 pinned consumer-side by a walt-android test that the details section renders a
 "Pass type" row (the pin moved from the earlier "host renders the kernel
 caption"). `Docked` remains the default and the recommended surface for hosts
@@ -405,16 +407,13 @@ C2 (non-suppressible "Created by you" caption with ≥2 visual distinguishing
 elements). The two combine: the user sees a different-shaped tile in a
 different-titled lane with a different caption.
 
-A bounded consumer-side concession permits a homogeneous wallet-row register
-(`ScannableCardRowTile`) when the row carries no signature dot, no
-verified-band-styled leading strip, and the detail surface retains the
-non-suppressible trust caption. Full conditions and rationale are recorded in
-the C1 / C2 concession subsection above. The trust caption shifts from
-list-row to detail-surface only; the artifact-class distinction at list scale
-is then carried by the absence of pass-only chrome (signature dot, verified
-band) rather than by the carousel tile's four redundant distinguishers.
+A bounded concession once permitted a homogeneous wallet-row register
+(`ScannableCardRowTile`), shifting the trust caption from list-row to detail
+surface. It is withdrawn (`wpass-80y.4`) along with the composable itself — see
+the C1 / C2 concession subsection above, which records the conditions it ran
+under and what reintroducing such a register would have to re-argue.
 
-A second, deeper consumer-side concession (`HostedTypeRow`, `wpass-gv6`) lets a
+A deeper consumer-side concession (`HostedTypeRow`, `wpass-gv6`) lets a
 host drop the detail-surface caption entirely and carry provenance with its own
 "Pass type" row — a neutral type label, possibly inside a collapsed foldout.
 Under that mode the detail-surface arm of this mitigation is reduced to the host
@@ -753,9 +752,9 @@ threat row above.
   payload length distributions are PII and never leave the device.
 - **No unbounded bypass of the "Created by you" provenance signal on the detail
   surface** (`ScannableCardScreen`), through theming, layout, or
-  consumer-supplied composables. Two bounded concessions exist, both recorded
-  above and nowhere else: the list-row register (`ScannableCardRowTile`) shifts
-  the caption from list-row to detail surface under the C1 / C2 concession; and
+  consumer-supplied composables. One bounded concession exists, recorded above
+  and nowhere else (the list-row register that was the second was withdrawn
+  with `ScannableCardRowTile` in `wpass-80y.4`):
   `TrustCaptionPlacement.HostedTypeRow` (`wpass-gv6`) lets a host drop the
   detail-surface caption and carry provenance with its own "Pass type" row (a
   neutral type label, possibly collapsed) under the C2 "Pass type" row
@@ -775,7 +774,7 @@ can trace back here.
 | Control | Pinned by                                  |
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
-| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb` adds `scannableCardRowTileHasExactlyFourUserVisibleParameters` to pin the wallet-row concession shape, and `rowTileDoesNotRenderTrustCaption` / `rowTileRendersFormatSubtitle` to pin the caption-shift contract; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged`; `wpass-80y.5` pins the shared tint gate with `passes-ui-core`'s `FaceTintTest` plus `fullyTransparentTintFallsBackToTheDefaultFace` (scannable face and ink resolution, via `facePaint`) and `…DefaultFrame` (document arm composes intact) |
+| C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb`'s wallet-row pins (`scannableCardRowTileHasExactlyFourUserVisibleParameters`, `rowTileDoesNotRenderTrustCaption`, `rowTileRendersFormatSubtitle`) were removed with the concession and the composable in `wpass-80y.4`; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged`; `wpass-80y.5` pins the shared tint gate with `passes-ui-core`'s `FaceTintTest` plus `fullyTransparentTintFallsBackToTheDefaultFace` (scannable face and ink resolution, via `facePaint`) and `…DefaultFrame` (document arm composes intact) |
 | C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |

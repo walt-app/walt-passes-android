@@ -59,9 +59,8 @@ import `is`.walt.passes.ui.internal.toMonochromeBitmap
  *
  * This is mechanism, not chrome: no label, no eyebrow, no trust caption, no
  * signature affordance can be composed here. The C1/C2 list-surface distinctions
- * (class eyebrow, neutral card surface — see `docs/SCANNABLE_CARD_THREAT_MODEL.md`
- * and the wpass-pnb / wpass-2a2 [ScannableCardRowTile] lineage) stay on the
- * consumer's card, and kernel trust captions stay on detail surfaces. C5 posture is
+ * (class distinction at list scale — see `docs/SCANNABLE_CARD_THREAT_MODEL.md`) stay
+ * on the consumer's card, and kernel trust captions stay on detail surfaces. C5 posture is
  * unchanged: this path only re-renders through the kernel's encoder-only
  * [BarcodeEncoder]; it adds no decode surface. [contentDescription] exists because
  * the code is usually the card face's dominant visual: the consumer passes its
