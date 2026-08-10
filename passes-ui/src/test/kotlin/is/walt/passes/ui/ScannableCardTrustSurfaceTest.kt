@@ -311,10 +311,8 @@ class ScannableCardTrustSurfaceTest {
 
     @Test
     fun fullyTransparentTintFallsBackToTheDefaultFace() {
-        // Color.isSpecified is true for Color.Transparent, so the gate this replaced painted
-        // a transparent face and read luminance 0 off it — white ink over whatever the host
-        // painted. The tint must resolve to the theme fallbacks instead, all three slots:
-        // a face that still paints, and ink NOT derived from the tint.
+        // A transparent tint must resolve to the theme fallbacks in all three slots: a face
+        // that still paints, and ink NOT derived from the tint (see faceIsTinted).
         val transparent = facePaint(
             faceTint = Color.Transparent,
             surface = SURFACE,
@@ -329,8 +327,11 @@ class ScannableCardTrustSurfaceTest {
         // a surface that ignores faceTint outright.
         assertThat(facePaint(TEAL, SURFACE, ON_SURFACE, ON_SURFACE_VARIANT).face).isEqualTo(TEAL)
 
-        // Mirrors DocumentFaceTintTest.fullyTransparentTintFallsBackToTheDefaultFrame: the
-        // surface must still compose intact under a transparent tint.
+        // That CodeCard actually calls facePaint is not pinned here — both branches paint
+        // something and neither changes the tree. ScannableCardFaceTintInstrumentedTest
+        // carries that pin on-device; captureToImage() cannot do it under Robolectric even
+        // with @GraphicsMode(NATIVE), because its forceRedraw handshake times out (verified,
+        // wpass-80y.5). Below: the surface must still compose intact under a transparent tint.
         composeRule.setContent {
             ThemedHost {
                 ScannableCardScreen(

@@ -8,16 +8,20 @@ class FaceTintTest {
 
     @Test
     fun transparentAndUnspecifiedTintsAreNotTints() {
-        // Color.isSpecified is true for Color.Transparent, so gating on it alone paints a
-        // transparent face and — on the scannable arm — derives ink from luminance 0.
         assertThat(faceIsTinted(Color.Transparent)).isFalse()
         assertThat(faceIsTinted(Color.Unspecified)).isFalse()
     }
 
     @Test
-    fun opaqueAndTranslucentTintsAreTints() {
-        // Translucent is a tint, not a reject: the KDocs ask for opaque colours because ink
-        // is derived from the nominal value, but a consumer that passes one still gets it.
+    fun anyNonZeroAlphaIsATint() {
+        // The knife edge sits at exactly zero, deliberately, and 0.004f pins that rather
+        // than leaving it to be discovered. An epsilon threshold would be a better fit for
+        // the stated rationale — at alpha 0.004 the face is visually host paint, yet the
+        // scannable arm still derives ink from the nominal RGB, so inkOn's WCAG guarantee
+        // (pinned only over opaque tints) does not hold there. It is not adopted because
+        // any epsilon is arbitrary and this gate is the shipped document-arm behaviour that
+        // wpass-80y.5 hoisted rather than redesigned; the surfaces disclaim it instead
+        // ("pass an opaque color"). Moving the edge is a contract change, not a fix.
         val denim = Color(0xFF2A75BA)
         assertThat(faceIsTinted(denim)).isTrue()
         assertThat(faceIsTinted(denim.copy(alpha = 0.5f))).isTrue()

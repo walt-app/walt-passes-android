@@ -387,10 +387,9 @@ private fun ImageDocumentView(
  * makes the frame-not-content constraint structural rather than a convention.
  *
  * Two things are deliberate. What counts as a tint is [faceIsTinted], shared with the
- * scannable face so the two cannot drift on the transparent case again (wpass-80y.5); here
- * the fallback keeps the document-surface tone rather than showing host paint through the
- * letterbox bars. And the rounded card shape arrives with the tint rather than
- * unconditionally: an untinted frame is the host's own
+ * scannable face; the fallback keeps the document-surface tone rather than showing host
+ * paint through the letterbox bars. And the rounded card shape arrives with the tint rather
+ * than unconditionally: an untinted frame is the host's own
  * [is.walt.passes.document.ui.theme.DocumentSemantics.laneBackground] tone bleeding to the
  * slot edge, and rounding it would change the appearance of every consumer already shipping
  * the surface (paint only — a shape on a background never moves layout). Corner radius comes
