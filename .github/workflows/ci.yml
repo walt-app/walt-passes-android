@@ -74,7 +74,12 @@ jobs:
       fail-fast: false
       matrix:
         api: [28, 31, 34, 36]
-    timeout-minutes: 45
+    # Raised from 45 with the third module (wpass-80y.5). Each module is its own emulator
+    # cycle per the note below, so the budget scales with module count, and a timeout kill
+    # renders identically to a real test failure — the one thing this job must not be
+    # ambiguous about. Replace this estimate with the observed wall-clock once a few runs
+    # have landed, so the next module addition has a measurement rather than a guess.
+    timeout-minutes: 70
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -137,16 +142,19 @@ jobs:
       # cannot hide the other's. Scoped to that step rather than `!cancelled()`, which would
       # also run this after a setup step failed and report a confusing second failure.
       - name: Run connected tests (passes-barcode)
-        id: barcode-connected
         if: ${{ success() || steps.storage-connected.conclusion == 'failure' }}
         run: ./gradlew :passes-barcode:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
       # passes-ui carries the wpass-80y.5 face-tint pin, which reads painted pixels and so
-      # cannot run under Robolectric. Same one-module-per-step rule as above: it gets its own
-      # invocation rather than sharing one, and runs when either leg above passed or failed on
-      # its own tests so no module's failure hides another's.
+      # cannot run under Robolectric. Same one-module-per-step rule as above: its own
+      # invocation, not appended to another.
+      #
+      # The condition means "the connected legs actually started" — i.e. setup succeeded —
+      # so a module failure never hides a later module's result. Written against the FIRST
+      # connected step rather than enumerating every prior one, so it stays this size as
+      # modules are added instead of needing a new clause each time.
       - name: Run connected tests (passes-ui)
-        if: ${{ success() || steps.storage-connected.conclusion == 'failure' || steps.barcode-connected.conclusion == 'failure' }}
+        if: ${{ steps.storage-connected.conclusion == 'success' || steps.storage-connected.conclusion == 'failure' }}
         run: ./gradlew :passes-ui:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
       - name: Upload connected test reports

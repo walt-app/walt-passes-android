@@ -73,7 +73,7 @@ class ScannableCardFaceTintInstrumentedTest {
             .that(pixels.any { it == SURFACE.toArgb() })
             .isTrue()
         assertWithMessage("ink must come from the theme, not from inkOn(Color.Transparent)")
-            .that(pixels.any { it isNear ON_SURFACE })
+            .that(pixels.anyNear(ON_SURFACE))
             .isTrue()
     }
 
@@ -106,14 +106,22 @@ class ScannableCardFaceTintInstrumentedTest {
     }
 
     /**
-     * Channel-wise near-match. Flat face paint is compared exactly, but glyph interiors are
-     * antialiased, so an exact ink match would depend on a fully-opaque interior pixel
-     * surviving the renderer's text pipeline — which varies across the API 28..36 matrix.
+     * Whether any pixel is [expected] within [CHANNEL_TOLERANCE] on every channel. Flat face
+     * paint is compared exactly; glyph interiors are antialiased, so an exact ink match would
+     * depend on a fully-opaque interior pixel surviving the renderer's text pipeline, which
+     * varies across the API 28..36 matrix.
      */
-    private infix fun Int.isNear(expected: Color): Boolean {
+    private fun IntArray.anyNear(expected: Color): Boolean {
         val want = expected.toArgb()
-        return listOf(24, 16, 8, 0).all { shift ->
-            abs(((this shr shift) and 0xFF) - ((want shr shift) and 0xFF)) <= CHANNEL_TOLERANCE
+        val wantA = (want ushr 24) and 0xFF
+        val wantR = (want shr 16) and 0xFF
+        val wantG = (want shr 8) and 0xFF
+        val wantB = want and 0xFF
+        return any { pixel ->
+            abs(((pixel ushr 24) and 0xFF) - wantA) <= CHANNEL_TOLERANCE &&
+                abs(((pixel shr 16) and 0xFF) - wantR) <= CHANNEL_TOLERANCE &&
+                abs(((pixel shr 8) and 0xFF) - wantG) <= CHANNEL_TOLERANCE &&
+                abs((pixel and 0xFF) - wantB) <= CHANNEL_TOLERANCE
         }
     }
 
@@ -176,13 +184,18 @@ class ScannableCardFaceTintInstrumentedTest {
     }
 
     private companion object {
-        // Off-palette on purpose: none is a Material default or a 26.08.08 tint. TINT is dark
-        // enough that inkOn flips to white on it, so ON_SURFACE cannot appear in that test.
+        // Off-palette on purpose: none is a Material default or a 26.08.08 tint.
         val SURFACE = Color(0xFF3B2E57)
-        val ON_SURFACE = Color(0xFFF3E9C8)
         val TINT = Color(0xFF14503C)
         val UNUSED = ArgbColor(0xFF000000.toInt())
 
+        // Load-bearing, not decorative. ON_SURFACE is matched with CHANNEL_TOLERANCE slack,
+        // and the wrong answer it must reject is Color.White — what inkOn(Color.Transparent)
+        // returns. A near-white ink would leave the two only a few units apart, so nudging
+        // the tolerance for a flaky API leg would quietly make the assertion pass against the
+        // bug. This mid-tone clears white, black, SURFACE and TINT by at least 83 on every
+        // channel, so the tolerance can move a long way before it means anything.
+        val ON_SURFACE = Color(0xFF91A5AA)
         const val CHANNEL_TOLERANCE = 8
     }
 }
