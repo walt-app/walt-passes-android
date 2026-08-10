@@ -217,15 +217,10 @@ class DocumentFaceTintTest {
     @Test
     fun fullyTransparentTintFallsBackToTheDefaultFrame() {
         // A cleared or not-yet-loaded color must get the documented default frame, not an
-        // unpainted one; the gate is pinned by passes-ui-core's FaceTintTest.
-        //
-        // That the frame ROUTES through it is not pinned here. The frame is a
-        // Modifier.background, so both branches are invisible to the assertions below (which
-        // check only that the surface composes intact). captureToImage() would see it, but
-        // does not work under Robolectric even with @GraphicsMode(NATIVE): its forceRedraw
-        // handshake times out with both createComposeRule and createAndroidComposeRule
-        // (verified, wpass-80y.5). Pixel coverage belongs in androidTest, as
-        // DocumentViewInstrumentedTest already does for page geometry.
+        // unpainted one; the gate is pinned by passes-ui-core's FaceTintTest. That the frame
+        // routes through it is unpinned on this arm — Robolectric cannot capture pixels here,
+        // and there is no on-device counterpart to the scannable arm's face-tint pin
+        // (wpass-3qf).
         assertThat(faceIsTinted(Color.Transparent)).isFalse()
 
         composeRule.setContent {

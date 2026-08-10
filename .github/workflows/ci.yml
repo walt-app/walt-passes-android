@@ -137,8 +137,17 @@ jobs:
       # cannot hide the other's. Scoped to that step rather than `!cancelled()`, which would
       # also run this after a setup step failed and report a confusing second failure.
       - name: Run connected tests (passes-barcode)
+        id: barcode-connected
         if: ${{ success() || steps.storage-connected.conclusion == 'failure' }}
         run: ./gradlew :passes-barcode:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
+
+      # passes-ui carries the wpass-80y.5 face-tint pin, which reads painted pixels and so
+      # cannot run under Robolectric. Same one-module-per-step rule as above: it gets its own
+      # invocation rather than sharing one, and runs when either leg above passed or failed on
+      # its own tests so no module's failure hides another's.
+      - name: Run connected tests (passes-ui)
+        if: ${{ success() || steps.storage-connected.conclusion == 'failure' || steps.barcode-connected.conclusion == 'failure' }}
+        run: ./gradlew :passes-ui:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
       - name: Upload connected test reports
         if: always()
@@ -150,6 +159,8 @@ jobs:
             passes-storage/build/outputs/androidTest-results/
             passes-barcode/build/reports/androidTests/
             passes-barcode/build/outputs/androidTest-results/
+            passes-ui/build/reports/androidTests/
+            passes-ui/build/outputs/androidTest-results/
           if-no-files-found: ignore
 
   dependency-review:

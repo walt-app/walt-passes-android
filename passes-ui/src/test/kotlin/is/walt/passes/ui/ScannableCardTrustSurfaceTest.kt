@@ -327,11 +327,9 @@ class ScannableCardTrustSurfaceTest {
         // a surface that ignores faceTint outright.
         assertThat(facePaint(TEAL, SURFACE, ON_SURFACE, ON_SURFACE_VARIANT).face).isEqualTo(TEAL)
 
-        // That CodeCard actually calls facePaint is not pinned here — both branches paint
-        // something and neither changes the tree. ScannableCardFaceTintInstrumentedTest
-        // carries that pin on-device; captureToImage() cannot do it under Robolectric even
-        // with @GraphicsMode(NATIVE), because its forceRedraw handshake times out (verified,
-        // wpass-80y.5). Below: the surface must still compose intact under a transparent tint.
+        // That CodeCard routes through facePaint is pinned on-device by
+        // ScannableCardFaceTintInstrumentedTest; Robolectric cannot capture pixels here.
+        // Below: the surface must still compose intact under a transparent tint.
         composeRule.setContent {
             ThemedHost {
                 ScannableCardScreen(

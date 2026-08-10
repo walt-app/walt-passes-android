@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -24,25 +25,28 @@ import `is`.walt.passes.ui.theme.PassesSemantics
 import `is`.walt.passes.ui.theme.PassesTheme
 import `is`.walt.passes.ui.theme.SecuritySheetStyle
 import `is`.walt.passes.ui.theme.SignatureBadgeColors
-import `is`.walt.passes.ui.theme.UnverifiedArtifactStyle
+import kotlin.math.abs
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * On-device pin for the one thing the JVM tests cannot observe: that `CodeCard` actually
- * resolves its colors through `facePaint`, rather than re-deriving them inline.
+ * On-device pin that `CodeCard` resolves its colors through `facePaint` — in both
+ * directions. `ScannableCardTrustSurfaceTest` pins `facePaint`'s own output, but both of its
+ * branches paint *something* and neither changes the composition tree, so at the call site
+ * neither re-inlining `faceTint.isSpecified` (reintroducing the wpass-80y.5 bug) nor dropping
+ * `faceTint` entirely (ignoring the consumer's tint) is visible to a composition assertion.
+ * Reading painted pixels is what closes both seams.
  *
- * `ScannableCardTrustSurfaceTest` pins `facePaint`'s output directly, but both of its
- * branches paint *something* and neither changes the composition tree, so re-inlining
- * `faceTint.isSpecified` at the call site would reintroduce the wpass-80y.5 bug with every
- * unit test still green. Reading the painted pixel is what closes that seam, and
- * `captureToImage()` does not work under Robolectric even at `@GraphicsMode(NATIVE)` — its
- * `forceRedraw` handshake times out with both `createComposeRule` and
- * `createAndroidComposeRule`. Same reason `DocumentViewInstrumentedTest` lives here.
+ * This is why the file exists rather than folding into the Robolectric suite:
+ * `captureToImage()` does not work there even at `@GraphicsMode(NATIVE)` — its `forceRedraw`
+ * handshake times out with both `createComposeRule` and `createAndroidComposeRule` (probed,
+ * wpass-80y.5). Same reason `DocumentViewInstrumentedTest` lives in `androidTest`. The
+ * managed-device matrix in `passes-ui/build.gradle.kts` and the connected-tests CI step are
+ * what actually run it; without those this class would assert into a void.
  *
- * The theme deliberately uses colors that appear nowhere else, so a passing assertion cannot
- * be a coincidence of the default palette.
+ * The theme uses colors that appear nowhere else in the palette, so no assertion here can
+ * pass by coincidence of a Material default or a 26.08.08 tint.
  */
 @RunWith(AndroidJUnit4::class)
 class ScannableCardFaceTintInstrumentedTest {
@@ -59,21 +63,58 @@ class ScannableCardFaceTintInstrumentedTest {
         }
         composeRule.waitForIdle()
 
-        // The label node's bounds cover both halves of the bug: glyph pixels are the ink,
-        // the gaps between them are face paint. Under the pre-fix gate the face painted the
-        // transparent tint (so those gaps show the host window, not SURFACE) and inkOn read
-        // luminance 0 off it (so the glyphs come out white, not ON_SURFACE). Each assertion
-        // therefore fails independently against the old gate.
-        val face = composeRule.onNodeWithText("⁨Membership⁩").captureToImage()
-        val pixels = IntArray(face.width * face.height)
-        face.readPixels(pixels)
+        // The label node's bounds cover both halves of the bug: the gaps between glyphs are
+        // face paint, the glyphs themselves are the ink. Under the pre-fix gate the face
+        // painted the transparent tint (so the gaps show the host window, not SURFACE) and
+        // inkOn read luminance 0 off it (so the glyphs come out white, not ON_SURFACE).
+        val pixels = capturedLabelPixels()
 
         assertWithMessage("a transparent faceTint must paint the theme surface, not the tint")
-            .that(pixels.toList())
-            .contains(SURFACE.toArgb())
+            .that(pixels.any { it == SURFACE.toArgb() })
+            .isTrue()
         assertWithMessage("ink must come from the theme, not from inkOn(Color.Transparent)")
-            .that(pixels.toList())
-            .contains(ON_SURFACE.toArgb())
+            .that(pixels.any { it isNear ON_SURFACE })
+            .isTrue()
+    }
+
+    @Test
+    fun opaqueFaceTintReachesTheCardFace() {
+        composeRule.setContent {
+            ThemedHost {
+                ScannableCardScreen(card = qrFixture(), faceTint = TINT)
+            }
+        }
+        composeRule.waitForIdle()
+
+        // The opposite direction from the test above, and it fails against a different
+        // regression: a CodeCard rewritten to ignore faceTint and always take the theme
+        // tokens would keep every other test on this branch green, including that one.
+        val pixels = capturedLabelPixels()
+
+        assertWithMessage("an opaque faceTint must reach the card face")
+            .that(pixels.any { it == TINT.toArgb() })
+            .isTrue()
+        assertWithMessage("a tinted face must not fall back to the theme surface")
+            .that(pixels.any { it == SURFACE.toArgb() })
+            .isFalse()
+    }
+
+    /** Pixels of the label node, whose bounds span face paint and ink. */
+    private fun capturedLabelPixels(): IntArray {
+        val image: ImageBitmap = composeRule.onNodeWithText("⁨Membership⁩").captureToImage()
+        return IntArray(image.width * image.height).also(image::readPixels)
+    }
+
+    /**
+     * Channel-wise near-match. Flat face paint is compared exactly, but glyph interiors are
+     * antialiased, so an exact ink match would depend on a fully-opaque interior pixel
+     * surviving the renderer's text pipeline — which varies across the API 28..36 matrix.
+     */
+    private infix fun Int.isNear(expected: Color): Boolean {
+        val want = expected.toArgb()
+        return listOf(24, 16, 8, 0).all { shift ->
+            abs(((this shr shift) and 0xFF) - ((want shr shift) and 0xFF)) <= CHANNEL_TOLERANCE
+        }
     }
 
     @Composable
@@ -85,8 +126,8 @@ class ScannableCardFaceTintInstrumentedTest {
         }
     }
 
-    // Only unverifiedArtifact matters to this surface; the rest are required constructor
-    // slots filled with values this test never reads.
+    // unverifiedArtifact is left at its Placeholder default — nothing here asserts on the
+    // caption. The rest are required constructor slots this test never reads.
     private val semantics = PassesSemantics(
         signatureBadge = SignatureBadgeColors(
             unsignedBackground = UNUSED,
@@ -119,11 +160,6 @@ class ScannableCardFaceTintInstrumentedTest {
             storeCard = UNUSED,
             generic = UNUSED,
         ),
-        unverifiedArtifact = UnverifiedArtifactStyle(
-            accent = ArgbColor(0xFF8A4A2E.toInt()),
-            captionBackground = ArgbColor(0xFFFFF0E0.toInt()),
-            captionForeground = ArgbColor(0xFF301010.toInt()),
-        ),
     )
 
     private fun qrFixture(): ScannableCard {
@@ -140,9 +176,13 @@ class ScannableCardFaceTintInstrumentedTest {
     }
 
     private companion object {
-        // Off-palette on purpose: neither is a Material default or a 26.08.08 tint.
+        // Off-palette on purpose: none is a Material default or a 26.08.08 tint. TINT is dark
+        // enough that inkOn flips to white on it, so ON_SURFACE cannot appear in that test.
         val SURFACE = Color(0xFF3B2E57)
         val ON_SURFACE = Color(0xFFF3E9C8)
+        val TINT = Color(0xFF14503C)
         val UNUSED = ArgbColor(0xFF000000.toInt())
+
+        const val CHANNEL_TOLERANCE = 8
     }
 }
