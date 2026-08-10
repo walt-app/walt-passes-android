@@ -34,6 +34,7 @@ import `is`.walt.passes.pdf.android.ProbeResult
 import `is`.walt.passes.pdf.android.RenderResult
 import `is`.walt.passes.pdf.android.RenderSourceRect
 import `is`.walt.passes.ui.core.ArgbColor
+import `is`.walt.passes.ui.core.faceIsTinted
 import java.io.File
 import java.util.Collections
 import org.junit.After
@@ -215,15 +216,15 @@ class DocumentFaceTintTest {
 
     @Test
     fun fullyTransparentTintFallsBackToTheDefaultFrame() {
-        // Color.isSpecified is true for Color.Transparent, so the naive gate would take
-        // the tinted branch and paint nothing — a consumer handing over a cleared or
-        // not-yet-loaded color would lose the document-surface tone entirely rather than
-        // get the documented default. Pixel capture is unavailable here, so the pin is on
-        // the resolution itself; the surface must still compose intact either way.
-        assertThat(documentFaceIsTinted(Color.Transparent)).isFalse()
-        assertThat(documentFaceIsTinted(Color.Unspecified)).isFalse()
-        assertThat(documentFaceIsTinted(denim)).isTrue()
-        assertThat(documentFaceIsTinted(denim.copy(alpha = 0.5f))).isTrue()
+        // A consumer handing over a cleared or not-yet-loaded color must get the documented
+        // default frame, not an unpainted one. The gate deciding that is pinned by
+        // passes-ui-core's FaceTintTest; restated here so the expectation reads at the call
+        // site. That the frame actually routes through it is NOT pinned: the frame is a
+        // Modifier.background and pixel capture is unavailable under this Robolectric setup,
+        // so both branches are invisible to the composition assertions below — which check
+        // only that the surface composes intact under a transparent tint. The scannable arm,
+        // where the same gate also picks ink, pins its resolution directly via facePaint.
+        assertThat(faceIsTinted(Color.Transparent)).isFalse()
 
         composeRule.setContent {
             ThemedHost {
