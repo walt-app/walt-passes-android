@@ -41,7 +41,7 @@ internal data class BarcodeDecodeConfig(
     }
 
     /** The scale ladder the symbol decode runs, bounded by this config's slice of the watchdog. */
-    fun ladder(): DecodeLadder = DecodeLadder.STILL_IMAGE.copy(budget = symbolDecodeBudgetMs.milliseconds)
+    val ladder: DecodeLadder = DecodeLadder.STILL_IMAGE.withBudget(symbolDecodeBudgetMs.milliseconds)
 
     companion object {
         /** Catches the large-file bomb shape; mirrors `PdfImportConfig` / storage's 25 MB. */
@@ -61,9 +61,14 @@ internal data class BarcodeDecodeConfig(
 
         /**
          * How much of [DEFAULT_DECODE_TIMEOUT_MS] the multi-scale symbol decode may spend
-         * (wpass-pl7.2), leaving the descriptor read and the codec decode the rest. The ladder
-         * drops its remaining rungs on expiry, so overrunning this costs a "no barcode found"
-         * — overrunning the watchdog would instead cost the whole sandbox.
+         * (wpass-pl7.2), leaving the descriptor read and the codec decode the rest.
+         *
+         * The ladder holds this by declining to start a rung it predicts would not finish inside
+         * the budget, so exceeding it costs a "no barcode found" where exceeding the watchdog
+         * would cost the whole sandbox. It is a self-imposed bound, not a hard one: the ladder's
+         * first rung is unconditional (bounded instead by being the cheapest and fixed-capped),
+         * and a rung's cost is predicted, not known. The gap between the two numbers is what
+         * absorbs both.
          */
         const val DEFAULT_SYMBOL_DECODE_BUDGET_MS: Long = 3_000L
 

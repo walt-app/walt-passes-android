@@ -1,7 +1,9 @@
 package `is`.walt.passes.barcode
 
 import com.google.common.truth.Truth.assertThat
+import com.google.zxing.BarcodeFormat
 import com.google.zxing.LuminanceSource
+import com.google.zxing.MultiFormatWriter
 import com.google.zxing.RGBLuminanceSource
 import com.google.zxing.aztec.encoder.Encoder
 import com.google.zxing.common.BitMatrix
@@ -12,26 +14,26 @@ import kotlin.time.Duration.Companion.milliseconds
 import kotlin.time.Duration.Companion.seconds
 
 /**
- * The wpass-pl7.2 ladder: [decodeLuminance] tries several SCALES of one image, because a single
+ * The wpass-pl7.2 ladder: [decodeLuminance] tries several scales of one image, because a single
  * attempt at the resolution the picker delivers is measurably not enough.
  *
- * Fixtures are SYNTHESISED here rather than committed as images, for the same two reasons as
+ * Fixtures are synthesised here rather than committed as images, for the same two reasons as
  * [ZxingBarcodeSymbolDecoderTest]: the suite stays device-free, and no real boarding pass (whose
  * payload carries passenger name and PNR) enters the repository. [screenshot] reproduces the
- * reported repro's SHAPE — a large Aztec carrying per-pixel screenshot/compression noise on a
+ * reported repro's shape — a large Aztec carrying per-pixel screenshot/compression noise on a
  * 1080x2340 phone canvas — which fails at native resolution and reads once area-averaged down.
  * [photo] is the opposite shape and the reason the ladder keeps a near-native rung: a small
  * symbol inside a 4000x3000 camera photo, which the downscale rungs destroy.
  *
  * Both shapes were found by measurement (the sweep recorded on wpass-pl7.2), not by intuition:
- * decodability is NOT monotonic in scale, so these fixtures pin the ladder that was measured to
+ * decodability is not monotonic in scale, so these fixtures pin the ladder that was measured to
  * cover both, and any future edit to [DecodeLadder.STILL_IMAGE] has to keep clearing them.
  */
 class DecodeLadderTest {
     @Test
     fun noisyScreenshotFailsAtNativeResolution() {
         // Establishes that the fixture reproduces the reported defect rather than passing
-        // trivially: this IS the pre-ladder behaviour, and it is what the live path still runs.
+        // trivially: this is the pre-ladder behaviour, and it is what the live path still runs.
         assertThat(decodeLuminance(screenshot(), DecodeLadder.SINGLE_ATTEMPT))
             .isEqualTo(BarcodeDecodeResult.NoBarcodeFound)
     }
@@ -78,7 +80,7 @@ class DecodeLadderTest {
     @Test
     fun theLargestRungIsCappedSoABombIsNotDecodedAtFullArea() {
         // 50 MP is what the caller's header caps allow through. Capping the last rung is what
-        // makes the ladder CHEAPER than the single uncapped attempt it replaces.
+        // makes the ladder cheaper than the single uncapped attempt it replaces.
         val rungs = rungSizes(12_000, 4_166, DecodeLadder.STILL_IMAGE)
 
         assertThat(rungs.maxOf { it.width.toLong() * it.height }).isLessThan(6_000_000L)
@@ -94,14 +96,14 @@ class DecodeLadderTest {
         // A device slower than the one the caps were measured on must degrade to "no barcode",
         // not to a decode its caller's watchdog kills. Only the first (downscaled) rung runs, and
         // this fixture needs a later one, so the budget is observable in the result.
-        val impatient = DecodeLadder.STILL_IMAGE.copy(budget = 1.milliseconds)
+        val impatient = DecodeLadder.STILL_IMAGE.withBudget(1.milliseconds)
 
         assertThat(decodeLuminance(photo(), impatient)).isEqualTo(BarcodeDecodeResult.NoBarcodeFound)
     }
 
     @Test
     fun theFirstRungAlwaysRunsEvenOnASpentBudget() {
-        assertThat(decodeLuminance(screenshot(), DecodeLadder.STILL_IMAGE.copy(budget = 1.milliseconds)))
+        assertThat(decodeLuminance(screenshot(), DecodeLadder.STILL_IMAGE.withBudget(1.milliseconds)))
             .isEqualTo(BarcodeDecodeResult.DecodedBarcode(PAYLOAD, ScannableFormat.Aztec))
     }
 
@@ -115,6 +117,26 @@ class DecodeLadderTest {
     fun aNonPositiveBudgetIsRejected() {
         assertThat(runCatching { DecodeLadder(listOf(1600), (-1).milliseconds) }.exceptionOrNull())
             .isInstanceOf(IllegalArgumentException::class.java)
+    }
+
+    @Test
+    fun rotatedOneDimensionalSymbolSurvivesEveryRungResampling() {
+        // Every rung resamples once the source passes the largest cap, and a resampled rung that
+        // does not support rotation costs OneDReader its 90-degree retry — silently, since the
+        // upright case still passes. 12 MP phone photos (4032x3024, 4080x3072) are over that cap,
+        // so this is the dominant camera input for the 1D loyalty-card case.
+        val rotated = rotatedCode128(width = 4200, height = 3200)
+
+        assertThat(decodeLuminance(rotated))
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode(CODE_128_PAYLOAD, ScannableFormat.Code128))
+    }
+
+    @Test
+    fun scaledRungsCarryZxingsOwnRotateAndCropSupport() {
+        val scaled = scaledTo(ByteArray(16), srcWidth = 4, srcHeight = 4, width = 2, height = 2)
+
+        assertThat(scaled.isRotateSupported).isTrue()
+        assertThat(scaled.isCropSupported).isTrue()
     }
 
     @Test
@@ -133,6 +155,28 @@ class DecodeLadderTest {
 
     /** A 4000x3000 camera photo of a small, clean Aztec — the shape downscaling would destroy. */
     private fun photo(): RGBLuminanceSource = compose(width = 4000, height = 3000, modulePx = 4, noise = 0)
+
+    /** A Code 128 turned 90 degrees (bars running vertically) on a canvas past every rung's cap. */
+    private fun rotatedCode128(
+        width: Int,
+        height: Int,
+    ): RGBLuminanceSource {
+        val symbol = MultiFormatWriter().encode(CODE_128_PAYLOAD, BarcodeFormat.CODE_128, 600, 200)
+        val symbolWidth = symbol.height * MODULE_SCALE
+        val symbolHeight = symbol.width * MODULE_SCALE
+        val left = (width - symbolWidth) / 2
+        val top = (height - symbolHeight) / 2
+        val pixels = IntArray(width * height) { gray(255) }
+        for (y in 0 until symbolHeight) {
+            for (x in 0 until symbolWidth) {
+                // The quarter turn: canvas (x, y) reads the symbol at (y, x).
+                if (symbol.get(y / MODULE_SCALE, x / MODULE_SCALE)) {
+                    pixels[(top + y) * width + (left + x)] = gray(0)
+                }
+            }
+        }
+        return RGBLuminanceSource(width, height, pixels)
+    }
 
     /**
      * Centre an Aztec of [modulePx]-sized modules on a white canvas and perturb every pixel by up
@@ -190,5 +234,11 @@ class DecodeLadderTest {
 
         /** Encoded once at one module per pixel; [compose] scales it up to the fixture's size. */
         val SYMBOL: BitMatrix = Encoder.encode(PAYLOAD, 33, 0).matrix
+
+        /** A 1D payload: four of the seven roster formats are 1D, and none reached a scaled rung. */
+        const val CODE_128_PAYLOAD: String = "LOYALTY-ABC-123"
+
+        /** Pixels per module for the 1D fixture, enough to survive the downscale rungs. */
+        const val MODULE_SCALE: Int = 3
     }
 }

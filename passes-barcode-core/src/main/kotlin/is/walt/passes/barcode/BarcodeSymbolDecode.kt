@@ -11,6 +11,7 @@ import com.google.zxing.common.HybridBinarizer
 import `is`.walt.passes.core.BarcodeDecodeResult
 import `is`.walt.passes.core.DecodeFailureReason
 import `is`.walt.passes.core.ScannableFormat
+import kotlin.time.Duration
 import kotlin.time.TimeSource
 
 /**
@@ -43,7 +44,7 @@ import kotlin.time.TimeSource
  * symbol-like region was found but could not be decoded cleanly, reported honestly as
  * no usable barcode rather than a fabricated payload.
  *
- * One attempt at the source's own resolution is not enough, so [ladder] decides which SCALES of
+ * One attempt at the source's own resolution is not enough, so [ladder] decides which scales of
  * the image are tried and bounds the total spend — see [DecodeLadder] for why the caps make the
  * worst case cheaper rather than dearer. "No locatable symbol" is only reported once every rung
  * has said so.
@@ -54,11 +55,13 @@ public fun decodeLuminance(
 ): BarcodeDecodeResult {
     val started = TimeSource.Monotonic.markNow()
     var luminances: ByteArray? = null
+    var previous: RungCost? = null
 
-    for ((index, rung) in rungSizes(source.width, source.height, ladder).withIndex()) {
-        // The first rung always runs; later ones are dropped once the budget is spent so a slow
-        // device degrades to "no barcode" rather than to a sandbox its caller's watchdog kills.
-        if (index > 0 && started.elapsedNow() >= ladder.budget) break
+    for (rung in rungSizes(source.width, source.height, ladder)) {
+        // The first rung always runs; a later one starts only if it is predicted to finish inside
+        // the budget, so a slow device degrades to "no barcode" rather than to a sandbox its
+        // caller's watchdog kills mid-rung.
+        if (previous != null && !fits(rung, previous, started.elapsedNow(), ladder.budget)) break
 
         val view =
             if (rung.width == source.width && rung.height == source.height) {
@@ -71,10 +74,32 @@ public fun decodeLuminance(
         // Only "no locatable symbol" is worth another rung. A symbol found in a format outside
         // the roster is terminal: the allowlist is a policy statement, and re-reading the same
         // image at another scale until it gives a different answer would blunt it.
+        val rungStarted = TimeSource.Monotonic.markNow()
         val result = decodeOnce(view)
         if (result != BarcodeDecodeResult.NoBarcodeFound) return result
+        previous = RungCost(rung.area, rungStarted.elapsedNow())
     }
     return BarcodeDecodeResult.NoBarcodeFound
+}
+
+/** What the last rung cost, the basis for predicting what the next one will. */
+private class RungCost(val area: Long, val duration: Duration)
+
+/**
+ * Whether [rung] is predicted to complete within [budget], given [elapsed] already spent and what
+ * [previous] cost. ZXing's work is close to linear in pixel count, so the previous rung's measured
+ * cost scaled by the area ratio is a good enough estimate — and being approximate is fine in this
+ * direction: the budget exists to keep the ladder clear of a watchdog set well above it, not to
+ * schedule to the millisecond.
+ */
+private fun fits(
+    rung: RungSize,
+    previous: RungCost,
+    elapsed: Duration,
+    budget: Duration,
+): Boolean {
+    val estimate = previous.duration * (rung.area.toDouble() / previous.area)
+    return elapsed + estimate <= budget
 }
 
 /** One binarize-and-read pass over exactly the pixels [source] presents. */
