@@ -41,7 +41,7 @@ import kotlin.coroutines.cancellation.CancellationException
 public class BarcodeDecodeService : Service() {
     private val config: BarcodeDecodeConfig = BarcodeDecodeConfig()
     private val watchdog: DecodeWatchdog = DecodeWatchdog(config.decodeTimeoutMs)
-    private val symbolDecoder: BarcodeSymbolDecoder = ZxingBarcodeSymbolDecoder()
+    private val symbolDecoder: BarcodeSymbolDecoder = ZxingBarcodeSymbolDecoder(config.ladder())
 
     override fun onCreate() {
         super.onCreate()

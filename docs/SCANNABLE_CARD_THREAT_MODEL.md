@@ -748,6 +748,22 @@ consumer's `confirmBarcode(payload, format)` gate is, and it is
 format-agnostic — it fires for every decoded symbology, including the two new
 ones, and preserves the decoded format verbatim rather than normalising it.
 
+**The scale ladder narrows the decode-cost surface it widens (`wpass-pl7.2`).**
+Roster growth alone did not make the reported screenshot decode: ZXing refuses
+it at the resolution the picker delivers and reads it immediately once the image
+is area-averaged down, so `decodeLuminance` now tries several scales of one
+image instead of one. More attempts per image is more CPU per hostile image, and
+the budget it spends is the same one `DecodeWatchdog` kills the sandbox over — so
+the ladder is bounded at both ends. Every rung caps the longest side, *including
+the largest*, which is the substantive change: decode cost stops scaling with a
+hostile image's area, and the 50 MP canvas the header caps still admit is now
+decoded at roughly 5 MP — measurably cheaper than the single uncapped attempt it
+replaces. A wall-clock budget (`DecodeLadder.budget`, a fraction of
+`decodeTimeoutMs` and checked against it at construction) drops the remaining
+rungs on a device slower than the one the caps were measured on, so the failure
+mode under load is "no barcode found" rather than a killed process. The live
+path keeps its single attempt per frame: its retry is the next frame.
+
 The image-codec RCE class is the kernel's to contain (isolated process); the
 manual-snap "system camera, never CameraX `ImageCapture`" rule and the
 confirmation surfaces are the consumer's, recorded in walt-android

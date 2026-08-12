@@ -12,9 +12,14 @@ import `is`.walt.passes.core.BarcodeDecodeResult
  * extracts the Y plane from its `ImageProxy` / `ImageAnalysis` frame and passes raw bytes plus the
  * plane geometry in; the module stays KMP-friendly (`ByteArray` + `Int` only). The contract is
  * identical to the static path: the [ScannableFormat][`is`.walt.passes.core.ScannableFormat] roster
- * is enforced (PDF417/Aztec rejected), the payload is returned FAITHFULLY, and the result is only
- * [BarcodeDecodeResult] — `{payload, format}`, `NoBarcodeFound`, or `DecodeFailed`. Nothing here
- * interprets, classifies, or validates the bytes.
+ * is enforced, the payload is returned FAITHFULLY, and the result is only [BarcodeDecodeResult] —
+ * `{payload, format}`, `NoBarcodeFound`, or `DecodeFailed`. Nothing here interprets, classifies, or
+ * validates the bytes.
+ *
+ * ### One attempt per frame
+ * The scale ladder the still-image path runs ([DecodeLadder.STILL_IMAGE]) is deliberately NOT used
+ * here: a live frame's retry is the next frame, so re-decoding this one at further scales would
+ * spend an analysis budget that is already tight (wpass-pl7.3) on an image about to be replaced.
  *
  * ### Stride handling (ZXing #1387)
  * An Android YUV_420_888 Y plane is rarely densely packed. Two HAL realities have to be stripped
@@ -82,7 +87,7 @@ public fun decodeYPlane(
             height,
             reverseHorizontal,
         )
-    return decodeLuminance(source)
+    return decodeLuminance(source, DecodeLadder.SINGLE_ATTEMPT)
 }
 
 /** Collapse a row/pixel-strided Y plane into a dense `width * height` luminance buffer. */

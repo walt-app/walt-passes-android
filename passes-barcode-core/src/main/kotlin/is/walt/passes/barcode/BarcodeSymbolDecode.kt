@@ -11,6 +11,7 @@ import com.google.zxing.common.HybridBinarizer
 import `is`.walt.passes.core.BarcodeDecodeResult
 import `is`.walt.passes.core.DecodeFailureReason
 import `is`.walt.passes.core.ScannableFormat
+import kotlin.time.TimeSource
 
 /**
  * The pure-JVM ZXing symbol decode (wpass-zrt.4): reads a barcode off a [LuminanceSource] and
@@ -41,8 +42,43 @@ import `is`.walt.passes.core.ScannableFormat
  * [BarcodeDecodeResult.NoBarcodeFound]; a [ReaderException] (checksum/format) means a
  * symbol-like region was found but could not be decoded cleanly, reported honestly as
  * no usable barcode rather than a fabricated payload.
+ *
+ * One attempt at the source's own resolution is not enough, so [ladder] decides which SCALES of
+ * the image are tried and bounds the total spend — see [DecodeLadder] for why the caps make the
+ * worst case cheaper rather than dearer. "No locatable symbol" is only reported once every rung
+ * has said so.
  */
-public fun decodeLuminance(source: LuminanceSource): BarcodeDecodeResult {
+public fun decodeLuminance(
+    source: LuminanceSource,
+    ladder: DecodeLadder = DecodeLadder.STILL_IMAGE,
+): BarcodeDecodeResult {
+    val started = TimeSource.Monotonic.markNow()
+    var luminances: ByteArray? = null
+
+    for ((index, rung) in rungSizes(source.width, source.height, ladder).withIndex()) {
+        // The first rung always runs; later ones are dropped once the budget is spent so a slow
+        // device degrades to "no barcode" rather than to a sandbox its caller's watchdog kills.
+        if (index > 0 && started.elapsedNow() >= ladder.budget) break
+
+        val view =
+            if (rung.width == source.width && rung.height == source.height) {
+                source
+            } else {
+                val full = luminances ?: source.matrix.also { luminances = it }
+                scaledTo(full, source.width, source.height, rung.width, rung.height)
+            }
+
+        // Only "no locatable symbol" is worth another rung. A symbol found in a format outside
+        // the roster is terminal: the allowlist is a policy statement, and re-reading the same
+        // image at another scale until it gives a different answer would blunt it.
+        val result = decodeOnce(view)
+        if (result != BarcodeDecodeResult.NoBarcodeFound) return result
+    }
+    return BarcodeDecodeResult.NoBarcodeFound
+}
+
+/** One binarize-and-read pass over exactly the pixels [source] presents. */
+private fun decodeOnce(source: LuminanceSource): BarcodeDecodeResult {
     val binary = BinaryBitmap(HybridBinarizer(source))
     return try {
         val result = MultiFormatReader().decode(binary, DECODE_HINTS)

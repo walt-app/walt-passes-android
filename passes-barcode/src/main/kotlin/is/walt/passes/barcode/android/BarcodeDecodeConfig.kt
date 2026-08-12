@@ -1,5 +1,8 @@
 package `is`.walt.passes.barcode.android
 
+import `is`.walt.passes.barcode.DecodeLadder
+import kotlin.time.Duration.Companion.milliseconds
+
 /**
  * Defensive caps for the bounded image decode that runs inside the `:barcodeDecoder`
  * sandbox (wpass-zrt.3). The image-codec step is the dominant RCE surface (CVE-2023-4863
@@ -11,7 +14,8 @@ package `is`.walt.passes.barcode.android
  * checked from the decoded *header* (via `ImageDecoder.OnHeaderDecodedListener`) before the
  * backing bitmap is allocated; [allowedMimeTypes] rejects containers outside the still-image
  * roster at the same header step; [decodeTimeoutMs] is the watchdog budget that bounds a
- * slow-loris descriptor and terminates the sandbox on expiry ([DecodeWatchdog]).
+ * slow-loris descriptor and terminates the sandbox on expiry ([DecodeWatchdog]);
+ * [symbolDecodeBudgetMs] is the slice of that budget the scale ladder may spend.
  *
  * Every field here is enforced INSIDE the sandbox. [decodeTimeoutMs] is additionally read by the
  * host, which compares elapsed time against it to attribute a dropped binder — see
@@ -26,8 +30,19 @@ internal data class BarcodeDecodeConfig(
     val maxDimensionPx: Int = DEFAULT_MAX_DIMENSION_PX,
     val maxAreaPx: Long = DEFAULT_MAX_AREA_PX,
     val decodeTimeoutMs: Long = DEFAULT_DECODE_TIMEOUT_MS,
+    val symbolDecodeBudgetMs: Long = DEFAULT_SYMBOL_DECODE_BUDGET_MS,
     val allowedMimeTypes: Set<String> = DEFAULT_ALLOWED_MIME_TYPES,
 ) {
+    init {
+        require(symbolDecodeBudgetMs < decodeTimeoutMs) {
+            "The symbol-decode budget ($symbolDecodeBudgetMs ms) must leave the read and codec " +
+                "decode room inside the watchdog timeout ($decodeTimeoutMs ms)."
+        }
+    }
+
+    /** The scale ladder the symbol decode runs, bounded by this config's slice of the watchdog. */
+    fun ladder(): DecodeLadder = DecodeLadder.STILL_IMAGE.copy(budget = symbolDecodeBudgetMs.milliseconds)
+
     companion object {
         /** Catches the large-file bomb shape; mirrors `PdfImportConfig` / storage's 25 MB. */
         const val DEFAULT_MAX_BYTES: Long = 25L * 1024 * 1024
@@ -43,6 +58,14 @@ internal data class BarcodeDecodeConfig(
 
         /** Decode wall-clock budget; on expiry [DecodeWatchdog] kills the sandbox (slow-loris guard). */
         const val DEFAULT_DECODE_TIMEOUT_MS: Long = 5_000L
+
+        /**
+         * How much of [DEFAULT_DECODE_TIMEOUT_MS] the multi-scale symbol decode may spend
+         * (wpass-pl7.2), leaving the descriptor read and the codec decode the rest. The ladder
+         * drops its remaining rungs on expiry, so overrunning this costs a "no barcode found"
+         * — overrunning the watchdog would instead cost the whole sandbox.
+         */
+        const val DEFAULT_SYMBOL_DECODE_BUDGET_MS: Long = 3_000L
 
         /** Still-image containers a card photo realistically arrives in; others are refused before decode. */
         val DEFAULT_ALLOWED_MIME_TYPES: Set<String> =
