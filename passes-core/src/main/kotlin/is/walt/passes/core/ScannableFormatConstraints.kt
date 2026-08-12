@@ -10,6 +10,14 @@ package `is`.walt.passes.core
  * live in [ScannableCardInputValidator] because they apply uniformly across all formats.
  */
 internal object ScannableFormatConstraints {
+    /**
+     * Roster members this build decodes but cannot render: wpass-pl7.1 added them to the decode
+     * allowlist, and the writer arms land in wpass-pl7.6. Read by BOTH the validator (refuses to
+     * mint a card) and the encoder (refuses to encode) so the two cannot drift into a state where
+     * a card is creatable but unrenderable. wpass-pl7.6 empties this set.
+     */
+    val decodeOnly: Set<ScannableFormat> = setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)
+
     /** Soft cap on payload length per symbology. Numeric symbologies use their exact length. */
     fun maxPayloadLength(format: ScannableFormat): Int =
         when (format) {

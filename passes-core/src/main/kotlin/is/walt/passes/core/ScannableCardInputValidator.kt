@@ -10,9 +10,11 @@ package `is`.walt.passes.core
  * tests are deterministic. The validator only judges field content; it does not allocate
  * identity or time.
  *
- * Fail-fast: returns the first violation found. Label trimmed first (a whitespace-only
- * label is empty for users), then payload (trim, empty, bidi/control, length, charset,
- * structural). Both trimmed values land on the resulting [ScannableCard].
+ * Fail-fast: returns the first violation found. Format capability first (it depends on the
+ * build, not on what the user typed, so reporting a charset error for a format that cannot
+ * render either way would misdirect), then label (a whitespace-only label is empty for
+ * users), then payload (trim, empty, bidi/control, length, charset, structural). Both
+ * trimmed values land on the resulting [ScannableCard].
  */
 public object ScannableCardInputValidator {
     /** Display-friendly cap. Long enough for any realistic card name, short enough to render. */
@@ -26,6 +28,14 @@ public object ScannableCardInputValidator {
         id: ScannableCardId,
         createdAt: PassInstant,
     ): ScannableCardCreateResult {
+        // The choke point that keeps a decode-only format from becoming a card nothing can
+        // render. Enforced here rather than left to each consumer's format picker: walt-android
+        // builds its picker from ScannableFormat.entries, so a roster addition would otherwise
+        // appear as a selectable chip with no one having decided it should.
+        if (input.format in ScannableFormatConstraints.decodeOnly) {
+            return ScannableCardCreateResult.UnsupportedFormat(input.format)
+        }
+
         val trimmedLabel = input.label.trim()
         validateLabel(trimmedLabel)?.let { return ScannableCardCreateResult.InvalidLabel(it) }
 

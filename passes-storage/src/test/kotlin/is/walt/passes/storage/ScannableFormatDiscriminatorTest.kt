@@ -59,7 +59,8 @@ class ScannableFormatDiscriminatorTest {
         assertThat(lookUp("aztec")).isNull()
     }
 
-    /** Mirrors the store's private cursor lookup; kept in step by the tests above. */
+    // Mirrors SqlCipherScannableCardStore.kt:121. A switch to a throwing valueOf there would
+    // not fail here — the device tests are the only place that catches it.
     private fun lookUp(stored: String): ScannableFormat? =
         ScannableFormat.entries.firstOrNull { it.name == stored }
 }

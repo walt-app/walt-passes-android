@@ -34,13 +34,14 @@ import `is`.walt.passes.ui.internal.toMonochromeBitmap
 /**
  * Renders [card]'s barcode through [BarcodeEncoder] as a 1-bit-per-module bitmap.
  * Minimum on-screen sizes mirror [BarcodeView] so the two barcode surfaces are
- * consistent at gate distance: 240 dp square for QR, 320 dp x 96 dp for the four
- * 1D symbologies. Painted with `FilterQuality.None` so the per-module upscale stays
- * nearest-neighbor and module edges remain sharp.
+ * consistent at gate distance: 240 dp square for the square 2D symbologies,
+ * 320 dp x 96 dp for the 1D ones. Painted with `FilterQuality.None` so the
+ * per-module upscale stays nearest-neighbor and module edges remain sharp.
  *
- * `contentScale` differs per format. QR uses [ContentScale.Fit] because its matrix
- * is square and [ContentScale.FillBounds] would distort it if the slot is non-square.
- * The four 1D symbologies use [ContentScale.FillBounds] because [BarcodeEncoder]
+ * `contentScale` differs per format. The 2D symbologies use [ContentScale.Fit]
+ * because they carry data on both axes, so [ContentScale.FillBounds] would corrupt
+ * the symbol in a slot of the wrong aspect.
+ * The 1D symbologies use [ContentScale.FillBounds] because [BarcodeEncoder]
  * emits their matrices at the symbology's natural minimum — exactly one module tall
  * (see `ZxingBarcodeEncoder.writeMatrix`) — and `Fit` against a ~200:1 painter
  * intrinsic ratio collapses the painted height to a few pixels in a normal-aspect
@@ -148,7 +149,8 @@ private fun BarcodeImage(
 /** Per-symbology min on-screen size in dp. Mirrors [BarcodeView] for gate consistency. */
 private fun ScannableFormat.minRenderSizeDp(): Pair<Int, Int> = when (this) {
     ScannableFormat.Qr, ScannableFormat.Aztec -> 240 to 240
-    // Stacked 2D: as wide as the 1D floor, but taller — its rows carry data.
+    // Taller floor than the 1D row so the stacked rows are not collapsed. Provisional:
+    // wpass-pl7.6 verifies it against the writer's actual aspect ratio.
     ScannableFormat.Pdf417 -> 320 to 120
     ScannableFormat.Code128,
     ScannableFormat.Ean13,

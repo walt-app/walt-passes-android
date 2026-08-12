@@ -24,11 +24,9 @@ import `is`.walt.passes.core.ScannableFormat
  * fork.
  *
  * Symbology ALLOWLIST, not "decode everything": [DECODE_HINTS] pins the reader to exactly the
- * [ScannableFormat] roster Walt renders. DataMatrix and the rest are deliberately not enabled —
- * restricting the reader narrows both the work and the parser surface a hostile image can reach.
- * PDF417 and Aztec joined the allowlist in wpass-pl7.1: they are the two dominant boarding-pass
- * and ID symbologies, and without them an imported boarding-pass screenshot is undecodable at
- * any input scale.
+ * [ScannableFormat] roster. DataMatrix and the rest are deliberately not enabled — restricting
+ * the reader narrows both the work and the parser surface a hostile image can reach. PDF417 and
+ * Aztec joined in wpass-pl7.1, for boarding passes.
  *
  * Because the reader can only return a format already in the allowlist, the out-of-roster
  * [DecodeFailureReason.UnsupportedBarcodeFormat] arm is a defensive guard the pinned hints make

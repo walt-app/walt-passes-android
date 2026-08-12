@@ -349,13 +349,21 @@ Pattern source: `B3UrlConfirmSheet` in `passes-ui/src/main/kotlin/.../SecuritySh
 
 **C4 forward obligation (`wpass-pl7.6`).** PDF417 and Aztec are byte-capable and
 can carry the same actionable URIs, so this gate must widen to them when they
-become creatable. It is not a gap today: `wpass-pl7.1` added them to the *decode*
-roster only, and the encoder refuses both with
-`EncoderFailureReason.FormatNotEncodable`, so no such card can be created or
-rendered in this build. The gate trigger is `QrPayloadKind`-scoped
-(`requiresCreateConfirmation()` takes no format), which is what makes widening a
-deliberate edit rather than something the compiler would have surfaced — hence
-recording it here.
+become creatable. It is not a gap today, and the reason is enforcement rather
+than convention: `wpass-pl7.1` added them to the *decode* roster only, and
+`ScannableCardInputValidator` returns
+`ScannableCardCreateResult.UnsupportedFormat` for both, so no such card can be
+minted, persisted, or rendered in this build. The refusal lives at the kernel
+choke point on purpose — consumers build their format pickers from
+`ScannableFormat.entries` (walt-android's `CreateScannableCardScreen` does), so
+a roster addition would otherwise surface as a selectable chip that nobody
+decided to offer. `ScannableFormatConstraints.decodeOnly` is the single set both
+the validator and the encoder read, so the two cannot drift.
+
+The gate trigger itself is `QrPayloadKind`-scoped (`requiresCreateConfirmation()`
+takes no format argument), so widening it is a deliberate edit that no compiler
+error will prompt — which is why it is recorded here and on `wpass-pl7.6`'s
+acceptance rather than left to be noticed.
 
 **C5. ZXing-JVM as encoder only; no runtime decoding of untrusted bytes.**
 The kernel uses `com.google.zxing:core` (Apache 2.0, pure JVM) exclusively to

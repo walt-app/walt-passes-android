@@ -90,7 +90,7 @@ internal object ZxingBarcodeEncoder {
         format: ScannableFormat,
     ): EncoderFailureReason? =
         when {
-            format == ScannableFormat.Pdf417 || format == ScannableFormat.Aztec ->
+            format in ScannableFormatConstraints.decodeOnly ->
                 EncoderFailureReason.FormatNotEncodable(format)
             format == ScannableFormat.Qr &&
                 payload.any { !ScannableFormatConstraints.isQrAlphanumericChar(it) } &&

@@ -149,6 +149,34 @@ class ScannableCardRepositoryTest {
     }
 
     @Test
+    fun createWithADecodeOnlyFormatIsRejectedAndPersistsNothing() = runTest {
+        // Aztec decodes but has no writer until wpass-pl7.6. Persisting the row would leave a
+        // card that renders as the failure placeholder forever, so the kernel refuses it here
+        // rather than relying on every consumer's format picker to omit the chip.
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val result = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = "WALT-CHECK-1",
+                format = ScannableFormat.Aztec,
+                label = "Boarding pass",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        assertThat(rejected.reason)
+            .isEqualTo(ScannableCardRejectionReason.UnsupportedFormat(ScannableFormat.Aztec))
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-rejected:FormatUnsupported",
+        ).inOrder()
+        assertThat(repo.observeScannableCards().first()).isEmpty()
+    }
+
+    @Test
     fun deleteRemovesRowFromObserveFlowAndEmitsDeletedTelemetryAfter() = runTest {
         val cards = FakeScannableCardStore()
         val telemetry = RecordingGuard()
