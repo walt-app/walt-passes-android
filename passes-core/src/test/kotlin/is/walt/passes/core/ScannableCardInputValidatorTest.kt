@@ -68,6 +68,18 @@ class ScannableCardInputValidatorTest {
     }
 
     @Test
+    fun isCreatableAgreesWithWhatTheValidatorAccepts() {
+        // The predicate consumers filter their format picker on must not drift from the gate it
+        // is meant to predict. Payload validity is irrelevant here: a creatable format with a
+        // bad payload reports InvalidPayload, never UnsupportedFormat.
+        for (format in ScannableFormat.entries) {
+            val refused = validate("WALT-CHECK-1", format) is ScannableCardCreateResult.UnsupportedFormat
+
+            assertThat(format.isCreatable()).isEqualTo(!refused)
+        }
+    }
+
+    @Test
     fun decodeOnlyRefusalOutranksPayloadAndLabelProblems() {
         // The format is unusable regardless of what was typed, so reporting a charset or label
         // error would send the user to fix the wrong field.

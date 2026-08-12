@@ -39,3 +39,18 @@ public enum class ScannableFormat {
     Pdf417,
     Aztec,
 }
+
+/**
+ * Whether a user can create a [ScannableCard] in this format — which is to say whether this
+ * build can render one. False only for the decode-only members ([Pdf417] / [Aztec] until
+ * wpass-pl7.6 wires their writers).
+ *
+ * **Consumers building a format picker must filter on this.** The picker cannot be derived from
+ * [ScannableFormat.entries] alone: [ScannableCardInputValidator] refuses a non-creatable format
+ * with [ScannableCardCreateResult.UnsupportedFormat], so an unfiltered picker offers a choice
+ * whose Save fails on every tap. Exposed rather than left implicit because nothing about adding
+ * a decode-only member breaks a consumer's build — the failure is silent by construction.
+ *
+ * Backed by the same set the validator and encoder read, so the three cannot disagree.
+ */
+public fun ScannableFormat.isCreatable(): Boolean = this !in ScannableFormatConstraints.decodeOnly

@@ -285,6 +285,46 @@ class ScannableCardRepositoryTest {
     }
 
     @Test
+    fun updateToADecodeOnlyFormatIsRejectedAndStoredRowIsUnchanged() = runTest {
+        // Edit shares the create gate. Without this the format could be switched to one that
+        // cannot render, turning an existing working card into a blank one.
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val seed = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = "5012345678900",
+                format = ScannableFormat.Ean13,
+                label = "seed",
+            ),
+        )
+        check(seed is StorageResult.Success)
+
+        val result = repo.updateScannableCard(
+            seed.value,
+            ScannableCardCreateInput(
+                payload = "5012345678900",
+                format = ScannableFormat.Pdf417,
+                label = "seed",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        assertThat(rejected.reason)
+            .isEqualTo(ScannableCardRejectionReason.UnsupportedFormat(ScannableFormat.Pdf417))
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-created:Ean13",
+            "card-rejected:FormatUnsupported",
+        ).inOrder()
+        val rows = repo.observeScannableCards().first()
+        assertThat(rows).hasSize(1)
+        assertThat(rows[0].format).isEqualTo(ScannableFormat.Ean13)
+    }
+
+    @Test
     fun updateWithControlCharInPayloadIsRejectedAndStoredRowIsUnchanged() = runTest {
         val cards = FakeScannableCardStore()
         val telemetry = RecordingGuard()

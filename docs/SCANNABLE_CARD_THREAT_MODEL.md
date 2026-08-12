@@ -329,14 +329,15 @@ per-format charset rules (EAN-13 / UPC-A numeric only, Code39 limited
 alphanumeric, Code128 the printable ASCII subset; QR, PDF417 and Aztec are
 byte-capable and admit any character), and Unicode Cf (Format) / Cc (Control)
 codepoint rejection in both `payload` and `label`. The Cf/Cc rejection runs
-before the per-format rules, so it covers the byte-capable formats too.
+before the per-format rules, so it covers the byte-capable formats too, and
+mirrors the discipline that `FieldLinkScanner.kt:67` and the PDF document-label
+path already enforce.
 
 The PDF417 and Aztec caps (`wpass-pl7.1`) were set to hold at any plausible
 error-correction level, because the level itself is not pinned until the writer
 arms land in `wpass-pl7.6`. That bead must re-derive them against its own pin:
 a cap the validator accepts but the encoder cannot fit converts a clean
-`InvalidPayload(TooLong)` rejection into a blank render. The Cf/Cc rejection mirrors the discipline that
-`FieldLinkScanner.kt:67` and the PDF document-label path already enforce.
+`InvalidPayload(TooLong)` rejection into a blank render.
 
 **C4. Create-time URI-scheme preview for QR.** When the user creates a QR
 ScannableCard, `passes-core`'s URI-scheme classifier inspects the payload
@@ -826,7 +827,7 @@ can trace back here.
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
 | C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb`'s wallet-row pins (`scannableCardRowTileHasExactlyFourUserVisibleParameters`, `rowTileDoesNotRenderTrustCaption`, `rowTileRendersFormatSubtitle`) were removed with the concession and the composable in `wpass-80y.4`; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged`; `wpass-80y.5` pins the shared tint gate with `passes-ui-core`'s `FaceTintTest` plus `fullyTransparentTintFallsBackToTheDefaultFace` (scannable face and ink resolution, via `facePaint`) and `…DefaultFrame` (document arm composes intact) |
-| C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests); `wpass-pl7.1` adds the PDF417 / Aztec cap and byte-capable-charset cases (`pdf417TooLong`, `aztecTooLong`, `pdf417AndAztecHappyPathAcceptsUtf8`, `aztecAcceptsABoardingPassLengthPayload`) |
+| C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests); `wpass-pl7.1` pins the decode-only refusal at the create boundary (`decodeOnlyFormatsAreRefusedAtTheCreateBoundary`, `decodeOnlyRefusalOutranksPayloadAndLabelProblems`, `isCreatableAgreesWithWhatTheValidatorAccepts`, and `createWithADecodeOnlyFormatIsRejectedAndPersistsNothing` end-to-end in `passes-storage`) plus the PDF417 / Aztec cap and byte-capable-charset rules in `ScannableFormatConstraintsTest` |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |
 | C6      | `wpass-lzi.2` (schema snapshot — no `secret`/`hmac`/`totp` fields permitted) |

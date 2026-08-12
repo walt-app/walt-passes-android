@@ -50,8 +50,13 @@ class ScannableFormatConstraintsTest {
     fun byteCapableFormatsAdmitAnyVisibleCharacter() {
         // Pdf417 and Aztec share Qr's "any character" rule; the bidi / control screen upstream in
         // the validator is what excludes the hazardous ones, not this per-format charset.
+        // isAllowedChar takes a Char, i.e. a UTF-16 code unit, so an astral codepoint reaches it
+        // as its two surrogates — included deliberately, since that is how an emoji payload
+        // actually arrives.
+        val surrogates = "👍" // U+1F44D, one high + one low surrogate
+        check(surrogates.length == 2)
         for (format in setOf(ScannableFormat.Qr, ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
-            for (char in "bag-drop/é/👍М1") {
+            for (char in "bag-drop/é/М1" + surrogates) {
                 assertThat(ScannableFormatConstraints.isAllowedChar(format, char)).isTrue()
             }
         }
