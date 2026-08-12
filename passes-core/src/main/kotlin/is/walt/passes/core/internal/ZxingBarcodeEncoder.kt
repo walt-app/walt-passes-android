@@ -19,10 +19,16 @@ import com.google.zxing.BarcodeFormat as ZxingFormat
 /**
  * ZXing-backed implementation of the kernel's barcode encoder. Per-format writers
  * (`Code128Writer`, `EAN13Writer`, `UPCAWriter`, `Code39Writer`, `QRCodeWriter`) are used
- * instead of `MultiFormatWriter` so the v1 roster of [ScannableFormat] is enforced at the
+ * instead of `MultiFormatWriter` so the roster of [ScannableFormat] is enforced at the
  * dispatch site: adding a format here is the only path that lets a new symbology reach the
  * encoder. The intermediate `MultiFormatWriter` would silently accept anything ZXing
  * supports, including formats the validator has not been taught to gate.
+ *
+ * **Pdf417 and Aztec decode but do not yet encode.** They joined the decode roster in
+ * wpass-pl7.1 and are refused here as [EncoderFailureReason.FormatNotEncodable] until
+ * wpass-pl7.6 wires `PDF417Writer` / `AztecWriter` with scan-verified EC and compaction
+ * defaults. That gap is why the dispatch is per-format: `MultiFormatWriter` would have
+ * silently emitted an unverified symbol for both the moment the enum grew.
  *
  * Hidden behind [BarcodeEncoder]; this object is package-internal so consumers cannot
  * reach for ZXing types directly.
@@ -45,21 +51,7 @@ internal object ZxingBarcodeEncoder {
         payload: String,
         format: ScannableFormat,
     ): EncodeResult {
-        // Proactive PayloadTooDense check for QR. Gated by the alphanumeric-mode membership
-        // test: a payload that fits QR's numeric or alphanumeric mode has a much larger
-        // capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs
-        // 2,331 bytes), and ZXing's QRCodeWriter auto-selects the densest fitting mode.
-        // Pre-rejecting such payloads against the byte-mode ceiling would over-reject;
-        // instead, for anything outside the alphanumeric set the encoding must use byte
-        // mode and the byte-count check applies. UTF-8 because byte-mode capacity is in
-        // bytes (a payload of "é" × 1500 is 3000 bytes). The "Data too big" message match
-        // in translateFailure stays as belt-and-suspenders for dense alphanumeric/numeric
-        // payloads that still overflow at v40.
-        if (format == ScannableFormat.Qr && payload.any { !ScannableFormatConstraints.isQrAlphanumericChar(it) } &&
-            payload.toByteArray(Charsets.UTF_8).size > ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M_BYTE_MODE
-        ) {
-            return EncodeResult.Failure(EncoderFailureReason.PayloadTooDense)
-        }
+        refuseBeforeWriter(payload, format)?.let { return EncodeResult.Failure(it) }
         // runCatching absorbs anything ZXing throws — including the plain
         // NullPointerException / ArrayIndexOutOfBoundsException its hand-rolled writers do
         // raise on some edge inputs — and funnels it into EncodeResult.Failure to honor the
@@ -79,6 +71,35 @@ internal object ZxingBarcodeEncoder {
             )
     }
 
+    /**
+     * The two refusals that are decided without running a writer, or null to proceed.
+     *
+     * Pdf417/Aztec are decode-only in this build (see the class KDoc). The QR check is a
+     * proactive [EncoderFailureReason.PayloadTooDense], gated by the alphanumeric-mode
+     * membership test: a payload that fits QR's numeric or alphanumeric mode has a much larger
+     * capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs 2,331
+     * bytes), and ZXing's QRCodeWriter auto-selects the densest fitting mode, so pre-rejecting
+     * such payloads against the byte-mode ceiling would over-reject. Anything outside the
+     * alphanumeric set must use byte mode, where the byte-count check applies — UTF-8 because
+     * byte-mode capacity is in bytes (a payload of "é" × 1500 is 3000 bytes). The "Data too
+     * big" message match in [translateFailure] stays as belt-and-suspenders for dense
+     * alphanumeric/numeric payloads that still overflow at v40.
+     */
+    private fun refuseBeforeWriter(
+        payload: String,
+        format: ScannableFormat,
+    ): EncoderFailureReason? =
+        when {
+            format in ScannableFormatConstraints.decodeOnly ->
+                EncoderFailureReason.FormatNotEncodable(format)
+            format == ScannableFormat.Qr &&
+                payload.any { !ScannableFormatConstraints.isQrAlphanumericChar(it) } &&
+                payload.toByteArray(Charsets.UTF_8).size >
+                ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M_BYTE_MODE ->
+                EncoderFailureReason.PayloadTooDense
+            else -> null
+        }
+
     private fun writeMatrix(
         payload: String,
         format: ScannableFormat,
@@ -93,6 +114,9 @@ internal object ZxingBarcodeEncoder {
                 ScannableFormat.Ean13 -> EAN13Writer().encode(payload, ZxingFormat.EAN_13, 0, 0)
                 ScannableFormat.UpcA -> UPCAWriter().encode(payload, ZxingFormat.UPC_A, 0, 0)
                 ScannableFormat.Qr -> QRCodeWriter().encode(payload, ZxingFormat.QR_CODE, 0, 0, qrHints)
+                // Unreachable: encode() refuses these before dispatching. No payload in the
+                // message — the format name alone is enough to diagnose a lost guard.
+                ScannableFormat.Pdf417, ScannableFormat.Aztec -> error("No writer wired for $format")
             }
         return bitMatrix.toBarcodeMatrix()
     }

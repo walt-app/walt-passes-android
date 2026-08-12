@@ -30,7 +30,8 @@ import org.junit.Test
  *    including the boundary where `rowStride == width * pixelStride`;
  *  - **failure arms** — a blank plane (no locatable symbol) and a located-but-ECC-exceeded symbol
  *    both surface as the honest [BarcodeDecodeResult.NoBarcodeFound], never a fabricated payload;
- *  - **allowlist** — a non-roster symbology (PDF417, Aztec) is not decoded;
+ *  - **allowlist** — the 2D roster members (PDF417, Aztec) decode, while a non-roster symbology
+ *    (DataMatrix) does not;
  *  - **geometry preconditions** — the [decodeYPlane] `require` guards reject malformed caller wiring
  *    (non-positive dims, `pixelStride < 1`, `rowStride < width * pixelStride`, undersized buffer)
  *    with [IllegalArgumentException] rather than widening the result surface.
@@ -146,16 +147,23 @@ class YPlaneFrameDecodeTest {
     // --- Allowlist (non-roster symbologies rejected) --------------------------------------------
 
     @Test
-    fun pdf417IsNotDecodedThroughYPlane() {
-        // PDF417 is intentionally absent from the v1 roster, so the pinned POSSIBLE_FORMATS hints
-        // never run a PDF417 decoder: a genuine PDF417 symbol reads as no locatable barcode.
-        assertThat(decodeNonRoster("BOARDING-PASS-PAYLOAD", BarcodeFormat.PDF_417))
-            .isEqualTo(BarcodeDecodeResult.NoBarcodeFound)
+    fun pdf417DecodesThroughYPlane() {
+        assertThat(decodeAtSize("WALT-LIVE-PDF417", BarcodeFormat.PDF_417, 600, 300))
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode("WALT-LIVE-PDF417", ScannableFormat.Pdf417))
     }
 
     @Test
-    fun aztecIsNotDecodedThroughYPlane() {
-        assertThat(decodeNonRoster("BOARDING-PASS-PAYLOAD", BarcodeFormat.AZTEC))
+    fun aztecDecodesThroughYPlane() {
+        assertThat(decodeAtSize("WALT-LIVE-AZTEC", BarcodeFormat.AZTEC, 300, 300))
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode("WALT-LIVE-AZTEC", ScannableFormat.Aztec))
+    }
+
+    @Test
+    fun dataMatrixIsNotDecodedThroughYPlane() {
+        // DataMatrix is deliberately out of the roster (wpass-pl7 scope decision), so the pinned
+        // POSSIBLE_FORMATS hints never run a DataMatrix decoder. Rendered at a size the roster
+        // symbologies above decode cleanly at, so the miss is the allowlist and not the scale.
+        assertThat(decodeAtSize("NOT-IN-ROSTER", BarcodeFormat.DATA_MATRIX, 300, 300))
             .isEqualTo(BarcodeDecodeResult.NoBarcodeFound)
     }
 
@@ -275,12 +283,14 @@ class YPlaneFrameDecodeTest {
         return decodeYPlane(interleaved, tight.width, tight.height, rowStride, pixelStride)
     }
 
-    /** Render a non-roster [format] symbol into a tight luminance plane and decode it. */
-    private fun decodeNonRoster(
+    /** Render [format] at the requested size into a tight luminance plane and decode it. */
+    private fun decodeAtSize(
         content: String,
         format: BarcodeFormat,
+        width: Int,
+        height: Int,
     ): BarcodeDecodeResult {
-        val plane = encodeYPlane(content, format, 0, 0, rowPadding = 0)
+        val plane = encodeYPlane(content, format, width, height, rowPadding = 0)
         return decodeYPlane(plane.bytes, plane.width, plane.height, rowStride = plane.width)
     }
 

@@ -52,6 +52,43 @@ class ScannableCardInputValidatorTest {
         assertSuccessWithPayload(result, "https://example.org/é/👍")
     }
 
+    // ---- decode-only formats ----
+
+    @Test
+    fun decodeOnlyFormatsAreRefusedAtTheCreateBoundary() {
+        // Pdf417/Aztec decode but have no writer until wpass-pl7.6, so a card in either would
+        // render as the failure placeholder forever. The validator is the choke point that
+        // stops one being minted — consumers build format pickers from ScannableFormat.entries,
+        // so nothing downstream would otherwise refuse it.
+        for (format in setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
+            val result = validate("WALT-CHECK-1", format)
+
+            assertThat(result).isEqualTo(ScannableCardCreateResult.UnsupportedFormat(format))
+        }
+    }
+
+    @Test
+    fun isCreatableAgreesWithWhatTheValidatorAccepts() {
+        // The predicate consumers filter their format picker on must not drift from the gate it
+        // is meant to predict. Payload validity is irrelevant here: a creatable format with a
+        // bad payload reports InvalidPayload, never UnsupportedFormat.
+        for (format in ScannableFormat.entries) {
+            val refused = validate("WALT-CHECK-1", format) is ScannableCardCreateResult.UnsupportedFormat
+
+            assertThat(format.isCreatable()).isEqualTo(!refused)
+        }
+    }
+
+    @Test
+    fun decodeOnlyRefusalOutranksPayloadAndLabelProblems() {
+        // The format is unusable regardless of what was typed, so reporting a charset or label
+        // error would send the user to fix the wrong field.
+        val result = validateInput("x".repeat(1501), ScannableFormat.Aztec, label = "")
+
+        assertThat(result)
+            .isEqualTo(ScannableCardCreateResult.UnsupportedFormat(ScannableFormat.Aztec))
+    }
+
     // ---- length caps ----
 
     @Test

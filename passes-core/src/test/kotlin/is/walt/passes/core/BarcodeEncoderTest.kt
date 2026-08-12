@@ -103,11 +103,25 @@ class BarcodeEncoderTest {
         // Locks no-throw AND per-format dispatch correctness in one test. Asserts on
         // WriterRejected.format specifically; PayloadTooDense is not a plausible arm for an
         // empty input (zero bytes can never exceed any ceiling).
-        for (format in ScannableFormat.entries) {
+        for (format in ScannableFormat.entries - notEncodable) {
             val result = BarcodeEncoder.encode("", format)
             val reason = (result as EncodeResult.Failure).reason
             assertThat(reason).isInstanceOf(EncoderFailureReason.WriterRejected::class.java)
             assertThat((reason as EncoderFailureReason.WriterRejected).format).isEqualTo(format)
+        }
+    }
+
+    @Test
+    fun decodeOnlyFormatsReportFormatNotEncodable() {
+        // Pdf417/Aztec decode but have no writer until wpass-pl7.6. The refusal must be the
+        // dedicated build-capability arm, not WriterRejected — a consumer that reads
+        // WriterRejected would tell the user to shorten a payload that was never the problem.
+        // Asserted on a valid payload so this cannot pass for the empty-input reason above.
+        for (format in notEncodable) {
+            val result = BarcodeEncoder.encode("WALT-CHECK-1", format)
+
+            assertThat((result as EncodeResult.Failure).reason)
+                .isEqualTo(EncoderFailureReason.FormatNotEncodable(format))
         }
     }
 
@@ -166,6 +180,9 @@ class BarcodeEncoderTest {
         val different = (BarcodeEncoder.encode("XYZ", ScannableFormat.Code128) as EncodeResult.Success).matrix
         assertThat(a).isNotEqualTo(different)
     }
+
+    /** Roster members that decode but do not yet encode; wpass-pl7.6 empties this set. */
+    private val notEncodable = setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)
 
     private fun anyModuleSet(matrix: BarcodeMatrix): Boolean {
         for (y in 0 until matrix.height) {

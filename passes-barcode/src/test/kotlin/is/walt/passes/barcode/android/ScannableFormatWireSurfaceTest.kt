@@ -22,6 +22,8 @@ class ScannableFormatWireSurfaceTest {
                 ScannableFormat.UpcA to ScannableFormatWire.UPC_A,
                 ScannableFormat.Code39 to ScannableFormatWire.CODE_39,
                 ScannableFormat.Qr to ScannableFormatWire.QR,
+                ScannableFormat.Pdf417 to ScannableFormatWire.PDF_417,
+                ScannableFormat.Aztec to ScannableFormatWire.AZTEC,
             )
         for ((format, code) in expected) {
             assertThat(ScannableFormatWire.encode(format)).isEqualTo(code)
@@ -43,6 +45,8 @@ class ScannableFormatWireSurfaceTest {
         assertThat(ScannableFormatWire.UPC_A).isEqualTo(2)
         assertThat(ScannableFormatWire.CODE_39).isEqualTo(3)
         assertThat(ScannableFormatWire.QR).isEqualTo(4)
+        assertThat(ScannableFormatWire.PDF_417).isEqualTo(5)
+        assertThat(ScannableFormatWire.AZTEC).isEqualTo(6)
     }
 
     @Test

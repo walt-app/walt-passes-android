@@ -42,9 +42,10 @@ import `is`.walt.passes.ui.internal.toMonochromeBitmap
  *    quiet-zone modules at natural size; the fixed white inner padding on top
  *    guarantees a visible quiet zone even when the consumer's tile hugs the code.
  *  - **Sharp modules.** Nearest-neighbor upscale ([FilterQuality.None]), matching
- *    [ScannableCardView]. QR paints [ContentScale.Fit] (square matrix, no
- *    distortion); the 1D symbologies paint [ContentScale.FillBounds] because their
- *    matrices are one module tall and carry no data on the vertical axis.
+ *    [ScannableCardView]. The 2D symbologies paint [ContentScale.Fit] (data on both
+ *    axes, so a non-uniform stretch corrupts the symbol); the 1D symbologies paint
+ *    [ContentScale.FillBounds] because their matrices are one module tall and carry
+ *    no data on the vertical axis.
  *
  * Sizing is the caller's: pass the tile size via [modifier] (the small
  * `defaultMinSize` floor only guards against a collapsed, unscannable render).
@@ -117,7 +118,8 @@ public fun CompactCodeView(
  * the tile, they are not a scannability promise at arbitrary sizes.
  */
 private fun ScannableFormat.compactMinSizeDp(): Pair<Int, Int> = when (this) {
-    ScannableFormat.Qr -> 48 to 48
+    ScannableFormat.Qr, ScannableFormat.Aztec -> 48 to 48
+    ScannableFormat.Pdf417 -> 96 to 40
     ScannableFormat.Code128,
     ScannableFormat.Ean13,
     ScannableFormat.UpcA,

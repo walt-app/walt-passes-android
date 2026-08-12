@@ -22,6 +22,8 @@ internal object ScannableFormatWire {
     const val UPC_A: Int = 2
     const val CODE_39: Int = 3
     const val QR: Int = 4
+    const val PDF_417: Int = 5
+    const val AZTEC: Int = 6
 
     fun encode(format: ScannableFormat): Int =
         when (format) {
@@ -30,6 +32,8 @@ internal object ScannableFormatWire {
             ScannableFormat.UpcA -> UPC_A
             ScannableFormat.Code39 -> CODE_39
             ScannableFormat.Qr -> QR
+            ScannableFormat.Pdf417 -> PDF_417
+            ScannableFormat.Aztec -> AZTEC
         }
 
     fun decode(code: Int): ScannableFormat =
@@ -39,6 +43,8 @@ internal object ScannableFormatWire {
             UPC_A -> ScannableFormat.UpcA
             CODE_39 -> ScannableFormat.Code39
             QR -> ScannableFormat.Qr
+            PDF_417 -> ScannableFormat.Pdf417
+            AZTEC -> ScannableFormat.Aztec
             else -> error("Unknown ScannableFormat wire code: $code")
         }
 }

@@ -17,8 +17,12 @@ import org.junit.Test
  *
  * What these assert:
  *  - every [ScannableFormat] in the roster decodes back to its payload + format faithfully;
- *  - the symbology allowlist holds — a format OUTSIDE the roster (PDF417) is not decoded;
+ *  - the symbology allowlist holds — a format OUTSIDE the roster (DataMatrix) is not decoded;
  *  - a clean image with no symbol is the honest [BarcodeDecodeResult.NoBarcodeFound].
+ *
+ * Fixtures are ENCODED IN-TEST rather than committed as images. That keeps the suite
+ * device-free, and it keeps real boarding-pass payloads — which carry passenger name and PNR
+ * (wpass-pl7) — out of the repository: the 2D cases below use synthetic strings only.
  */
 class ZxingBarcodeSymbolDecoderTest {
     @Test
@@ -64,11 +68,40 @@ class ZxingBarcodeSymbolDecoderTest {
     }
 
     @Test
+    fun pdf417RoundTrips() {
+        val source = encode("WALT-PDF417-CHECK", BarcodeFormat.PDF_417, 600, 300)
+
+        assertThat(decodeLuminance(source))
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode("WALT-PDF417-CHECK", ScannableFormat.Pdf417))
+    }
+
+    @Test
+    fun aztecRoundTrips() {
+        val source = encode("WALT-AZTEC-CHECK", BarcodeFormat.AZTEC, 300, 300)
+
+        assertThat(decodeLuminance(source))
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode("WALT-AZTEC-CHECK", ScannableFormat.Aztec))
+    }
+
+    @Test
+    fun aztecDecodesAtBcbpPayloadLength() {
+        // The wpass-pl7 repro is an Aztec carrying a ~126-character IATA BCBP string. Shape and
+        // length are what matter to the decoder, so this stands in a synthetic string of the
+        // same size rather than a real boarding pass (those payloads are PII).
+        val payload = "M1WALT/TEST".padEnd(126, 'X')
+        val source = encode(payload, BarcodeFormat.AZTEC, 400, 400)
+
+        assertThat(decodeLuminance(source))
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode(payload, ScannableFormat.Aztec))
+    }
+
+    @Test
     fun formatOutsideRosterIsNotDecoded() {
-        // PDF417 is intentionally absent from the v1 roster. With POSSIBLE_FORMATS pinned to
-        // the allowlist, the reader never tries a PDF417 decoder, so a genuine PDF417 symbol
-        // reads as no locatable barcode — proving the allowlist, not blind decode-everything.
-        val source = encode("BOARDING-PASS-PAYLOAD", BarcodeFormat.PDF_417, 600, 300)
+        // DataMatrix is deliberately out of the roster (wpass-pl7 scope decision). With
+        // POSSIBLE_FORMATS pinned to the allowlist, the reader never tries a DataMatrix
+        // decoder, so a genuine DataMatrix symbol reads as no locatable barcode — proving the
+        // allowlist, not blind decode-everything.
+        val source = encode("NOT-IN-ROSTER", BarcodeFormat.DATA_MATRIX, 300, 300)
 
         assertThat(decodeLuminance(source)).isEqualTo(BarcodeDecodeResult.NoBarcodeFound)
     }

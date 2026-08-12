@@ -24,8 +24,10 @@ import `is`.walt.passes.core.ScannableFormat
  * fork.
  *
  * Symbology ALLOWLIST, not "decode everything": [DECODE_HINTS] pins the reader to exactly the
- * [ScannableFormat] roster Walt renders. PDF417/Aztec and the rest are deliberately not enabled —
- * restricting the reader narrows both the work and the parser surface a hostile image can reach.
+ * [ScannableFormat] roster. DataMatrix and the rest are deliberately not enabled — restricting
+ * the reader narrows both the work and the parser surface a hostile image can reach. PDF417 and
+ * Aztec joined in wpass-pl7.1, for boarding passes.
+ *
  * Because the reader can only return a format already in the allowlist, the out-of-roster
  * [DecodeFailureReason.UnsupportedBarcodeFormat] arm is a defensive guard the pinned hints make
  * unreachable in practice; it exists so a later hint change can't silently force an unsupported
@@ -56,7 +58,11 @@ public fun decodeLuminance(source: LuminanceSource): BarcodeDecodeResult {
     }
 }
 
-/** The symbology allowlist: ZXing format → the [ScannableFormat] Walt renders. */
+/**
+ * The symbology allowlist: ZXing format → the [ScannableFormat] it maps to. Its width is a
+ * threat-model input (parser surface and misread ambiguity, Threat 14); changing it means
+ * changing `docs/SCANNABLE_CARD_THREAT_MODEL.md` alongside.
+ */
 private val ROSTER_BY_ZXING_FORMAT: Map<BarcodeFormat, ScannableFormat> =
     mapOf(
         BarcodeFormat.CODE_128 to ScannableFormat.Code128,
@@ -64,6 +70,8 @@ private val ROSTER_BY_ZXING_FORMAT: Map<BarcodeFormat, ScannableFormat> =
         BarcodeFormat.UPC_A to ScannableFormat.UpcA,
         BarcodeFormat.CODE_39 to ScannableFormat.Code39,
         BarcodeFormat.QR_CODE to ScannableFormat.Qr,
+        BarcodeFormat.PDF_417 to ScannableFormat.Pdf417,
+        BarcodeFormat.AZTEC to ScannableFormat.Aztec,
     )
 
 /**

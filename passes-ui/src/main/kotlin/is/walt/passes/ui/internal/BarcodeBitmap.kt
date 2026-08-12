@@ -13,13 +13,18 @@ import `is`.walt.passes.core.ScannableFormat
 internal const val BARCODE_RENDER_FAILURE_DESCRIPTION: String = "Barcode failed to render"
 
 /**
- * Per-symbology paint scale shared by ScannableCardView and CompactCodeView. QR uses
- * [ContentScale.Fit] (square matrix; FillBounds would distort in a non-square slot);
- * the 1D symbologies use [ContentScale.FillBounds] because their matrices are one
- * module tall and carry no data on the vertical axis. See ScannableCardView's KDoc.
+ * Per-symbology paint scale shared by ScannableCardView and CompactCodeView. The 2D
+ * symbologies use [ContentScale.Fit] because they carry data on BOTH axes, so a
+ * non-uniform stretch corrupts the symbol — true for Pdf417's stacked rows just as much
+ * as for the square Qr and Aztec matrices, despite Pdf417's wide aspect ratio. The 1D
+ * symbologies use [ContentScale.FillBounds] because their matrices are one module tall
+ * and carry no data on the vertical axis. See ScannableCardView's KDoc.
  */
 internal fun ScannableFormat.barcodeContentScale(): ContentScale = when (this) {
-    ScannableFormat.Qr -> ContentScale.Fit
+    ScannableFormat.Qr,
+    ScannableFormat.Aztec,
+    ScannableFormat.Pdf417,
+    -> ContentScale.Fit
     ScannableFormat.Code128,
     ScannableFormat.Ean13,
     ScannableFormat.UpcA,
