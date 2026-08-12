@@ -324,10 +324,18 @@ the audited `Docked | HostedTypeRow` choice, pinned by
 **C3. Input hygiene at the create boundary.** `passes-core` validates
 `ScannableCardCreateInput` for: per-format length caps (Code128 ~80 chars,
 EAN-13 / UPC-A fixed-length with checksum, QR per-version cap with a
-conservative ~2000-char ceiling), per-format charset rules (EAN-13 / UPC-A
-numeric only, Code39 limited alphanumeric, Code128 the printable ASCII subset),
-and Unicode Cf (Format) / Cc (Control) codepoint rejection in both `payload`
-and `label`. The Cf/Cc rejection mirrors the discipline that
+conservative ~2000-char ceiling, PDF417 ~800 chars, Aztec ~1500 chars),
+per-format charset rules (EAN-13 / UPC-A numeric only, Code39 limited
+alphanumeric, Code128 the printable ASCII subset; QR, PDF417 and Aztec are
+byte-capable and admit any character), and Unicode Cf (Format) / Cc (Control)
+codepoint rejection in both `payload` and `label`. The Cf/Cc rejection runs
+before the per-format rules, so it covers the byte-capable formats too.
+
+The PDF417 and Aztec caps (`wpass-pl7.1`) were set to hold at any plausible
+error-correction level, because the level itself is not pinned until the writer
+arms land in `wpass-pl7.6`. That bead must re-derive them against its own pin:
+a cap the validator accepts but the encoder cannot fit converts a clean
+`InvalidPayload(TooLong)` rejection into a blank render. The Cf/Cc rejection mirrors the discipline that
 `FieldLinkScanner.kt:67` and the PDF document-label path already enforce.
 
 **C4. Create-time URI-scheme preview for QR.** When the user creates a QR
@@ -338,6 +346,16 @@ match (or a "looks URI-shaped but unrecognized scheme" fallback) raises the
 walt-android-side confirmation dialog before the row is persisted. The user
 must explicitly confirm "yes, this QR is meant to encode an actionable URI."
 Pattern source: `B3UrlConfirmSheet` in `passes-ui/src/main/kotlin/.../SecuritySheets.kt`.
+
+**C4 forward obligation (`wpass-pl7.6`).** PDF417 and Aztec are byte-capable and
+can carry the same actionable URIs, so this gate must widen to them when they
+become creatable. It is not a gap today: `wpass-pl7.1` added them to the *decode*
+roster only, and the encoder refuses both with
+`EncoderFailureReason.FormatNotEncodable`, so no such card can be created or
+rendered in this build. The gate trigger is `QrPayloadKind`-scoped
+(`requiresCreateConfirmation()` takes no format), which is what makes widening a
+deliberate edit rather than something the compiler would have surfaced — hence
+recording it here.
 
 **C5. ZXing-JVM as encoder only; no runtime decoding of untrusted bytes.**
 The kernel uses `com.google.zxing:core` (Apache 2.0, pure JVM) exclusively to
@@ -501,8 +519,10 @@ fast (<50ms for typical payloads) but degrades visibly at the upper end.
 **Mitigation.** C3: per-format payload caps codified in `passes-core` and
 returned as `InvalidPayload(TooLong)` before the encoder runs. Conservative
 ceilings: Code128 80 chars, EAN-13 / UPC-A fixed by format, Code39 80 chars,
-QR ~2000 chars. The 2000-char QR ceiling sits well below format max but well
-above any realistic library / loyalty / URL payload.
+QR ~2000 chars, PDF417 800 chars, Aztec 1500 chars. Every ceiling sits well
+below its format max but well above any realistic library / loyalty / URL
+payload — for the two 2D additions the sizing case is a boarding pass, whose
+IATA BCBP string runs ~60 characters per leg.
 
 **Status.** Mitigated by hard caps. Caps are enforced in `passes-core` (first
 line) and `passes-storage` (second line, as a row-level constraint, defense
@@ -530,6 +550,11 @@ are no longer informational: apply the same 30-day cadence to decoder CVEs that
 are reachable from `decodeYPlane` / `BarcodeImageDecoder`. The blast radius of a
 *static*-path decoder bug is contained to the isolated process (C5 amendment),
 which lowers severity but does not remove the upgrade obligation.
+
+**Widened by `wpass-pl7.1`.** The reachable decoder set grew from five
+symbologies to seven: `AztecReader` and `PDF417Reader`, with their own
+detector and error-correction code, are now invoked on both decode paths.
+Advisories against either are in scope for the same 30-day cadence.
 
 **Status.** Mitigated by surface reduction (C5) and a stated cadence; the
 upgrade-cadence bead is the follow-up artifact.
@@ -695,6 +720,24 @@ system, neither of which existed for the type-it-yourself ScannableCard:
 - **Transient camera stills are swept** to one-at-most in the consumer's cache
   (`wlt-noq5`); the persisted image lives only in SQLCipher (Threats 7, 8
   inherited).
+- **The symbology allowlist bounds both sub-threats.** `DECODE_HINTS` pins
+  `POSSIBLE_FORMATS` to exactly the `ScannableFormat` roster, so a hostile image
+  can only reach the parsers for symbologies Walt actually renders, and the
+  reader has correspondingly fewer candidate interpretations to confuse. The
+  allowlist is the reason both risks scale with roster size rather than with
+  ZXing's full format list.
+
+**Roster growth is a deliberate re-weighting of this threat (`wpass-pl7.1`).**
+Adding PDF417 and Aztec widens the reachable parser surface by two symbologies
+and gives the reader two more candidate interpretations of an ambiguous region.
+Accepted because the alternative was worse: without them an imported
+boarding-pass screenshot — the single most-reported import — decodes to nothing
+at any input scale, and the user gets no scannable code at all. DataMatrix stays
+out for exactly this reason, having no reported need to pay for. The misread
+half of the risk is bounded as above: decode is not the trust boundary, the
+consumer's `confirmBarcode(payload, format)` gate is, and it is
+format-agnostic — it fires for every decoded symbology, including the two new
+ones, and preserves the decoded format verbatim rather than normalising it.
 
 The image-codec RCE class is the kernel's to contain (isolated process); the
 manual-snap "system camera, never CameraX `ImageCapture`" rule and the
@@ -775,7 +818,7 @@ can trace back here.
 |---------|--------------------------------------------|
 | C1      | `wpass-lzi.2` (data model surface test), `wpass-lzi.6` (separate table assertion), `wpass-lzi.8` (separate-lane composable test) |
 | C2      | `wpass-lzi.8` (non-suppressible caption test, ≥2-distinct-elements snapshot); `wpass-pnb`'s wallet-row pins (`scannableCardRowTileHasExactlyFourUserVisibleParameters`, `rowTileDoesNotRenderTrustCaption`, `rowTileRendersFormatSubtitle`) were removed with the concession and the composable in `wpass-80y.4`; `wpass-gv6` adds `scannableCardScreenHasExactlyFiveUserVisibleParameters` (four at the time; `wpass-80y.1`'s `faceTint` bumped it) + `scannableCardScreenTrustCaptionParamIsThePlacementType` (placement is the audited carrier-of-provenance choice, not a Boolean) and `fullScreenHostedTypeRowOmitsKernelCaption` / `hostedTypeRowStillRendersBarcodeAndPayloadCaption` to pin the "Pass type" row concession; the consumer-side pin (Walt details section renders a "Pass type" row) lives in walt-android `wlt-3cer`; `wpass-80y` pins the colour-is-not-trust row with `ScannableCardTrustSurfaceTest.faceTintDoesNotSuppressBarcodeLabelPayloadOrTrustCaption` (+ its dark-tint twin), `codePanelIsLiterallyWhiteNotAThemeTokenOrTheFaceTint`, `inkOnClearsWcagAaAgainstEveryTintIncludingTheWorstCase`, and `DocumentFaceTintTest.faceTintDoesNotSuppressTheTrustCaptionOnEitherArm` / `faceTintLeavesThePageRenderRequestUnchanged`; `wpass-80y.5` pins the shared tint gate with `passes-ui-core`'s `FaceTintTest` plus `fullyTransparentTintFallsBackToTheDefaultFace` (scannable face and ink resolution, via `facePaint`) and `…DefaultFrame` (document arm composes intact) |
-| C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests)             |
+| C3      | `wpass-lzi.4` (length caps, charset, Cf/Cc rejection unit tests); `wpass-pl7.1` adds the PDF417 / Aztec cap and byte-capable-charset cases (`pdf417TooLong`, `aztecTooLong`, `pdf417AndAztecHappyPathAcceptsUtf8`, `aztecAcceptsABoardingPassLengthPayload`) |
 | C4      | `wpass-lzi.5` (URI classifier unit tests), `wpass-lzi.9` (dialog gating test) |
 | C5      | `wpass-lzi.3` (encoder integration). C5 amendment (wpass-7rv): the original "decoder not in dependency closure" build assertion no longer holds — decode confinement is pinned instead by the isolated-decode tests (`BarcodeDecodeServiceInstrumentedTest`, `YPlaneFrameDecodeTest`) and, consumer-side, by walt-android `CompositeImportInstrumentedTest` (no host-process decode of source bytes) + `CameraScanSecurityGuardTest` (no CameraX `ImageCapture` in `src/main`) |
 | C6      | `wpass-lzi.2` (schema snapshot — no `secret`/`hmac`/`totp` fields permitted) |

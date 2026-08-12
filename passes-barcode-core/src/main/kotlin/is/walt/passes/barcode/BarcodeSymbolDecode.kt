@@ -60,7 +60,11 @@ public fun decodeLuminance(source: LuminanceSource): BarcodeDecodeResult {
     }
 }
 
-/** The symbology allowlist: ZXing format → the [ScannableFormat] Walt renders. */
+/**
+ * The symbology allowlist: ZXing format → the [ScannableFormat] Walt renders. Its width is a
+ * threat-model input (parser surface and misread ambiguity, Threat 14); changing it means
+ * changing `docs/SCANNABLE_CARD_THREAT_MODEL.md` alongside.
+ */
 private val ROSTER_BY_ZXING_FORMAT: Map<BarcodeFormat, ScannableFormat> =
     mapOf(
         BarcodeFormat.CODE_128 to ScannableFormat.Code128,
