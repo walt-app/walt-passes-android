@@ -117,7 +117,8 @@ public fun CompactCodeView(
  * the tile, they are not a scannability promise at arbitrary sizes.
  */
 private fun ScannableFormat.compactMinSizeDp(): Pair<Int, Int> = when (this) {
-    ScannableFormat.Qr -> 48 to 48
+    ScannableFormat.Qr, ScannableFormat.Aztec -> 48 to 48
+    ScannableFormat.Pdf417 -> 96 to 40
     ScannableFormat.Code128,
     ScannableFormat.Ean13,
     ScannableFormat.UpcA,

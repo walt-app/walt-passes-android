@@ -612,6 +612,8 @@ class PublicApiSurfaceTest {
                 ScannableFormat.Ean13 -> "ean13"
                 ScannableFormat.UpcA -> "upca"
                 ScannableFormat.Code39 -> "code39"
+                ScannableFormat.Pdf417 -> "pdf417"
+                ScannableFormat.Aztec -> "aztec"
             }
         }
         assertThat(sizes.toSet()).containsExactlyElementsIn(

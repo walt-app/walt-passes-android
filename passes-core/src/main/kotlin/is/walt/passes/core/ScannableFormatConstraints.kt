@@ -18,6 +18,8 @@ internal object ScannableFormatConstraints {
             ScannableFormat.Ean13 -> EAN13_LENGTH
             ScannableFormat.UpcA -> UPCA_LENGTH
             ScannableFormat.Qr -> QR_MAX
+            ScannableFormat.Pdf417 -> PDF417_MAX
+            ScannableFormat.Aztec -> AZTEC_MAX
         }
 
     /** Non-null only for fixed-length numeric symbologies (EAN-13, UPC-A). */
@@ -44,7 +46,8 @@ internal object ScannableFormatConstraints {
             ScannableFormat.Code128 -> char.code in PRINTABLE_ASCII_MIN..PRINTABLE_ASCII_MAX
             ScannableFormat.Code39 -> char in CODE39_ALLOWED
             ScannableFormat.Ean13, ScannableFormat.UpcA -> char in '0'..'9'
-            ScannableFormat.Qr -> true
+            // Byte-capable 2D symbologies: any character the payload survives as UTF-8.
+            ScannableFormat.Qr, ScannableFormat.Pdf417, ScannableFormat.Aztec -> true
         }
 
     /**
@@ -59,7 +62,12 @@ internal object ScannableFormatConstraints {
         when (format) {
             ScannableFormat.Ean13 -> validateEan13(payload)
             ScannableFormat.UpcA -> validateUpcA(payload)
-            ScannableFormat.Code128, ScannableFormat.Code39, ScannableFormat.Qr -> null
+            ScannableFormat.Code128,
+            ScannableFormat.Code39,
+            ScannableFormat.Qr,
+            ScannableFormat.Pdf417,
+            ScannableFormat.Aztec,
+            -> null
         }
 
     // Length already enforced by the validator via [requiredLength]; structural check assumes
@@ -132,6 +140,19 @@ internal object ScannableFormatConstraints {
     private const val EAN13_LENGTH = 13
     private const val UPCA_LENGTH = 12
     private const val QR_MAX = 2000
+
+    /**
+     * Soft caps for the two 2D symbologies added in wpass-pl7.1, in characters (same unit as
+     * [QR_MAX]; the byte-exact ceiling is an encoder concern). Both sit well under the spec
+     * maxima at any plausible error-correction level — PDF417 holds ~1,100 bytes and Aztec
+     * ~1,900 at MINIMUM EC, and both shrink as EC rises. wpass-pl7.6 pins the EC defaults; if
+     * it picks anything below PDF417 level 5 or Aztec 23%, re-derive these against that pin.
+     *
+     * A boarding pass is the sizing case that matters and is nowhere near either: an IATA
+     * BCBP payload runs ~60 characters per leg.
+     */
+    private const val PDF417_MAX = 800
+    private const val AZTEC_MAX = 1500
     private const val PRINTABLE_ASCII_MIN = 0x20
     private const val PRINTABLE_ASCII_MAX = 0x7E
 

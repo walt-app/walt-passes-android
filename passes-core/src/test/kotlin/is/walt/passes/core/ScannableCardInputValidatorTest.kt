@@ -52,6 +52,22 @@ class ScannableCardInputValidatorTest {
         assertSuccessWithPayload(result, "https://example.org/é/👍")
     }
 
+    @Test
+    fun pdf417AndAztecHappyPathAcceptsUtf8() {
+        // Both are byte-capable, so they share Qr's "any character" charset rule.
+        for (format in setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
+            assertSuccessWithPayload(validate("bag-drop/é/👍", format), "bag-drop/é/👍")
+        }
+    }
+
+    @Test
+    fun aztecAcceptsABoardingPassLengthPayload() {
+        // The wpass-pl7 repro decodes to a ~126-character IATA BCBP string. Synthetic stand-in:
+        // real BCBP payloads carry passenger name and PNR and must not enter this repository.
+        val payload = "M1WALT/TEST".padEnd(126, 'X')
+        assertSuccessWithPayload(validate(payload, ScannableFormat.Aztec), payload)
+    }
+
     // ---- length caps ----
 
     @Test
@@ -74,6 +90,22 @@ class ScannableCardInputValidatorTest {
     fun qrTooLong() {
         val rejection = expectPayloadRejection("x".repeat(2001), ScannableFormat.Qr)
         assertThat(rejection).isInstanceOf(PayloadRejection.TooLong::class.java)
+    }
+
+    @Test
+    fun pdf417TooLong() {
+        val rejection = expectPayloadRejection("x".repeat(801), ScannableFormat.Pdf417)
+        assertThat(rejection).isInstanceOf(PayloadRejection.TooLong::class.java)
+        rejection as PayloadRejection.TooLong
+        assertThat(rejection.max).isEqualTo(800)
+    }
+
+    @Test
+    fun aztecTooLong() {
+        val rejection = expectPayloadRejection("x".repeat(1501), ScannableFormat.Aztec)
+        assertThat(rejection).isInstanceOf(PayloadRejection.TooLong::class.java)
+        rejection as PayloadRejection.TooLong
+        assertThat(rejection.max).isEqualTo(1500)
     }
 
     // ---- charset violations ----

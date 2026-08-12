@@ -110,4 +110,17 @@ public sealed interface EncoderFailureReason {
      * switching format.
      */
     public object PayloadTooDense : EncoderFailureReason
+
+    /**
+     * This kernel build has no writer wired for [format], so the symbol cannot be rendered.
+     * The read and write halves of the roster are deliberately out of step for one step:
+     * wpass-pl7.1 taught the decoder Pdf417/Aztec so imported boarding passes stop failing
+     * silently, while the writer arms — whose error-correction and compaction defaults need
+     * their own scan-verified rollout — land in wpass-pl7.6.
+     *
+     * Distinct from [WriterRejected], which means a wired writer looked at this payload and
+     * said no. This arm is about the build, not the input, so retrying with a shorter payload
+     * cannot help. **Temporary:** wpass-pl7.6 removes it once every roster member encodes.
+     */
+    public data class FormatNotEncodable(public val format: ScannableFormat) : EncoderFailureReason
 }

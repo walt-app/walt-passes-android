@@ -191,7 +191,8 @@ private fun Modifier.dashedBorder(
 }
 
 private fun ScannableFormat.previewSize(): Pair<Dp, Dp> = when (this) {
-    ScannableFormat.Qr -> 96.dp to 96.dp
+    ScannableFormat.Qr, ScannableFormat.Aztec -> 96.dp to 96.dp
+    ScannableFormat.Pdf417 -> 132.dp to 56.dp
     ScannableFormat.Code128,
     ScannableFormat.Ean13,
     ScannableFormat.UpcA,

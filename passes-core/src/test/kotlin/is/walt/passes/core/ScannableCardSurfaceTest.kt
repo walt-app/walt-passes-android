@@ -32,6 +32,8 @@ class ScannableCardSurfaceTest {
                 ScannableFormat.UpcA,
                 ScannableFormat.Code39,
                 ScannableFormat.Qr,
+                ScannableFormat.Pdf417,
+                ScannableFormat.Aztec,
             )
         assertThat(allFormats).hasSize(ScannableFormat.entries.size)
     }

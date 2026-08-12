@@ -147,7 +147,9 @@ private fun BarcodeImage(
 
 /** Per-symbology min on-screen size in dp. Mirrors [BarcodeView] for gate consistency. */
 private fun ScannableFormat.minRenderSizeDp(): Pair<Int, Int> = when (this) {
-    ScannableFormat.Qr -> 240 to 240
+    ScannableFormat.Qr, ScannableFormat.Aztec -> 240 to 240
+    // Stacked 2D: as wide as the 1D floor, but taller — its rows carry data.
+    ScannableFormat.Pdf417 -> 320 to 120
     ScannableFormat.Code128,
     ScannableFormat.Ean13,
     ScannableFormat.UpcA,
