@@ -1,6 +1,7 @@
 package `is`.walt.passes.core
 
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.internal.ZxingBarcodeEncoder
 import org.junit.Test
 
 /**
@@ -135,17 +136,38 @@ class BarcodeEncoderTest {
     }
 
     @Test
-    fun writerRejectionNeverCarriesThePayloadInDetail() {
-        // PDF417Writer interpolates the whole input into its "Failed to encode" message, and
-        // detail is the one third-party string crossing the kernel boundary. A card number
-        // reaching a consumer's diagnostic surface through an error field is the leak.
+    fun pdf417RefusesSupplementaryCharactersWithoutEchoingThePayload() {
+        // Refused before the writer runs, which is what keeps the payload out of detail:
+        // PDF417Writer's own "Failed to encode" message interpolates the WHOLE input, and
+        // detail is the one third-party string crossing the kernel boundary. Named for the
+        // refusal rather than the scrub, because the refusal is what this input exercises.
         val payload = "https://example.org/secret-token-abc123/👍"
 
         val reason = (BarcodeEncoder.encode(payload, ScannableFormat.Pdf417) as EncodeResult.Failure).reason
 
-        assertThat((reason as EncoderFailureReason.WriterRejected).detail).doesNotContain(payload)
+        assertThat((reason as EncoderFailureReason.WriterRejected).format).isEqualTo(ScannableFormat.Pdf417)
         assertThat(reason.detail).doesNotContain("secret-token-abc123")
-        assertThat(reason.format).isEqualTo(ScannableFormat.Pdf417)
+    }
+
+    @Test
+    fun payloadScrubberRemovesThePayloadFromAThirdPartyMessage() {
+        // Exercised directly because no input reaches it end-to-end: the surrogate refusal
+        // above blocks the one ZXing message that echoes a whole payload. The scrub is the
+        // backstop if that guard is ever relaxed or a reworded message starts echoing input,
+        // so it needs coverage of its own or it rots unnoticed.
+        val payload = "MEMBER-9988776655-SECRET"
+
+        with(ZxingBarcodeEncoder) {
+            assertThat("""Failed to encode "$payload"""".withoutPayload(payload))
+                .doesNotContain(payload)
+            // Messages that never carried the payload are passed through untouched, so
+            // ordinary diagnostics keep their detail.
+            assertThat("Bad character in input: ASCII value=233".withoutPayload(payload))
+                .isEqualTo("Bad character in input: ASCII value=233")
+            // An empty payload must not turn every message into redactions.
+            assertThat("Empty message not allowed".withoutPayload(""))
+                .isEqualTo("Empty message not allowed")
+        }
     }
 
     @Test

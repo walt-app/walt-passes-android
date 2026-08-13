@@ -48,14 +48,14 @@ import com.google.zxing.BarcodeFormat as ZxingFormat
  * ZXing's default and the Aztec spec's recommended level. Measured against ZXing 3.5.4: a
  * 132-character BCBP boarding pass yields the same 37x37 matrix at every level from 23% to
  * 50%, so the redundancy is free at the payload size this roster addition exists to serve.
- * Capacity at 33% is ~3,000 ASCII characters, twice the validator's 1,500-character cap.
+ * Capacity headroom against the validator's cap is recorded on that cap, in
+ * `ScannableFormatConstraints`, so the numbers and the limits they justify stay together.
  *
  * **PDF417 error correction, compaction and margin.** Error correction is pinned at
  * [PDF417_ERROR_CORRECTION_LEVEL] (3) rather than ZXing's hardcoded default of 2:
  * ISO/IEC 15438 recommends level 3 for 41-160 data codewords, which is where a BCBP
  * boarding pass lands. Measured cost at that length is one extra row and no extra column
- * (209x48 to 209x52), so module width at a fixed render width is unchanged. Capacity at
- * level 3 is ~1,766 ASCII characters, well above the validator's 800-character cap.
+ * (209x48 to 209x52), so module width at a fixed render width is unchanged.
  *
  * Compaction is left [Compaction.AUTO]: it emits a symbol no larger than forced BYTE
  * compaction, so forcing a mode only costs area.
@@ -197,14 +197,8 @@ internal object ZxingBarcodeEncoder {
         payload: String,
         cause: Throwable,
     ): EncoderFailureReason {
-        // Belt-and-suspenders: the proactive byte-length check above handles the common QR
-        // overflow path; this string match catches the same condition when ZXing surfaces it
-        // for a payload that slipped under the byte ceiling (e.g. some mixed-mode inputs).
-        // The match is intentionally lossy — if ZXing rewords the message on a future bump,
-        // the encoder still surfaces WriterRejected and the consumer still gets a usable
-        // error path, just without the PayloadTooDense-specific UI hint.
         val message = cause.message.orEmpty()
-        if (OVER_CAPACITY_MESSAGES.getValue(format).any { it in message }) {
+        if (overCapacityMessages(format).any { it in message }) {
             return EncoderFailureReason.PayloadTooDense
         }
         return EncoderFailureReason.WriterRejected(format, message.withoutPayload(payload))
@@ -221,38 +215,57 @@ internal object ZxingBarcodeEncoder {
     }
 
     /**
-     * Strips [payload] out of a third-party exception message. `PDF417Writer` interpolates the
-     * whole input into its "Failed to encode" text, and [EncoderFailureReason.WriterRejected.
-     * detail] is the one third-party string that crosses the kernel boundary — its own KDoc
-     * warns consumers not to ship it verbatim. Removing the payload here means that warning no
-     * longer has to hold back the user's card number.
+     * Strips [payload] out of a third-party exception message. [EncoderFailureReason.
+     * WriterRejected.detail] is the one third-party string that crosses the kernel boundary, and
+     * its own KDoc warns consumers not to ship it verbatim because ZXing has historically
+     * embedded input-derived substrings in its messages.
+     *
+     * **No writer reaches this with a payload in the message today**, verified across the roster
+     * against ZXing 3.5.4: the only message that interpolates the whole input is `PDF417Writer`'s
+     * "Failed to encode", which needs a surrogate, and [refuseBeforeWriter] rejects those before
+     * the writer runs. Every other failure names one character, one ASCII value, or a length.
+     *
+     * It stays because the guard is what makes that true. If a later ZXing gains surrogate
+     * support and the refusal above is relaxed, or a reworded message starts echoing input, the
+     * leak returns silently — this keeps that change safe by default rather than depending on
+     * whoever makes it noticing. Exercised directly by `BarcodeEncoderTest`, since no
+     * end-to-end input can currently reach it.
      */
-    private fun String.withoutPayload(payload: String): String =
+    internal fun String.withoutPayload(payload: String): String =
         if (payload.isNotEmpty() && payload in this) replace(payload, REDACTED) else this
 
-    // Per-format substrings that mean "this payload does not fit", lifted to the dedicated
-    // PayloadTooDense arm so the consumer can say "shorten it" rather than "try another
-    // format". The matches are intentionally lossy: if ZXing rewords one on a version bump the
-    // encoder still reports WriterRejected, just without the specific UI hint.
-    //
-    // The three 2D formats need this because their length caps are in CHARACTERS while their
-    // capacity is in bytes, so a multibyte payload can clear the validator and still overflow
-    // (see ScannableFormatConstraints' cap KDoc). The 1D formats have no over-capacity message
-    // of their own — their fixed or short caps are reached long before any density limit.
-    private val OVER_CAPACITY_MESSAGES: Map<ScannableFormat, List<String>> =
-        mapOf(
-            ScannableFormat.Qr to listOf("Data too big"),
-            ScannableFormat.Aztec to listOf("Data too large for an Aztec code"),
-            ScannableFormat.Pdf417 to
+    /**
+     * ZXing message substrings meaning "this payload does not fit", lifted to the dedicated
+     * [EncoderFailureReason.PayloadTooDense] arm so the consumer can say "shorten it" rather
+     * than "try another format". The matches are intentionally lossy: if ZXing rewords one on a
+     * version bump the encoder still reports `WriterRejected`, just without the specific hint.
+     *
+     * The three 2D formats need this because their length caps are in CHARACTERS while their
+     * capacity is spent in bytes, so a multibyte payload can clear the validator and still
+     * overflow (see `ScannableFormatConstraints`' cap KDoc). The 1D formats have no
+     * over-capacity message of their own — their fixed or short caps are reached long before
+     * any density limit.
+     *
+     * An exhaustive `when` rather than a map because [translateFailure] runs in the `onFailure`
+     * lambda, OUTSIDE the `runCatching` above: a missing key there would throw straight through
+     * [BarcodeEncoder]'s no-throw contract, and only in the failure path where nobody is
+     * looking. A roster addition has to be answered here at compile time instead.
+     */
+    private fun overCapacityMessages(format: ScannableFormat): List<String> =
+        when (format) {
+            ScannableFormat.Qr -> listOf("Data too big")
+            ScannableFormat.Aztec -> listOf("Data too large for an Aztec code")
+            ScannableFormat.Pdf417 ->
                 listOf(
                     "Unable to fit message in columns",
                     "Encoded message contains too many code words",
-                ),
-            ScannableFormat.Code128 to emptyList(),
-            ScannableFormat.Code39 to emptyList(),
-            ScannableFormat.Ean13 to emptyList(),
-            ScannableFormat.UpcA to emptyList(),
-        )
+                )
+            ScannableFormat.Code128,
+            ScannableFormat.Code39,
+            ScannableFormat.Ean13,
+            ScannableFormat.UpcA,
+            -> emptyList()
+        }
 
     // The pins the class KDoc argues for. ScannableFormatConstraints' PDF417 / Aztec caps were
     // derived against these values; changing one means re-deriving the other.

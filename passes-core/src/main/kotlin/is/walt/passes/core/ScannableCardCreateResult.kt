@@ -104,10 +104,14 @@ public sealed interface EncoderFailureReason {
     ) : EncoderFailureReason
 
     /**
-     * The payload is too dense to encode at the symbology's maximum version (only QR can
-     * surface this — the 1D writers reject density mismatches under [WriterRejected]). Distinct
-     * arm so the consumer UI can specifically suggest shortening the payload rather than
-     * switching format.
+     * The payload is too dense to encode at the symbology's maximum size. Surfaced by the three
+     * 2D symbologies — QR, PDF417 and Aztec; the 1D writers reject density mismatches under
+     * [WriterRejected]. Distinct arm so the consumer UI can specifically suggest shortening the
+     * payload rather than switching format.
+     *
+     * Reachable even for a payload that cleared [ScannableCardInputValidator]: the 2D length
+     * caps count characters while capacity is spent in bytes, so a multibyte payload can sit
+     * under its cap and still overflow.
      */
     public object PayloadTooDense : EncoderFailureReason
 }

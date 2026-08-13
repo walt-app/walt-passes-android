@@ -343,12 +343,14 @@ largest payload each writer accepts: **for single-byte payloads** PDF417 holds
 
 **The caps do not, however, guarantee encodability, and this section previously
 overstated that they did.** They count characters while writer capacity is
-consumed in bytes. Measured over three-byte characters the same writers hold 528
-(PDF417) and 623 (Aztec) — both far under the caps, so a 700-character CJK
-payload clears the validator and cannot be rendered. No exact predicate is
-available at the validator: each writer picks a compaction mode per run, so
-capacity swings with the payload's composition, and a byte ceiling tight enough
-to be safe would reject ordinary accented text well inside the character cap.
+consumed in bytes. Measured over three-byte characters the same writers hold far less
+than their caps allow, so a 700-character CJK payload clears the validator and
+cannot be rendered. No exact predicate is available at the validator: each writer
+picks a compaction mode per run, so capacity swings with the payload's
+composition, and a byte ceiling tight enough to be safe would reject ordinary
+accented text well inside the character cap. The per-width measurements live on
+the caps themselves in `ScannableFormatConstraints`, which is where they would be
+re-derived.
 
 What is in place instead is attribution rather than prevention: the encoder lifts
 both writers' over-capacity errors to `EncoderFailureReason.PayloadTooDense`, so
