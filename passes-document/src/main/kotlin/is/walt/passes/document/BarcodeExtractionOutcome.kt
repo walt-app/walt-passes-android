@@ -5,19 +5,16 @@ import `is`.walt.passes.core.DecodeFailureReason
 /**
  * Why an imported image is a plain image rather than a composite (wpass-pl7.5). Carried on
  * [DocumentPersist.Image] so the consumer's confirm sheet can say what actually happened instead
- * of rendering "no code found" for every non-composite outcome.
+ * of rendering one caption for every non-composite outcome.
  *
- * The arms are the four distinguishable ways the composite path declines to produce a barcode,
- * and they call for different copy AND different affordances: [Failed] with
- * [DecodeFailureReason.DecodeTimedOut] is a load signal that a user-initiated retry may clear,
- * [DecodeFailureReason.ImageTooLarge] never will, [NoCodeFound] means the sandbox read the image
- * fine, and [Declined] means the user already rejected the read. Collapsing them to a single null
- * hid a watchdog kill behind "no code found" — the failure mode the wpass-pl7.2 retry ladder is
- * most likely to introduce.
+ * The arms are kept apart because they call for different copy AND different affordances:
+ * [Failed] with [DecodeFailureReason.DecodeTimedOut] is a load signal a user-initiated retry may
+ * clear, [DecodeFailureReason.ImageTooLarge] never will, [NoCodeFound] means the sandbox read the
+ * image fine, and [Declined] means the user already rejected the read.
  *
  * NOTHING here carries the decoded payload or any image bytes: a BCBP boarding pass payload
- * carries passenger name and PNR, and the composite arm ([DocumentPersist.BarcodedImage]) is the
- * only place a payload crosses this seam — and only after the user has confirmed it.
+ * carries passenger name and PNR, and [DocumentPersist.BarcodedImage] is the only place a payload
+ * crosses this seam — and only after the user has confirmed it.
  */
 public sealed interface BarcodeExtractionOutcome {
     /**

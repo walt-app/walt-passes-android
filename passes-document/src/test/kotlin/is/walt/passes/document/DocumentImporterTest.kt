@@ -264,7 +264,7 @@ class DocumentImporterTest {
     }
 
     @Test
-    fun aDeclinedReadNamesItselfAndCarriesNoPayload() = runTest {
+    fun aDeclinedReadDegradesToAPlainImageNamingItselfAndCarryingNoPayload() = runTest {
         // A BCBP payload carries passenger name and PNR: the degrade reason says the user declined,
         // never what they declined.
         val persisted = mutableListOf<DocumentPersist>()
@@ -273,13 +273,14 @@ class DocumentImporterTest {
             barcodeExtract = { BarcodeDecodeResult.DecodedBarcode(SECRET_PAYLOAD, ScannableFormat.Aztec) },
         )
 
-        importer.import(
+        val result = importer.import(
             source = source(pngBytes),
             displayLabel = "boarding.png",
             confirmBarcode = { _, _ -> false },
             persist = { persisted += it },
         )
 
+        assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
         val image = persisted.single() as DocumentPersist.Image
         assertThat(image.barcodeExtraction).isEqualTo(BarcodeExtractionOutcome.Declined)
         assertThat(image.barcodeExtraction.toString()).doesNotContain(SECRET_PAYLOAD)
@@ -354,26 +355,6 @@ class DocumentImporterTest {
 
         assertThat(propagated).isTrue()
         assertThat(persisted).isFalse()
-    }
-
-    @Test
-    fun declinedConfirmationDegradesToPlainImageAndPersistsNoBarcode() = runTest {
-        val persisted = mutableListOf<DocumentPersist>()
-        val importer = importer(
-            imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
-            barcodeExtract = { BarcodeDecodeResult.DecodedBarcode("MAYBE-MISREAD", ScannableFormat.Qr) },
-        )
-
-        val result = importer.import(
-            source = source(pngBytes),
-            displayLabel = "card.png",
-            confirmBarcode = { _, _ -> false },
-            persist = { persisted += it },
-        )
-
-        assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
-        assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
-
     }
 
     @Test

@@ -23,9 +23,8 @@ import `is`.walt.passes.core.ScannableFormat
  * the consumer declines via `confirmBarcode`) it degrades to a plain
  * [DocumentImportResult.ImportedImage]. Without the hook (the default) no extraction runs and the
  * result is always a plain image. Barcode extraction never runs in the host process; only the
- * decoded payload + symbology cross the binder, matching the wpass-i9x isolation invariant. Every
- * degrade path names itself on [DocumentPersist.Image.barcodeExtraction] (wpass-pl7.5) so the
- * consumer's confirm sheet can tell a genuinely code-free image from a decoder timeout.
+ * decoded payload + symbology cross the binder, matching the wpass-i9x isolation invariant. Each
+ * degrade path names itself on [DocumentPersist.Image.barcodeExtraction].
  *
  * Storage is wired through a `persist` callback rather than a `PassRepository` dependency so
  * `passes-document` stays independent of `passes-storage` (matching `PdfImporter`). The
@@ -59,8 +58,7 @@ public interface DocumentImporter {
      * UX can pass `{ _, _ -> true }` to accept every read. The hook is never called for PDFs, for
      * images with no detected barcode, or when extraction fails. A `CancellationException` from the
      * hook propagates; any other throw is treated as a declined confirmation (degrade to image) so
-     * a confirm-UI bug cannot fail the whole import. Whichever way the composite path degrades, the
-     * reason reaches [persist] as [DocumentPersist.Image.barcodeExtraction].
+     * a confirm-UI bug cannot fail the whole import.
      */
     public suspend fun import(
         source: DocumentImportSource,

@@ -143,11 +143,10 @@ internal class DefaultDocumentImporter(
         }
 
         // Composite path (wpass-8lu): extract a barcode from the same bytes in the isolated
-        // decoder. A found+confirmed code makes this a composite; anything else (no code,
-        // extraction failure, declined confirmation) degrades to a plain image carrying its own
-        // BarcodeExtractionOutcome — extraction never fails the import. Resolved BEFORE persist so
-        // nothing is stored until the consumer's confirm step has run ("before the code becomes
-        // usable").
+        // decoder. A found+confirmed code makes this a composite; anything else degrades to a
+        // plain image carrying its own [BarcodeExtractionOutcome] — extraction never fails the
+        // import. Resolved BEFORE persist so nothing is stored until the consumer's confirm step
+        // has run ("before the code becomes usable").
         val extraction = extractConfirmedBarcode(bytes, confirmBarcode)
 
         runCatching {
@@ -214,12 +213,8 @@ internal class DefaultDocumentImporter(
      * Opts into and runs the isolated barcode extraction plus the consumer's confirm gate. When
      * [confirmBarcode] is `null` the caller has not opted into composites: extraction does NOT run
      * (no isolated barcode-decode cost) and the result is always a plain image. Otherwise returns
-     * the `(payload, format)` to persist as a composite, or the [BarcodeExtractionOutcome] that
-     * degraded the artifact to a plain image.
-     *
-     * Every degrade path keeps its own outcome (wpass-pl7.5) rather than collapsing to one null:
-     * a watchdog kill (`DecodeTimedOut`) and an oversize rejection (`ImageTooLarge`) both used to
-     * read as "no code found in this image" to the user AND to whoever was debugging.
+     * the `(payload, format)` to persist as a composite, or the [BarcodeExtractionOutcome] naming
+     * why it degraded to a plain image — each path keeps its own, see that type.
      *
      * A `CancellationException` from the confirm hook propagates (structured concurrency); any
      * other throw is folded to [BarcodeExtractionOutcome.Declined] so a confirm-UI bug cannot fail
@@ -233,13 +228,15 @@ internal class DefaultDocumentImporter(
         bytes: ByteArray,
         confirmBarcode: (suspend (String, ScannableFormat) -> Boolean)?,
     ): BarcodeExtraction {
-        if (confirmBarcode == null) return degraded(BarcodeExtractionOutcome.NotAttempted)
+        if (confirmBarcode == null) {
+            return BarcodeExtraction.Degraded(BarcodeExtractionOutcome.NotAttempted)
+        }
         val decoded = when (val extracted = barcodeExtract(bytes)) {
             is BarcodeDecodeResult.DecodedBarcode -> extracted
             BarcodeDecodeResult.NoBarcodeFound ->
-                return degraded(BarcodeExtractionOutcome.NoCodeFound)
+                return BarcodeExtraction.Degraded(BarcodeExtractionOutcome.NoCodeFound)
             is BarcodeDecodeResult.DecodeFailed ->
-                return degraded(BarcodeExtractionOutcome.Failed(extracted.reason))
+                return BarcodeExtraction.Degraded(BarcodeExtractionOutcome.Failed(extracted.reason))
         }
         val confirmed = try {
             confirmBarcode(decoded.payload, decoded.format)
@@ -251,12 +248,9 @@ internal class DefaultDocumentImporter(
         return if (confirmed) {
             BarcodeExtraction.Confirmed(decoded.payload, decoded.format)
         } else {
-            degraded(BarcodeExtractionOutcome.Declined)
+            BarcodeExtraction.Degraded(BarcodeExtractionOutcome.Declined)
         }
     }
-
-    private fun degraded(outcome: BarcodeExtractionOutcome): BarcodeExtraction.Degraded =
-        BarcodeExtraction.Degraded(outcome)
 
     private fun buildPersist(
         extraction: BarcodeExtraction,

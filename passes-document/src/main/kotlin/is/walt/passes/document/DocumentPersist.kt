@@ -32,9 +32,7 @@ public sealed interface DocumentPersist {
     ) : DocumentPersist
 
     /**
-     * A plain image. [barcodeExtraction] says why it is not a composite (wpass-pl7.5) so the
-     * consumer's confirm sheet can distinguish "no code in this image" from a watchdog kill, an
-     * oversize rejection, or a code the user declined. It defaults to
+     * A plain image. [barcodeExtraction] names why it is not a composite; it defaults to
      * [BarcodeExtractionOutcome.NotAttempted], the outcome for a caller that never opted in.
      */
     public data class Image(
