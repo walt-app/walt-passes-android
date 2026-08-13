@@ -192,12 +192,11 @@ public interface PassRepository {
      * [StorageError.ScannableCardRejected] with the typed reason preserved, never as a
      * generic infra failure, and the row never reaches disk.
      *
-     * An approved input is then trial-encoded with the kernel's `BarcodeEncoder` before
-     * the write, and an encoder refusal is rejected the same way, under
-     * [ScannableCardRejectionReason.EncoderFailure]. The validator alone cannot decide
-     * this: the 2D length caps count characters while writer capacity is spent in bytes,
-     * so a multibyte payload can clear its cap and still overflow the symbology. Without
-     * the encode such a card persists and renders blank with no reason attached.
+     * An approved input is then trial-encoded with the kernel's `BarcodeEncoder` before the
+     * write, and an encoder refusal is rejected the same way, under
+     * [ScannableCardRejectionReason.EncoderFailure]. The length caps cannot decide this on
+     * their own (`ScannableFormatConstraints`' cap KDoc derives why), and without the
+     * encode such a card persists and renders blank with no reason attached.
      */
     public suspend fun createScannableCard(
         input: ScannableCardCreateInput,

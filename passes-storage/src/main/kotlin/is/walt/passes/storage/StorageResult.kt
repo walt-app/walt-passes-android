@@ -70,6 +70,10 @@ public sealed interface StorageError {
      * (`BarcodeEncoder`). Carries the typed kernel rejection so the consumer's error UI
      * can localize a specific message without re-running validation. The row never
      * reaches disk.
+     *
+     * One arm needs care: `EncoderFailure(WriterRejected)` carries a raw third-party
+     * message on its `detail` field. Read that field's kernel KDoc before surfacing or
+     * reporting it — the telemetry this repository emits carries only the enum kind.
      */
     public data class ScannableCardRejected(
         public val reason: ScannableCardRejectionReason,
