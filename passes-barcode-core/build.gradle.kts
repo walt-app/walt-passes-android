@@ -15,3 +15,11 @@ dependencies {
     testImplementation(libs.junit)
     testImplementation(libs.truth)
 }
+
+tasks.test {
+    // Opt-in gate for LiveFrameRosterLatencyHarness. Gradle does not forward -D to the test JVM,
+    // so without this the harness is unreachable rather than merely skipped.
+    providers.systemProperty("walt.latencyHarness").orNull?.let {
+        systemProperty("walt.latencyHarness", it)
+    }
+}
