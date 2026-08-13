@@ -30,13 +30,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import `is`.walt.passes.core.QrPayloadKind
+import `is`.walt.passes.core.ScannableFormat
+import `is`.walt.passes.core.canCarryActionablePayload
 import `is`.walt.passes.ui.core.isolated
 import `is`.walt.passes.ui.theme.LocalPassesSemantics
 import `is`.walt.passes.ui.theme.SecuritySheetStyle
 import `is`.walt.passes.ui.theme.toComposeColor
 
 /**
- * Create-time URI-scheme confirmation gate for a QR `ScannableCard`. Mirrors the
+ * Create-time URI-scheme confirmation gate for a `ScannableCard`. Mirrors the
  * verbatim-rendering / FSI-PDI isolation / trust-styling-token posture of the
  * back-field [B3UrlConfirmSheet], but inverts the button prominence: Cancel is the
  * focused, filled action; Confirm is the lower-emphasis text button. That divergence
@@ -45,10 +47,10 @@ import `is`.walt.passes.ui.theme.toComposeColor
  * persistence so a payload classified by [QrPayloadKind] as auto-acting on a future
  * scanner phone cannot land in the wallet without an explicit confirm tap.
  *
- * Triggered ONLY for the QR symbology - linear formats do not auto-act when
- * scanned and skip this gate at the caller. [QrPayloadKind.PlainText] also skips:
- * the composable short-circuits to no output so the caller's create flow can be a
- * single unconditional `BarcodeCreateConfirmSheet` invocation.
+ * Triggered for the byte-capable symbologies only - linear formats do not auto-act when
+ * scanned and skip this gate at the caller, via [requiresCreateConfirmation].
+ * [QrPayloadKind.PlainText] also skips: the composable short-circuits to no output so the
+ * caller's create flow can be a single unconditional `BarcodeCreateConfirmSheet` invocation.
  *
  * The trust claim that this gate enforces is "the user saw, in their own typed
  * form, what a scanner phone would do" - the verbatim payload is the load-bearing
@@ -222,12 +224,19 @@ private fun BarcodeCreateActions(
 }
 
 /**
- * Whether [BarcodeCreateConfirmSheet] should be invoked for [QrPayloadKind]. Returns
- * `false` only for [QrPayloadKind.PlainText]; callers branch on this to persist a
- * plain-text QR directly without showing a no-op sheet.
+ * Whether [BarcodeCreateConfirmSheet] should be invoked for this payload in [format].
+ * False for [QrPayloadKind.PlainText], which has nothing to confirm, and false for the 1D
+ * symbologies, which no scanner auto-acts on. Callers branch on this to persist directly
+ * without showing a no-op sheet.
+ *
+ * [format] is a parameter rather than an assumed `Qr` because that assumption was the C4
+ * gate's silent-bypass risk: wpass-pl7.6 made Pdf417 and Aztec renderable, and both carry
+ * the same actionable URIs QR does. Taking the format here puts the decision behind
+ * [canCarryActionablePayload]'s exhaustive `when`, so a future roster member is a compile
+ * error at one kernel site rather than a gate that quietly stops covering a format.
  */
-public fun QrPayloadKind.requiresCreateConfirmation(): Boolean =
-    this !is QrPayloadKind.PlainText
+public fun QrPayloadKind.requiresCreateConfirmation(format: ScannableFormat): Boolean =
+    format.canCarryActionablePayload() && this !is QrPayloadKind.PlainText
 
 /**
  * Test tags for the two action buttons. Exposed so per-arm focus and click assertions

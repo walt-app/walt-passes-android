@@ -110,12 +110,4 @@ public sealed interface EncoderFailureReason {
      * switching format.
      */
     public object PayloadTooDense : EncoderFailureReason
-
-    /**
-     * This kernel build has no writer wired for [format], so the symbol cannot be rendered.
-     * Distinct from [WriterRejected], which means a wired writer looked at this payload and
-     * said no: this arm is about the build, not the input, so a shorter payload cannot help.
-     * Temporary — wpass-pl7.6 removes it once every roster member encodes.
-     */
-    public data class FormatNotEncodable(public val format: ScannableFormat) : EncoderFailureReason
 }

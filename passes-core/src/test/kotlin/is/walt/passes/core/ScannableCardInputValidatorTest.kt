@@ -52,18 +52,15 @@ class ScannableCardInputValidatorTest {
         assertSuccessWithPayload(result, "https://example.org/é/👍")
     }
 
-    // ---- decode-only formats ----
+    // ---- the two-dimensional formats wpass-pl7.6 opened for creation ----
 
     @Test
-    fun decodeOnlyFormatsAreRefusedAtTheCreateBoundary() {
-        // Pdf417/Aztec decode but have no writer until wpass-pl7.6, so a card in either would
-        // render as the failure placeholder forever. The validator is the choke point that
-        // stops one being minted — consumers build format pickers from ScannableFormat.entries,
-        // so nothing downstream would otherwise refuse it.
+    fun pdf417AndAztecHappyPath() {
+        // Both were refused at this boundary until their writers landed. Now they validate like
+        // any other byte-capable format, which is what makes an extracted boarding-pass payload
+        // mintable as a card the user can present at a gate.
         for (format in setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
-            val result = validate("WALT-CHECK-1", format)
-
-            assertThat(result).isEqualTo(ScannableCardCreateResult.UnsupportedFormat(format))
+            assertSuccessWithPayload(validate("WALT-CHECK-1", format), "WALT-CHECK-1")
         }
     }
 
@@ -80,13 +77,18 @@ class ScannableCardInputValidatorTest {
     }
 
     @Test
-    fun decodeOnlyRefusalOutranksPayloadAndLabelProblems() {
-        // The format is unusable regardless of what was typed, so reporting a charset or label
-        // error would send the user to fix the wrong field.
-        val result = validateInput("x".repeat(1501), ScannableFormat.Aztec, label = "")
+    fun aztecOverItsCapReportsTooLongRatherThanUnsupportedFormat() {
+        // Before wpass-pl7.6 the format refusal outranked everything typed. Now an over-cap
+        // payload has to reach the length rule, or the user is told the format is unusable
+        // when the fix is to shorten what they typed.
+        val result = validate("x".repeat(1501), ScannableFormat.Aztec)
 
         assertThat(result)
-            .isEqualTo(ScannableCardCreateResult.UnsupportedFormat(ScannableFormat.Aztec))
+            .isEqualTo(
+                ScannableCardCreateResult.InvalidPayload(
+                    PayloadRejection.TooLong(actual = 1501, max = 1500),
+                ),
+            )
     }
 
     // ---- length caps ----

@@ -1,11 +1,14 @@
 package `is`.walt.passes.core.internal
 
 import com.google.zxing.EncodeHintType
+import com.google.zxing.aztec.AztecWriter
 import com.google.zxing.common.BitMatrix
 import com.google.zxing.oned.Code128Writer
 import com.google.zxing.oned.Code39Writer
 import com.google.zxing.oned.EAN13Writer
 import com.google.zxing.oned.UPCAWriter
+import com.google.zxing.pdf417.PDF417Writer
+import com.google.zxing.pdf417.encoder.Compaction
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import `is`.walt.passes.core.BarcodeMatrix
@@ -24,28 +27,78 @@ import com.google.zxing.BarcodeFormat as ZxingFormat
  * encoder. The intermediate `MultiFormatWriter` would silently accept anything ZXing
  * supports, including formats the validator has not been taught to gate.
  *
- * **Pdf417 and Aztec decode but do not yet encode.** They joined the decode roster in
- * wpass-pl7.1 and are refused here as [EncoderFailureReason.FormatNotEncodable] until
- * wpass-pl7.6 wires `PDF417Writer` / `AztecWriter` with scan-verified EC and compaction
- * defaults. That gap is why the dispatch is per-format: `MultiFormatWriter` would have
- * silently emitted an unverified symbol for both the moment the enum grew.
+ * Every roster member encodes as of wpass-pl7.6. A future decode-only addition has no
+ * refusal path to opt into: [writeMatrix]'s `when` is compiler-exhaustive, so a new
+ * [ScannableFormat] member breaks the build here and forces the writer (or a deliberate
+ * refusal) to be a decision someone makes rather than one `MultiFormatWriter` makes for them.
  *
  * Hidden behind [BarcodeEncoder]; this object is package-internal so consumers cannot
  * reach for ZXing types directly.
  *
- * **Quiet zone.** Most ZXing writers emit their own quiet zone (margin) at default
- * settings. The kernel does not strip or extend it here — the render layer (passes-ui,
- * Child 7) controls visual padding.
+ * **Quiet zone.** Most ZXing writers emit their own quiet zone (margin) at default settings
+ * and the kernel leaves it alone — the render layer (passes-ui) controls visual padding.
+ * `PDF417Writer` is the one exception, see the margin note below.
  *
  * **QR error correction.** Fixed at [ErrorCorrectionLevel.M] (~15% redundancy). High
  * enough to survive moderate scratch/damage on a phone screen but low enough that long
  * payloads still fit. v1 does not expose a tuning knob; if scanner reliability demands it
  * later, surface a parameter on [BarcodeEncoder.encode] without changing the default.
+ *
+ * **Aztec error correction.** Fixed at [AZTEC_ERROR_CORRECTION_PERCENT] (33%), which is both
+ * ZXing's default and the Aztec spec's recommended level. Measured against ZXing 3.5.4: a
+ * 132-character BCBP boarding pass yields the same 37x37 matrix at every level from 23% to
+ * 50%, so the redundancy is free at the payload size this roster addition exists to serve.
+ * Capacity at 33% is ~3,000 ASCII characters, twice the validator's 1,500-character cap.
+ *
+ * **PDF417 error correction, compaction and margin.** Error correction is pinned at
+ * [PDF417_ERROR_CORRECTION_LEVEL] (3) rather than ZXing's hardcoded default of 2:
+ * ISO/IEC 15438 recommends level 3 for 41-160 data codewords, which is where a BCBP
+ * boarding pass lands. Measured cost at that length is one extra row and no extra column
+ * (209x48 to 209x52), so module width at a fixed render width is unchanged. Capacity at
+ * level 3 is ~1,766 ASCII characters, well above the validator's 800-character cap.
+ *
+ * Compaction is left [Compaction.AUTO]: it emits a symbol no larger than forced BYTE
+ * compaction, so forcing a mode only costs area.
+ *
+ * Margin is pinned to [PDF417_QUIET_ZONE_MODULES] (2, the spec quiet zone) because
+ * `PDF417Writer` otherwise pads 30 modules on all four sides. On a 44-module-tall symbol
+ * that more than doubles the height and drags the aspect ratio from 4.66 to 2.55 — dead
+ * space the render layer then letterboxes, on top of the quiet zone it already applies
+ * itself. This is the one place the kernel overrides a writer's own margin.
+ *
+ * **Character set.** Both writers default to ISO-8859-1, and the validator admits any visible
+ * character for the byte-capable formats, so the default loses payloads a user can legitimately
+ * type. The two symbologies fail differently and both are addressed: `PDF417Writer` throws
+ * outright on a non-Latin-1 character, fixed by `PDF417_AUTO_ECI`, which emits an ECI header
+ * only when one is actually needed; `AztecWriter` is the worse case — it encodes happily and
+ * decodes back transliterated ("東京" returns as "??"), a silent corruption fixed by pinning
+ * CHARACTER_SET. Measured: both fixes leave the all-ASCII case byte-identical in matrix size
+ * and capacity, so they cost nothing at boarding-pass payloads.
+ *
+ * QR has the same silent-transliteration defect and is NOT fixed here — it predates this bead
+ * and changing the emitted symbol for existing QR cards needs its own scanner verification.
+ * Tracked as wpass-qj6.
  */
 internal object ZxingBarcodeEncoder {
-    // The QR writer's hint for error correction. Other writers ignore the hint map.
+    // Per-writer hint maps. Each writer reads ERROR_CORRECTION as a different type —
+    // ErrorCorrectionLevel for QR, an Int percentage for Aztec, an Int level for PDF417 —
+    // so the maps cannot be merged. See the class KDoc for how each value was chosen.
     private val qrHints: Map<EncodeHintType, Any> =
         mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
+
+    private val aztecHints: Map<EncodeHintType, Any> =
+        mapOf(
+            EncodeHintType.ERROR_CORRECTION to AZTEC_ERROR_CORRECTION_PERCENT,
+            EncodeHintType.CHARACTER_SET to UTF_8,
+        )
+
+    private val pdf417Hints: Map<EncodeHintType, Any> =
+        mapOf(
+            EncodeHintType.ERROR_CORRECTION to PDF417_ERROR_CORRECTION_LEVEL,
+            EncodeHintType.PDF417_COMPACTION to Compaction.AUTO,
+            EncodeHintType.MARGIN to PDF417_QUIET_ZONE_MODULES,
+            EncodeHintType.PDF417_AUTO_ECI to true,
+        )
 
     fun encode(
         payload: String,
@@ -72,10 +125,15 @@ internal object ZxingBarcodeEncoder {
     }
 
     /**
-     * The two refusals that are decided without running a writer, or null to proceed.
+     * The refusals that are decided without running a writer, or null to proceed.
      *
-     * Pdf417/Aztec are decode-only in this build (see the class KDoc). The QR check is a
-     * proactive [EncoderFailureReason.PayloadTooDense], gated by the alphanumeric-mode
+     * An empty payload is refused for every format. The validator rejects it upstream, so this
+     * is defense in depth — but it cannot be left to the writers: five of the six throw on an
+     * empty input and `AztecWriter` does not once a CHARACTER_SET is pinned, happily emitting a
+     * 15x15 symbol that encodes nothing. Uniform refusal here beats six incidental behaviors
+     * that a hint change can flip.
+     *
+     * The QR check is a proactive [EncoderFailureReason.PayloadTooDense], gated by the alphanumeric-mode
      * membership test: a payload that fits QR's numeric or alphanumeric mode has a much larger
      * capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs 2,331
      * bytes), and ZXing's QRCodeWriter auto-selects the densest fitting mode, so pre-rejecting
@@ -90,8 +148,8 @@ internal object ZxingBarcodeEncoder {
         format: ScannableFormat,
     ): EncoderFailureReason? =
         when {
-            format in ScannableFormatConstraints.decodeOnly ->
-                EncoderFailureReason.FormatNotEncodable(format)
+            payload.isEmpty() ->
+                EncoderFailureReason.WriterRejected(format, EMPTY_PAYLOAD_MESSAGE)
             format == ScannableFormat.Qr &&
                 payload.any { !ScannableFormatConstraints.isQrAlphanumericChar(it) } &&
                 payload.toByteArray(Charsets.UTF_8).size >
@@ -114,9 +172,10 @@ internal object ZxingBarcodeEncoder {
                 ScannableFormat.Ean13 -> EAN13Writer().encode(payload, ZxingFormat.EAN_13, 0, 0)
                 ScannableFormat.UpcA -> UPCAWriter().encode(payload, ZxingFormat.UPC_A, 0, 0)
                 ScannableFormat.Qr -> QRCodeWriter().encode(payload, ZxingFormat.QR_CODE, 0, 0, qrHints)
-                // Unreachable: encode() refuses these before dispatching. No payload in the
-                // message — the format name alone is enough to diagnose a lost guard.
-                ScannableFormat.Pdf417, ScannableFormat.Aztec -> error("No writer wired for $format")
+                ScannableFormat.Pdf417 ->
+                    PDF417Writer().encode(payload, ZxingFormat.PDF_417, 0, 0, pdf417Hints)
+                ScannableFormat.Aztec ->
+                    AztecWriter().encode(payload, ZxingFormat.AZTEC, 0, 0, aztecHints)
             }
         return bitMatrix.toBarcodeMatrix()
     }
@@ -152,4 +211,14 @@ internal object ZxingBarcodeEncoder {
     // The exact substring is load-bearing — see PayloadTooDense lift above. Pinned by
     // BarcodeEncoderTest.qrPayloadTooDenseLiftsToDedicatedArm.
     private const val DATA_TOO_BIG_MESSAGE = "Data too big"
+
+    // The pins the class KDoc argues for. ScannableFormatConstraints' PDF417 / Aztec caps were
+    // derived against these values; changing one means re-deriving the other.
+    private const val AZTEC_ERROR_CORRECTION_PERCENT = 33
+    private const val PDF417_ERROR_CORRECTION_LEVEL = 3
+    private const val PDF417_QUIET_ZONE_MODULES = 2
+    private const val UTF_8 = "UTF-8"
+
+    // Walt's own wording, not a ZXing message — this refusal never reaches a writer.
+    private const val EMPTY_PAYLOAD_MESSAGE = "Empty payload"
 }

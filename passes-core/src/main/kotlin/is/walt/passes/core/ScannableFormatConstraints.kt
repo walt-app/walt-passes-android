@@ -11,12 +11,16 @@ package `is`.walt.passes.core
  */
 internal object ScannableFormatConstraints {
     /**
-     * Roster members this build decodes but cannot render: wpass-pl7.1 added them to the decode
-     * allowlist, and the writer arms land in wpass-pl7.6. Read by BOTH the validator (refuses to
-     * mint a card) and the encoder (refuses to encode) so the two cannot drift into a state where
-     * a card is creatable but unrenderable. wpass-pl7.6 empties this set.
+     * Roster members this build decodes but cannot render. Empty since wpass-pl7.6 wired the
+     * Pdf417 / Aztec writer arms — every roster member now encodes.
+     *
+     * Kept rather than deleted because it is the create-boundary refusal a decode-first roster
+     * addition needs: put a format here and [ScannableCardInputValidator] refuses to mint the
+     * card, so consumers building a picker off [ScannableFormat.entries] cannot offer a choice
+     * whose Save always fails. The encoder no longer reads it — `ZxingBarcodeEncoder.writeMatrix`
+     * is compiler-exhaustive, so a new member breaks that build until someone decides on a writer.
      */
-    val decodeOnly: Set<ScannableFormat> = setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)
+    val decodeOnly: Set<ScannableFormat> = emptySet()
 
     /** Soft cap on payload length per symbology. Numeric symbologies use their exact length. */
     fun maxPayloadLength(format: ScannableFormat): Int =
@@ -151,10 +155,15 @@ internal object ScannableFormatConstraints {
 
     /**
      * Soft caps for the two 2D symbologies added in wpass-pl7.1, in characters (same unit as
-     * [QR_MAX]; the byte-exact ceiling is an encoder concern). Both sit well under the spec
-     * maxima at any plausible error-correction level — PDF417 holds ~1,100 bytes and Aztec
-     * ~1,900 at MINIMUM EC, and both shrink as EC rises. wpass-pl7.6 pins the EC defaults; if
-     * it picks anything below PDF417 level 5 or Aztec 23%, re-derive these against that pin.
+     * [QR_MAX]; the byte-exact ceiling is an encoder concern).
+     *
+     * RE-DERIVED in wpass-pl7.6 against the error-correction levels that bead pinned, measured
+     * with ZXing 3.5.4 by binary-searching the largest ASCII payload each writer accepts:
+     * PDF417 at level 3 holds 1,766 characters against the 800 here, Aztec at 33% holds 3,000
+     * against the 1,500 here. Both caps therefore stand unchanged, with better than 2x headroom
+     * — the property that matters is that a payload the validator accepts always fits the
+     * encoder, or a clean `InvalidPayload(TooLong)` rejection becomes a blank render instead.
+     * Re-derive again if either EC pin rises.
      *
      * A boarding pass is the sizing case that matters and is nowhere near either: an IATA
      * BCBP payload runs ~60 characters per leg.

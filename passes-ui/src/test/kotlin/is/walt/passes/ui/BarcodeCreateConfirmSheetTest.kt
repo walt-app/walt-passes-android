@@ -13,6 +13,8 @@ import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.ParseFailureKind
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.QrPayloadKind
+import `is`.walt.passes.core.ScannableFormat
+import `is`.walt.passes.core.canCarryActionablePayload
 import `is`.walt.passes.ui.theme.ArgbColor
 import `is`.walt.passes.ui.theme.CategoryAccentColors
 import `is`.walt.passes.ui.theme.ExpiredBadgeStyle
@@ -65,7 +67,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will open a website:",
+            "When scanned, this code will open a website:",
         ).assertIsDisplayed()
         composeRule.onNodeWithText("⁨example.com⁩").assertIsDisplayed()
     }
@@ -97,7 +99,7 @@ class BarcodeCreateConfirmSheetTest {
                 )
             }
         }
-        composeRule.onNodeWithText("When scanned, this QR will dial:").assertIsDisplayed()
+        composeRule.onNodeWithText("When scanned, this code will dial:").assertIsDisplayed()
         composeRule.onNodeWithText("⁨+44 7700 900000⁩").assertIsDisplayed()
     }
 
@@ -113,7 +115,7 @@ class BarcodeCreateConfirmSheetTest {
                 )
             }
         }
-        composeRule.onNodeWithText("When scanned, this QR will text:").assertIsDisplayed()
+        composeRule.onNodeWithText("When scanned, this code will text:").assertIsDisplayed()
         composeRule.onNodeWithText("⁨+44 7700 900000⁩").assertIsDisplayed()
     }
 
@@ -129,7 +131,7 @@ class BarcodeCreateConfirmSheetTest {
                 )
             }
         }
-        composeRule.onNodeWithText("When scanned, this QR will email:").assertIsDisplayed()
+        composeRule.onNodeWithText("When scanned, this code will email:").assertIsDisplayed()
         composeRule.onNodeWithText("⁨alice@example.com⁩").assertIsDisplayed()
     }
 
@@ -146,7 +148,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will show a location on a map:",
+            "When scanned, this code will show a location on a map:",
         ).assertIsDisplayed()
         composeRule.onNodeWithText("⁨51.5074,-0.1278⁩").assertIsDisplayed()
     }
@@ -164,7 +166,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will offer to join Wi-Fi network:",
+            "When scanned, this code will offer to join Wi-Fi network:",
         ).assertIsDisplayed()
         composeRule.onNodeWithText("⁨MyNetwork⁩").assertIsDisplayed()
     }
@@ -182,7 +184,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will offer to join a Wi-Fi network.",
+            "When scanned, this code will offer to join a Wi-Fi network.",
         ).assertIsDisplayed()
     }
 
@@ -204,7 +206,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will prepare a Bitcoin payment to:",
+            "When scanned, this code will prepare a Bitcoin payment to:",
         ).assertIsDisplayed()
         composeRule.onNodeWithText(
             "⁨1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa⁩",
@@ -226,7 +228,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will prepare an Ethereum payment to:",
+            "When scanned, this code will prepare an Ethereum payment to:",
         ).assertIsDisplayed()
         composeRule.onNodeWithText(
             "⁨0x71C7656EC7ab88b098defB751B7401B5f6d8976F⁩",
@@ -246,7 +248,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will start a torrent download.",
+            "When scanned, this code will start a torrent download.",
         ).assertIsDisplayed()
     }
 
@@ -263,7 +265,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR will open a Play Store listing:",
+            "When scanned, this code will open a Play Store listing:",
         ).assertIsDisplayed()
         composeRule.onNodeWithText("⁨details?id=com.example.app⁩").assertIsDisplayed()
     }
@@ -283,7 +285,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR can trigger an app action. " +
+            "When scanned, this code can trigger an app action. " +
                 "This is uncommon for loyalty cards. Continue?",
         ).assertIsDisplayed()
         composeRule.onNodeWithText(
@@ -307,7 +309,7 @@ class BarcodeCreateConfirmSheetTest {
             }
         }
         composeRule.onNodeWithText(
-            "When scanned, this QR uses a scheme Walt doesn't recognize. " +
+            "When scanned, this code uses a scheme Walt doesn't recognize. " +
                 "If you didn't expect this, cancel.",
         ).assertIsDisplayed()
         composeRule.onNodeWithText("⁨myapp://action?id=1⁩").assertIsDisplayed()
@@ -325,18 +327,43 @@ class BarcodeCreateConfirmSheetTest {
                 )
             }
         }
-        composeRule.onNodeWithText("Confirm what this QR will do").assertDoesNotExist()
+        composeRule.onNodeWithText("Confirm what this code will do").assertDoesNotExist()
     }
 
     @Test
-    fun requiresCreateConfirmationIsFalseOnlyForPlainText() {
-        assertThat(QrPayloadKind.PlainText.requiresCreateConfirmation()).isFalse()
-        assertThat(QrPayloadKind.Magnet.requiresCreateConfirmation()).isTrue()
+    fun requiresCreateConfirmationIsFalseOnlyForPlainTextOnAByteCapableFormat() {
+        val qr = ScannableFormat.Qr
+        assertThat(QrPayloadKind.PlainText.requiresCreateConfirmation(qr)).isFalse()
+        assertThat(QrPayloadKind.Magnet.requiresCreateConfirmation(qr)).isTrue()
         assertThat(
             QrPayloadKind.Url("https", "example.com", "https://example.com")
-                .requiresCreateConfirmation(),
+                .requiresCreateConfirmation(qr),
         ).isTrue()
-        assertThat(QrPayloadKind.Wifi(ssid = null).requiresCreateConfirmation()).isTrue()
+        assertThat(QrPayloadKind.Wifi(ssid = null).requiresCreateConfirmation(qr)).isTrue()
+    }
+
+    @Test
+    fun theGateCoversEveryFormatThatCanCarryAnActionablePayload() {
+        // The C4 silent-bypass guard. Before wpass-pl7.6 the gate was keyed on QR alone, which
+        // was safe only while QR was the roster's one renderable byte-capable format; an Aztec
+        // carrying a URL would otherwise reach storage unconfirmed. Driven off
+        // ScannableFormat.entries so a future roster member cannot slip past unconsidered.
+        val url = QrPayloadKind.Url("https", "example.com", "https://example.com")
+        for (format in ScannableFormat.entries) {
+            assertThat(url.requiresCreateConfirmation(format))
+                .isEqualTo(format.canCarryActionablePayload())
+        }
+        assertThat(ScannableFormat.entries.filter { it.canCarryActionablePayload() })
+            .containsExactly(ScannableFormat.Qr, ScannableFormat.Pdf417, ScannableFormat.Aztec)
+    }
+
+    @Test
+    fun linearFormatsSkipTheGateEvenForAnActionablePayload() {
+        // A scanner hands a Code128 payload back as text; nothing auto-acts on it, so gating
+        // there would train the user to tap through a dialog that protects nothing.
+        val url = QrPayloadKind.Url("https", "example.com", "https://example.com")
+
+        assertThat(url.requiresCreateConfirmation(ScannableFormat.Code128)).isFalse()
     }
 
     @Test

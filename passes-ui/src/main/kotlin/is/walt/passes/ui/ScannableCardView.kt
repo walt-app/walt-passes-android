@@ -149,9 +149,11 @@ private fun BarcodeImage(
 /** Per-symbology min on-screen size in dp. Mirrors [BarcodeView] for gate consistency. */
 private fun ScannableFormat.minRenderSizeDp(): Pair<Int, Int> = when (this) {
     ScannableFormat.Qr, ScannableFormat.Aztec -> 240 to 240
-    // Taller floor than the 1D row so the stacked rows are not collapsed. Provisional:
-    // wpass-pl7.6 verifies it against the writer's actual aspect ratio.
-    ScannableFormat.Pdf417 -> 320 to 120
+    // 4:1 matches the writer's measured output at the pinned EC and 2-module quiet zone
+    // (3.7:1 to 4.3:1 across the payload range), so ContentScale.Fit barely letterboxes and
+    // the modules land square. The provisional 320x120 this replaces was 2.7:1 and left a
+    // third of the slot as dead space.
+    ScannableFormat.Pdf417 -> 320 to 80
     ScannableFormat.Code128,
     ScannableFormat.Ean13,
     ScannableFormat.UpcA,
