@@ -143,14 +143,14 @@ internal class DefaultDocumentImporter(
         }
 
         // Composite path (wpass-8lu): extract a barcode from the same bytes in the isolated
-        // decoder. A found+confirmed code makes this a composite; anything else (no code,
-        // extraction failure, declined confirmation) degrades to a plain image — extraction never
-        // fails the import. Resolved BEFORE persist so nothing is stored until the consumer's
-        // confirm step has run ("before the code becomes usable").
-        val barcode = extractConfirmedBarcode(bytes, confirmBarcode)
+        // decoder. A found+confirmed code makes this a composite; anything else degrades to a
+        // plain image carrying its own [BarcodeExtractionOutcome] — extraction never fails the
+        // import. Resolved BEFORE persist so nothing is stored until the consumer's confirm step
+        // has run ("before the code becomes usable").
+        val extraction = extractConfirmedBarcode(bytes, confirmBarcode)
 
         runCatching {
-            persist(buildPersist(barcode, displayLabel, bytes, decoded, format))
+            persist(buildPersist(extraction, displayLabel, bytes, decoded, format))
         }.getOrElse { t ->
             if (t is CancellationException) throw t
             guard.onImportFailed(
@@ -171,31 +171,32 @@ internal class DefaultDocumentImporter(
                 durationMillis = now() - startedAt,
             ),
         )
-        return buildImportedResult(barcode, displayLabel, byteCount, decoded)
+        return buildImportedResult(extraction, displayLabel, byteCount, decoded)
     }
 
     private fun buildImportedResult(
-        barcode: DecodedBarcode?,
+        extraction: BarcodeExtraction,
         displayLabel: String,
         byteCount: Long,
         decoded: ImageDecodeOutcome.Decoded,
     ): DocumentImportResult {
         val importedAt = wallClock()
-        return if (barcode != null) {
-            DocumentImportResult.ImportedBarcodedImage(
+        return when (extraction) {
+            is BarcodeExtraction.Confirmed -> DocumentImportResult.ImportedBarcodedImage(
                 BarcodedImageDocument(
                     id = BarcodedImageDocumentId(idGenerator()),
                     displayLabel = displayLabel,
                     byteCount = byteCount,
                     widthPx = decoded.widthPx,
                     heightPx = decoded.heightPx,
-                    barcodePayload = barcode.payload,
-                    barcodeFormat = barcode.format,
+                    barcodePayload = extraction.payload,
+                    barcodeFormat = extraction.format,
                     importedAtEpochMs = importedAt,
                 ),
             )
-        } else {
-            DocumentImportResult.ImportedImage(
+            // The degrade reason rides the persist seam (the confirm sheet reads it there), not the
+            // stored ImageDocument: it describes this import attempt, not the artifact.
+            is BarcodeExtraction.Degraded -> DocumentImportResult.ImportedImage(
                 ImageDocument(
                     id = ImageDocumentId(idGenerator()),
                     displayLabel = displayLabel,
@@ -212,22 +213,31 @@ internal class DefaultDocumentImporter(
      * Opts into and runs the isolated barcode extraction plus the consumer's confirm gate. When
      * [confirmBarcode] is `null` the caller has not opted into composites: extraction does NOT run
      * (no isolated barcode-decode cost) and the result is always a plain image. Otherwise returns
-     * the `(payload, format)` to persist as a composite, or `null` to degrade to a plain image —
-     * for no detected code, an extraction failure, OR a declined/failed confirmation. A
-     * `CancellationException` from the confirm hook propagates (structured concurrency); any
-     * other throw is swallowed to a declined confirmation so a confirm-UI bug cannot fail the
-     * whole import.
+     * the `(payload, format)` to persist as a composite, or the [BarcodeExtractionOutcome] naming
+     * why it degraded to a plain image — each path keeps its own, see that type.
+     *
+     * A `CancellationException` from the confirm hook propagates (structured concurrency); any
+     * other throw is folded to [BarcodeExtractionOutcome.Declined] so a confirm-UI bug cannot fail
+     * the whole import.
      */
-    // ReturnCount: three guard-style early exits (not-opted-in, no code, declined) each read as a
-    // distinct reason to stay a plain image; collapsing them behind one expression would obscure
-    // which condition degraded the artifact. Same precedent as importImage above.
+    // ReturnCount: three guard-style early exits (not-opted-in, no code, extraction failed) each
+    // read as a distinct reason to stay a plain image; collapsing them behind one expression would
+    // obscure which condition degraded the artifact. Same precedent as importImage above.
     @Suppress("ReturnCount")
     private suspend fun extractConfirmedBarcode(
         bytes: ByteArray,
         confirmBarcode: (suspend (String, ScannableFormat) -> Boolean)?,
-    ): DecodedBarcode? {
-        if (confirmBarcode == null) return null
-        val decoded = barcodeExtract(bytes) as? BarcodeDecodeResult.DecodedBarcode ?: return null
+    ): BarcodeExtraction {
+        if (confirmBarcode == null) {
+            return BarcodeExtraction.Degraded(BarcodeExtractionOutcome.NotAttempted)
+        }
+        val decoded = when (val extracted = barcodeExtract(bytes)) {
+            is BarcodeDecodeResult.DecodedBarcode -> extracted
+            BarcodeDecodeResult.NoBarcodeFound ->
+                return BarcodeExtraction.Degraded(BarcodeExtractionOutcome.NoCodeFound)
+            is BarcodeDecodeResult.DecodeFailed ->
+                return BarcodeExtraction.Degraded(BarcodeExtractionOutcome.Failed(extracted.reason))
+        }
         val confirmed = try {
             confirmBarcode(decoded.payload, decoded.format)
         } catch (e: CancellationException) {
@@ -235,35 +245,39 @@ internal class DefaultDocumentImporter(
         } catch (_: Throwable) {
             false
         }
-        return if (confirmed) DecodedBarcode(decoded.payload, decoded.format) else null
+        return if (confirmed) {
+            BarcodeExtraction.Confirmed(decoded.payload, decoded.format)
+        } else {
+            BarcodeExtraction.Degraded(BarcodeExtractionOutcome.Declined)
+        }
     }
 
     private fun buildPersist(
-        barcode: DecodedBarcode?,
+        extraction: BarcodeExtraction,
         displayLabel: String,
         bytes: ByteArray,
         decoded: ImageDecodeOutcome.Decoded,
         format: ImageFormat,
     ): DocumentPersist =
-        if (barcode != null) {
-            DocumentPersist.BarcodedImage(
+        when (extraction) {
+            is BarcodeExtraction.Confirmed -> DocumentPersist.BarcodedImage(
                 label = displayLabel,
                 bytes = bytes,
                 thumbnailBytes = decoded.thumbnailBytes,
                 format = format,
                 widthPx = decoded.widthPx,
                 heightPx = decoded.heightPx,
-                barcodePayload = barcode.payload,
-                barcodeFormat = barcode.format,
+                barcodePayload = extraction.payload,
+                barcodeFormat = extraction.format,
             )
-        } else {
-            DocumentPersist.Image(
+            is BarcodeExtraction.Degraded -> DocumentPersist.Image(
                 label = displayLabel,
                 bytes = bytes,
                 thumbnailBytes = decoded.thumbnailBytes,
                 format = format,
                 widthPx = decoded.widthPx,
                 heightPx = decoded.heightPx,
+                barcodeExtraction = extraction.outcome,
             )
         }
 
@@ -327,14 +341,18 @@ internal class DefaultDocumentImporter(
     }
 
     /**
-     * A confirmed barcode to persist as a composite — the pure `(payload, format)` distilled from
-     * the isolated [BarcodeDecodeResult] once the consumer's confirm gate passed. Internal so the
-     * importer never threads a raw [BarcodeDecodeResult] (with its reject arms) past the seam.
+     * What the composite path produced: either a confirmed barcode to persist, or the reason the
+     * artifact stays a plain image. Internal so the importer never threads a raw
+     * [BarcodeDecodeResult] past the seam; only the distilled `(payload, format)` and the
+     * payload-free [BarcodeExtractionOutcome] cross it.
      */
-    internal data class DecodedBarcode(
-        val payload: String,
-        val format: ScannableFormat,
-    )
+    internal sealed interface BarcodeExtraction {
+        /** The confirmed `(payload, format)` to persist as a composite. */
+        data class Confirmed(val payload: String, val format: ScannableFormat) : BarcodeExtraction
+
+        /** No composite: [outcome] is the reason, forwarded to the consumer's confirm sheet. */
+        data class Degraded(val outcome: BarcodeExtractionOutcome) : BarcodeExtraction
+    }
 
     internal companion object {
         // Read buffer for the bounded materialization loop. 64 KiB matches the

@@ -31,6 +31,10 @@ public sealed interface DocumentPersist {
         public val pageCount: Int,
     ) : DocumentPersist
 
+    /**
+     * A plain image. [barcodeExtraction] names why it is not a composite; it defaults to
+     * [BarcodeExtractionOutcome.NotAttempted], the outcome for a caller that never opted in.
+     */
     public data class Image(
         public override val label: String,
         public override val bytes: ByteArray,
@@ -38,6 +42,7 @@ public sealed interface DocumentPersist {
         public val format: ImageFormat,
         public val widthPx: Int,
         public val heightPx: Int,
+        public val barcodeExtraction: BarcodeExtractionOutcome = BarcodeExtractionOutcome.NotAttempted,
     ) : DocumentPersist
 
     /**

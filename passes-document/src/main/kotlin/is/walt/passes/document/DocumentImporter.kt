@@ -23,7 +23,8 @@ import `is`.walt.passes.core.ScannableFormat
  * the consumer declines via `confirmBarcode`) it degrades to a plain
  * [DocumentImportResult.ImportedImage]. Without the hook (the default) no extraction runs and the
  * result is always a plain image. Barcode extraction never runs in the host process; only the
- * decoded payload + symbology cross the binder, matching the wpass-i9x isolation invariant.
+ * decoded payload + symbology cross the binder, matching the wpass-i9x isolation invariant. Each
+ * degrade path names itself on [DocumentPersist.Image.barcodeExtraction].
  *
  * Storage is wired through a `persist` callback rather than a `PassRepository` dependency so
  * `passes-document` stays independent of `passes-storage` (matching `PdfImporter`). The
