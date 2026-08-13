@@ -21,6 +21,15 @@ import `is`.walt.passes.core.BarcodeDecodeResult
  * here: a live frame's retry is the next frame, so re-decoding this one at further scales would
  * spend an analysis budget that is already tight (wpass-pl7.3) on an image about to be replaced.
  *
+ * ### Roster cost per frame (wpass-pl7.3)
+ * The live path carries the SAME roster as the still path, measured rather than assumed. Adding
+ * Aztec and PDF417 costs ~4.4ms per 640x480 frame on a host JVM: QR is unaffected, because ZXing
+ * reaches `QRCodeReader` before the added readers, while a 1D symbol pays all of it, because
+ * `TRY_HARDER` makes ZXing append the 1D reader LAST. That is a 3.7x relative rise on the 1D path
+ * and it was ACCEPTED — the absolute cost is small, and a narrower live roster would give up
+ * scanning a physical boarding pass to buy it back. `LiveFrameRosterLatencyHarness` re-measures
+ * this; run it before widening the roster again.
+ *
  * ### Stride handling (ZXing #1387)
  * An Android YUV_420_888 Y plane is rarely densely packed. Two HAL realities have to be stripped
  * before ZXing sees the pixels, and getting them wrong feeds garbage rows into the binarizer:
