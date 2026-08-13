@@ -34,7 +34,7 @@ import java.util.Random
  * runs its readers QR → Aztec → PDF417 → 1D (TRY_HARDER appends the 1D reader LAST):
  *  - **QR pays nothing** (~1.4ms either way) — it exits before reaching the added readers.
  *  - **1D pays all of it** — a loyalty card queues behind three failed 2D attempts, 1.3 → 4.4ms.
- *  - **PDF417 is the dearest hit** (2.2ms, against Aztec's 1.5ms), being last in that order.
+ *  - **PDF417 is the dearest 2D hit** (2.2ms, against Aztec's 1.5ms), being last of the 2D readers.
  *
  * That delta was judged small enough in absolute terms to accept rather than narrow the live
  * roster. But the delta is not what bounds this path — the NO-SYMBOL frame is, being every frame
@@ -76,29 +76,35 @@ class LiveFrameRosterLatencyHarness {
                             put(DecodeHintType.POSSIBLE_FORMATS, formats)
                             if (tryHarder) put(DecodeHintType.TRY_HARDER, true)
                         }
-                    val samples = timed { decodeFrame(scene.plane, w, h, hints) }
-                    val hit = decodeFrame(scene.plane, w, h, hints) != null
-                    report(scene.name, w, h, name, samples, hit)
+                    val (samples, last) = timed { decodeFrame(scene.plane, w, h, hints) }
+                    report(scene.name, w, h, name, samples, hit = last != null)
                 }
 
                 // The real entry point on the current roster, printed as a row so confirming the
                 // replication is a glance down the column rather than a hand-match across formats.
-                val samples = timed { decodeYPlane(scene.plane, w, h, rowStride = w) }
-                val hit = decodeYPlane(scene.plane, w, h, rowStride = w) is BarcodeDecodeResult.DecodedBarcode
-                report(scene.name, w, h, "production", samples, hit)
+                val (samples, last) = timed { decodeYPlane(scene.plane, w, h, rowStride = w) }
+                report(scene.name, w, h, "production", samples, last is BarcodeDecodeResult.DecodedBarcode)
             }
         }
     }
 
-    /** Sorted per-call durations of [RUNS] timed invocations, after [WARMUP] untimed ones. */
-    private fun timed(decode: () -> Unit): List<Long> {
-        repeat(WARMUP) { decode() }
-        return (0 until RUNS)
-            .map {
-                val started = System.nanoTime()
-                decode()
-                System.nanoTime() - started
-            }.sorted()
+    /**
+     * Sorted per-call durations of [RUNS] timed invocations of [decode], after [WARMUP] untimed
+     * ones, paired with its last result. Returning the value rather than discarding it both saves
+     * the caller a second decode to learn whether the frame hit, and sinks the result so no part
+     * of the measured work can be optimised away as dead.
+     */
+    private fun <T> timed(decode: () -> T): Pair<List<Long>, T> {
+        var last = decode()
+        repeat(WARMUP - 1) { last = decode() }
+        val samples =
+            (0 until RUNS)
+                .map {
+                    val started = System.nanoTime()
+                    last = decode()
+                    System.nanoTime() - started
+                }.sorted()
+        return samples to last
     }
 
     @Suppress("LongParameterList") // A table row is its columns; a holder type would only hide them.
@@ -169,12 +175,11 @@ class LiveFrameRosterLatencyHarness {
                 ),
             ),
             Scene("aztec", frameWith(BarcodeFormat.AZTEC, BOARDING_PASS, width, height)),
-            // The dearest hit in the roster: PDF417 is LAST in ZXing's reader order, so it pays a
+            // The dearest 2D hit in the roster: PDF417 is LAST of the 2D readers, so it pays a
             // failed QR and a failed Aztec first. Stacked like a 1D symbol, so it needs an aspect.
-            // READ THE 640x480 ROW ONLY. Against this per-pixel noise the PDF417 detector stops
-            // locating the symbol above 640x480 whatever its size (measured), so the 1280x720 row
-            // reports the cost of a MISS, not of a hit. Uninvestigated: it is a property of the
-            // synthetic texture, and 640x480 is the resolution the live path actually runs at.
+            // Read the 640x480 row only: above that size the detector stops locating this symbol
+            // against the fixture's per-pixel noise (measured, uninvestigated — a property of the
+            // synthetic texture, and 640x480 is what the live path runs at).
             Scene(
                 "pdf417",
                 frameWith(
