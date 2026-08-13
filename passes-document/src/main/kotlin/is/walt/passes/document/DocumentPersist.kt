@@ -31,6 +31,12 @@ public sealed interface DocumentPersist {
         public val pageCount: Int,
     ) : DocumentPersist
 
+    /**
+     * A plain image. [barcodeExtraction] says why it is not a composite (wpass-pl7.5) so the
+     * consumer's confirm sheet can distinguish "no code in this image" from a watchdog kill, an
+     * oversize rejection, or a code the user declined. It defaults to
+     * [BarcodeExtractionOutcome.NotAttempted], the outcome for a caller that never opted in.
+     */
     public data class Image(
         public override val label: String,
         public override val bytes: ByteArray,
@@ -38,6 +44,7 @@ public sealed interface DocumentPersist {
         public val format: ImageFormat,
         public val widthPx: Int,
         public val heightPx: Int,
+        public val barcodeExtraction: BarcodeExtractionOutcome = BarcodeExtractionOutcome.NotAttempted,
     ) : DocumentPersist
 
     /**

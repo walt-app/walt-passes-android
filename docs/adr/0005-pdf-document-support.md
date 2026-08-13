@@ -798,6 +798,18 @@ image contains several codes, the kernel returns the **first** detected code (co
 decision, `wlt-yjn5`; ZXing's `MultiFormatReader` stops at the first match). No content
 beyond the barcode is extracted (D4 holds: no EXIF / XMP / payload-derived label).
 
+**Degrading names its reason (`wpass-pl7.5`).** Every non-composite outcome reaches the
+consumer as `DocumentPersist.Image.barcodeExtraction`: `NotAttempted` (no hook),
+`NoCodeFound`, `Failed(DecodeFailureReason)` — the decoder's own bucket verbatim,
+including the `DecodeTimedOut` / `DecoderUnavailable` split `wpass-qw3` exists to
+preserve — or `Declined`. Collapsing all four to one null made a watchdog kill read as
+"no code found in this image" to the user and to whoever was debugging, which is exactly
+the failure mode the `wpass-pl7.2` scale ladder is most likely to introduce. The outcome
+carries **no payload and no image bytes**: a BCBP payload holds passenger name and PNR,
+and the composite arm (`DocumentPersist.BarcodedImage`) stays the only place a payload
+crosses this seam — and only after the user confirmed it. Rendering per-reason copy is
+the consumer's half.
+
 ### C4. Storage: `documents` schema v6 → v7 (forward-only)
 
 The `documents` table gains nullable `barcode_payload TEXT` / `barcode_format TEXT`

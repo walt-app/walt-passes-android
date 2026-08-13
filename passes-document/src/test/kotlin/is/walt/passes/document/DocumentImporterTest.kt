@@ -209,11 +209,13 @@ class DocumentImporterTest {
         )
 
         assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
-        assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
+        val image = persisted.single() as DocumentPersist.Image
+        assertThat(image.barcodeExtraction).isEqualTo(BarcodeExtractionOutcome.NoCodeFound)
     }
 
     @Test
     fun barcodeExtractionFailureDegradesToPlainImageRatherThanFailingImport() = runTest {
+        val persisted = mutableListOf<DocumentPersist>()
         val importer = importer(
             imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
             barcodeExtract = { BarcodeDecodeResult.DecodeFailed(DecodeFailureReason.ImageDecodeFailed) },
@@ -222,9 +224,65 @@ class DocumentImporterTest {
             source = source(pngBytes),
             displayLabel = "plain.png",
             confirmBarcode = { _, _ -> true },
-            persist = {},
+            persist = { persisted += it },
         )
         assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
+        val image = persisted.single() as DocumentPersist.Image
+        assertThat(image.barcodeExtraction)
+            .isEqualTo(BarcodeExtractionOutcome.Failed(DecodeFailureReason.ImageDecodeFailed))
+    }
+
+    // -- degrade reasons stay distinguishable (wpass-pl7.5) --------------------------
+
+    @Test
+    fun timedOutAndOversizeExtractionsProduceDistinguishableReasonsAtTheSeam() = runTest {
+        // The acceptance case: a watchdog kill and an oversize rejection both degrade to a plain
+        // image, but they must NOT read alike to the consumer — a timeout is a load signal a
+        // user-initiated retry may clear, an oversize image never will.
+        val timedOut = persistedImageFor(DecodeFailureReason.DecodeTimedOut)
+        val oversize = persistedImageFor(DecodeFailureReason.ImageTooLarge)
+
+        assertThat(timedOut.barcodeExtraction)
+            .isEqualTo(BarcodeExtractionOutcome.Failed(DecodeFailureReason.DecodeTimedOut))
+        assertThat(oversize.barcodeExtraction)
+            .isEqualTo(BarcodeExtractionOutcome.Failed(DecodeFailureReason.ImageTooLarge))
+        assertThat(timedOut.barcodeExtraction).isNotEqualTo(oversize.barcodeExtraction)
+        // ...and neither collapses onto the genuinely code-free outcome.
+        assertThat(timedOut.barcodeExtraction).isNotEqualTo(BarcodeExtractionOutcome.NoCodeFound)
+        assertThat(oversize.barcodeExtraction).isNotEqualTo(BarcodeExtractionOutcome.NoCodeFound)
+    }
+
+    @Test
+    fun everyDecodeFailureReasonReachesTheSeamVerbatim() = runTest {
+        // No reason is folded into a neighbour on the way through the importer; the consumer sees
+        // the decoder's own bucket, including the DecoderUnavailable/DecodeTimedOut split wpass-qw3
+        // exists to preserve.
+        for (reason in DecodeFailureReason.entries) {
+            assertThat(persistedImageFor(reason).barcodeExtraction)
+                .isEqualTo(BarcodeExtractionOutcome.Failed(reason))
+        }
+    }
+
+    @Test
+    fun aDeclinedReadNamesItselfAndCarriesNoPayload() = runTest {
+        // A BCBP payload carries passenger name and PNR: the degrade reason says the user declined,
+        // never what they declined.
+        val persisted = mutableListOf<DocumentPersist>()
+        val importer = importer(
+            imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
+            barcodeExtract = { BarcodeDecodeResult.DecodedBarcode(SECRET_PAYLOAD, ScannableFormat.Aztec) },
+        )
+
+        importer.import(
+            source = source(pngBytes),
+            displayLabel = "boarding.png",
+            confirmBarcode = { _, _ -> false },
+            persist = { persisted += it },
+        )
+
+        val image = persisted.single() as DocumentPersist.Image
+        assertThat(image.barcodeExtraction).isEqualTo(BarcodeExtractionOutcome.Declined)
+        assertThat(image.barcodeExtraction.toString()).doesNotContain(SECRET_PAYLOAD)
     }
 
     @Test
@@ -245,7 +303,9 @@ class DocumentImporterTest {
 
         assertThat(extractionCalled).isFalse()
         assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
-        assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
+        val image = persisted.single() as DocumentPersist.Image
+        // NotAttempted, not NoCodeFound: nothing looked at the image, so absence is unknown.
+        assertThat(image.barcodeExtraction).isEqualTo(BarcodeExtractionOutcome.NotAttempted)
     }
 
     @Test
@@ -266,7 +326,8 @@ class DocumentImporterTest {
         )
 
         assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
-        assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
+        val image = persisted.single() as DocumentPersist.Image
+        assertThat(image.barcodeExtraction).isEqualTo(BarcodeExtractionOutcome.Declined)
     }
 
     @Test
@@ -312,6 +373,7 @@ class DocumentImporterTest {
 
         assertThat(result).isInstanceOf(DocumentImportResult.ImportedImage::class.java)
         assertThat(persisted.single()).isInstanceOf(DocumentPersist.Image::class.java)
+
     }
 
     @Test
@@ -383,6 +445,22 @@ class DocumentImporterTest {
             idGenerator = { "fixed-id" },
         )
 
+    /** Imports an image whose isolated barcode extraction failed with [reason]. */
+    private suspend fun persistedImageFor(reason: DecodeFailureReason): DocumentPersist.Image {
+        val persisted = mutableListOf<DocumentPersist>()
+        val importer = importer(
+            imageDecode = { _, _ -> ImageDecodeOutcome.Decoded(byteArrayOf(7), 100, 100) },
+            barcodeExtract = { BarcodeDecodeResult.DecodeFailed(reason) },
+        )
+        importer.import(
+            source = source(pngBytes),
+            displayLabel = "card.png",
+            confirmBarcode = { _, _ -> true },
+            persist = { persisted += it },
+        )
+        return persisted.single() as DocumentPersist.Image
+    }
+
     private fun source(bytes: ByteArray): DocumentImportSource.FileDescriptor {
         val file: File = tmp.newFile()
         file.writeBytes(bytes)
@@ -413,5 +491,9 @@ class DocumentImporterTest {
     private companion object {
         // Arbitrary fixed epoch-ms the injected wall clock returns, so importedAt is pinnable.
         const val FIXED_WALL_CLOCK_MS: Long = 1_700_000_000_000L
+
+        // Stands in for a BCBP payload (passenger name + PNR) to assert it never rides a
+        // degrade reason.
+        const val SECRET_PAYLOAD: String = "M1DOE/JANE       EABC123 SFOJFK"
     }
 }
