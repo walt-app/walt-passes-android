@@ -1,6 +1,8 @@
 package `is`.walt.passes.storage
 
 import android.content.Context
+import `is`.walt.passes.core.BarcodeEncoder
+import `is`.walt.passes.core.EncodeResult
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.ScannableCard
@@ -229,35 +231,10 @@ public class SqlCipherPassRepository internal constructor(
     override suspend fun createScannableCard(
         input: ScannableCardCreateInput,
     ): StorageResult<ScannableCardRecordId> = runIo {
-        // Validator does not use the id for validation; storage mints the real one
-        // post-insert and listAll() rehydrates the StateFlow with the stringified row id.
-        val validation = ScannableCardInputValidator.validate(
-            input = input,
-            id = ScannableCardId(""),
-            createdAt = PassInstant(clock()),
-        )
-        val approved = when (validation) {
-            is ScannableCardCreateResult.Success -> validation.card
-            is ScannableCardCreateResult.InvalidLabel ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.InvalidLabel(validation.reason),
-                    telemetryKind = ScannableCardRejectedKind.LabelInvalid,
-                )
-            is ScannableCardCreateResult.InvalidPayload ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.InvalidPayload(validation.reason),
-                    telemetryKind = ScannableCardRejectedKind.PayloadInvalid,
-                )
-            is ScannableCardCreateResult.UnsupportedFormat ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.UnsupportedFormat(validation.format),
-                    telemetryKind = ScannableCardRejectedKind.FormatUnsupported,
-                )
-            is ScannableCardCreateResult.EncoderFailure ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.EncoderFailure(validation.reason),
-                    telemetryKind = ScannableCardRejectedKind.EncoderFailed,
-                )
+        // listAll() rehydrates the StateFlow with the stringified row id storage mints below.
+        val approved = when (val approval = approveScannableCard(input)) {
+            is StorageResult.Success -> approval.value
+            is StorageResult.Failure -> return@runIo approval
         }
 
         val outcome = writeMutex.withLock {
@@ -283,36 +260,11 @@ public class SqlCipherPassRepository internal constructor(
         id: ScannableCardRecordId,
         input: ScannableCardCreateInput,
     ): StorageResult<Unit> = runIo {
-        // Validator does not consume the id or timestamp for validation logic; storage
-        // preserves the existing row's created_at_epoch_ms at the SQL layer, so the
-        // placeholders below never reach disk.
-        val validation = ScannableCardInputValidator.validate(
-            input = input,
-            id = ScannableCardId(id.value.toString()),
-            createdAt = PassInstant(clock()),
-        )
-        val approved = when (validation) {
-            is ScannableCardCreateResult.Success -> validation.card
-            is ScannableCardCreateResult.InvalidLabel ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.InvalidLabel(validation.reason),
-                    telemetryKind = ScannableCardRejectedKind.LabelInvalid,
-                )
-            is ScannableCardCreateResult.InvalidPayload ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.InvalidPayload(validation.reason),
-                    telemetryKind = ScannableCardRejectedKind.PayloadInvalid,
-                )
-            is ScannableCardCreateResult.UnsupportedFormat ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.UnsupportedFormat(validation.format),
-                    telemetryKind = ScannableCardRejectedKind.FormatUnsupported,
-                )
-            is ScannableCardCreateResult.EncoderFailure ->
-                return@runIo rejectScannableCard(
-                    ScannableCardRejectionReason.EncoderFailure(validation.reason),
-                    telemetryKind = ScannableCardRejectedKind.EncoderFailed,
-                )
+        // The existing row's created_at_epoch_ms is preserved at the SQL layer, so the
+        // approved card's placeholder timestamp never reaches disk.
+        val approved = when (val approval = approveScannableCard(input)) {
+            is StorageResult.Success -> approval.value
+            is StorageResult.Failure -> return@runIo approval
         }
 
         val matched = writeMutex.withLock {
@@ -419,8 +371,74 @@ public class SqlCipherPassRepository internal constructor(
     }
 
     /**
-     * Single emission point for a scannable-card validator rejection. Same discipline
-     * as [rejectDocument]: skip [failure] so `onStorageFailure` does not double-fire.
+     * The approval gate both scannable-card write paths share: kernel validation, then a
+     * trial encode of what the validator approved. This is the "orchestrator wrapping
+     * validation + encoding into a single create flow" that [BarcodeEncoder]'s KDoc names,
+     * so the encoder refusal re-enters the kernel result family as
+     * [ScannableCardCreateResult.EncoderFailure] and one `when` maps every arm — validator
+     * and encoder alike — onto its storage rejection.
+     *
+     * The trial encode is what keeps a card nothing can render off disk: a payload can
+     * clear [ScannableCardInputValidator] and still overflow its symbology (see
+     * `ScannableFormatConstraints`' cap KDoc for why the caps cannot predict this), and
+     * without an encode here the row persists and first surfaces as an empty barcode with
+     * no reason attached (wpass-1kg).
+     *
+     * The [ScannableCardId] is a placeholder: the validator does not read it, and both
+     * write paths take only payload / format / label off the approved card — storage mints
+     * the real id at insert and preserves it across an update.
+     *
+     * A rejection has already emitted its `onScannableCardRejected` event; callers
+     * propagate the [StorageResult.Failure] unchanged.
+     */
+    private fun approveScannableCard(input: ScannableCardCreateInput): StorageResult<ScannableCard> {
+        val validation = ScannableCardInputValidator.validate(
+            input = input,
+            id = ScannableCardId(""),
+            createdAt = PassInstant(clock()),
+        )
+        // Only an approved card is worth an encode; every other arm passes through
+        // untouched to the single mapping below.
+        val approval = when (validation) {
+            is ScannableCardCreateResult.Success -> trialEncode(validation.card)
+            else -> validation
+        }
+        return when (approval) {
+            is ScannableCardCreateResult.Success -> StorageResult.Success(approval.card)
+            is ScannableCardCreateResult.InvalidLabel -> rejectScannableCard(
+                ScannableCardRejectionReason.InvalidLabel(approval.reason),
+                telemetryKind = ScannableCardRejectedKind.LabelInvalid,
+            )
+            is ScannableCardCreateResult.InvalidPayload -> rejectScannableCard(
+                ScannableCardRejectionReason.InvalidPayload(approval.reason),
+                telemetryKind = ScannableCardRejectedKind.PayloadInvalid,
+            )
+            is ScannableCardCreateResult.UnsupportedFormat -> rejectScannableCard(
+                ScannableCardRejectionReason.UnsupportedFormat(approval.format),
+                telemetryKind = ScannableCardRejectedKind.FormatUnsupported,
+            )
+            is ScannableCardCreateResult.EncoderFailure -> rejectScannableCard(
+                ScannableCardRejectionReason.EncoderFailure(approval.reason),
+                telemetryKind = ScannableCardRejectedKind.EncoderFailed,
+            )
+        }
+    }
+
+    /**
+     * Re-approves [card] only if its `(payload, format)` actually encodes. The matrix is
+     * discarded — the renderer re-encodes at draw time against its own size — so this
+     * costs one encode per save on a non-hot path and yields only the verdict.
+     */
+    private fun trialEncode(card: ScannableCard): ScannableCardCreateResult =
+        when (val encoded = BarcodeEncoder.encode(card.payload, card.format)) {
+            is EncodeResult.Success -> ScannableCardCreateResult.Success(card)
+            is EncodeResult.Failure -> ScannableCardCreateResult.EncoderFailure(encoded.reason)
+        }
+
+    /**
+     * Single emission point for a scannable-card rejection, validator or encoder. Same
+     * discipline as [rejectDocument]: skip [failure] so `onStorageFailure` does not
+     * double-fire.
      */
     private fun <T> rejectScannableCard(
         reason: ScannableCardRejectionReason,

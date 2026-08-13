@@ -2,6 +2,7 @@ package `is`.walt.passes.storage
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.EncoderFailureReason
 import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
@@ -65,6 +66,12 @@ import org.robolectric.annotation.Config
  *     when the input passed validation; an invalid input against an unknown id
  *     surfaces as [StorageError.ScannableCardRejected] (validation precedes the row
  *     lookup, mirroring `updateDocumentLabel`).
+ * 11. Both write paths trial-encode before persisting, so a card nothing can render is
+ *     rejected rather than stored blank: over-capacity payloads surface
+ *     [EncoderFailureReason.PayloadTooDense] and writer-refused ones
+ *     [EncoderFailureReason.WriterRejected], both on the `EncoderFailed` telemetry
+ *     channel. A payload at the full character cap still encodes and is stored, so the
+ *     gate does not over-reject what the caps admit.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(AndroidJUnit4::class)
@@ -172,6 +179,158 @@ class ScannableCardRepositoryTest {
         val rows = repo.observeScannableCards().first()
         assertThat(rows).hasSize(1)
         assertThat(rows[0].format).isEqualTo(ScannableFormat.Aztec)
+    }
+
+    @Test
+    fun createWithAztecPayloadOverEncoderCapacityIsRejectedAsTooDense() = runTest {
+        // 700 three-byte characters: under the 1500-character Aztec cap the validator
+        // enforces, over the ~623 three-byte characters the writer holds at 33% ECC.
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val result = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = DENSE_MULTIBYTE_PAYLOAD,
+                format = ScannableFormat.Aztec,
+                label = "Boarding pass",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        val reason = rejected.reason as ScannableCardRejectionReason.EncoderFailure
+        assertThat(reason.reason).isEqualTo(EncoderFailureReason.PayloadTooDense)
+        // Encoder rejection shares the validator's channel and does NOT also emit
+        // `failure:ScannableCardRejected:...`.
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-rejected:EncoderFailed",
+        ).inOrder()
+        assertThat(repo.observeScannableCards().first()).isEmpty()
+    }
+
+    @Test
+    fun createWithPdf417PayloadOverEncoderCapacityIsRejectedAsTooDense() = runTest {
+        // Same payload against PDF417's 800-character cap, where the writer holds ~528
+        // three-byte characters at error-correction level 3.
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val result = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = DENSE_MULTIBYTE_PAYLOAD,
+                format = ScannableFormat.Pdf417,
+                label = "Boarding pass",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        val reason = rejected.reason as ScannableCardRejectionReason.EncoderFailure
+        assertThat(reason.reason).isEqualTo(EncoderFailureReason.PayloadTooDense)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-rejected:EncoderFailed",
+        ).inOrder()
+        assertThat(repo.observeScannableCards().first()).isEmpty()
+    }
+
+    @Test
+    fun createWithPayloadTheWriterRefusesOutrightIsRejectedAsWriterRejected() = runTest {
+        // The gate's other reachable arm. An emoji is a surrogate pair, which the validator
+        // admits (visible, neither Cf nor Cc) and PDF417 cannot encode at any length.
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val result = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = SUPPLEMENTARY_PLANE_PAYLOAD,
+                format = ScannableFormat.Pdf417,
+                label = "Boarding pass",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        val reason = rejected.reason as ScannableCardRejectionReason.EncoderFailure
+        val writerRejected = reason.reason as EncoderFailureReason.WriterRejected
+        assertThat(writerRejected.format).isEqualTo(ScannableFormat.Pdf417)
+        // `detail` is the one third-party string crossing this API; it must never carry
+        // the payload back out (see the arm's kernel KDoc).
+        assertThat(writerRejected.detail).doesNotContain(SUPPLEMENTARY_PLANE_PAYLOAD)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-rejected:EncoderFailed",
+        ).inOrder()
+        assertThat(repo.observeScannableCards().first()).isEmpty()
+    }
+
+    @Test
+    fun updateWithPayloadOverEncoderCapacityIsRejectedAndStoredRowIsUnchanged() = runTest {
+        // Edit shares the create gate, so a rendering card cannot be edited into a blank one.
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val seed = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = "WALT-CHECK-1",
+                format = ScannableFormat.Aztec,
+                label = "seed",
+            ),
+        )
+        check(seed is StorageResult.Success)
+
+        val result = repo.updateScannableCard(
+            seed.value,
+            ScannableCardCreateInput(
+                payload = DENSE_MULTIBYTE_PAYLOAD,
+                format = ScannableFormat.Aztec,
+                label = "new",
+            ),
+        )
+
+        check(result is StorageResult.Failure)
+        val rejected = result.error as StorageError.ScannableCardRejected
+        val reason = rejected.reason as ScannableCardRejectionReason.EncoderFailure
+        assertThat(reason.reason).isEqualTo(EncoderFailureReason.PayloadTooDense)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-created:Aztec",
+            "card-rejected:EncoderFailed",
+        ).inOrder()
+        val rows = repo.observeScannableCards().first()
+        assertThat(rows).hasSize(1)
+        assertThat(rows[0].payload).isEqualTo("WALT-CHECK-1")
+        assertThat(rows[0].label).isEqualTo("seed")
+    }
+
+    @Test
+    fun createWithAccentedPayloadAtTheFullPdf417CapStillPersists() = runTest {
+        // The gate must not become a stricter cap. "é" is inside ISO-8859-1, so PDF417's
+        // AUTO_ECI spends one byte on it: this is the full 800-character cap in the
+        // cheapest case, well inside the writer's 1,766 single-byte characters.
+        val cards = FakeScannableCardStore()
+        val telemetry = RecordingGuard()
+        val repo = repo(cards, telemetry)
+
+        val result = repo.createScannableCard(
+            ScannableCardCreateInput(
+                payload = "é".repeat(800),
+                format = ScannableFormat.Pdf417,
+                label = "Accented",
+            ),
+        )
+
+        check(result is StorageResult.Success)
+        assertThat(telemetry.events).containsExactly(
+            "init:Tee",
+            "card-created:Pdf417",
+        ).inOrder()
+        assertThat(repo.observeScannableCards().first()).hasSize(1)
     }
 
     @Test
@@ -613,5 +772,14 @@ class ScannableCardRepositoryTest {
             clearing: Boolean,
         ) = Unit
         override fun onPassRejected(kind: PassUpdateRejectedKind) = Unit
+    }
+
+    private companion object {
+        // Synthetic, not lifted from a real pass: the epic treats decoded payload content
+        // as PII, and the property under test is byte length, not what the bytes say.
+        val DENSE_MULTIBYTE_PAYLOAD: String = "東".repeat(700)
+
+        // Short on purpose — no writer refuses this for its size.
+        const val SUPPLEMENTARY_PLANE_PAYLOAD: String = "WALT-🎫-1"
     }
 }
