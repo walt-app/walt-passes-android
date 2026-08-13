@@ -6,17 +6,14 @@ import org.junit.Test
 /**
  * Behavior lock for [ScannableFormatConstraints], the per-symbology charset / length / structural
  * table. [ScannableCardInputValidatorTest] covers the same rules end-to-end for the formats a card
- * can actually be minted in; this suite is where the rules for the DECODE-ONLY formats live,
- * because the validator refuses those before any of them is consulted (wpass-pl7.1).
- *
- * When wpass-pl7.6 wires the writers and empties [ScannableFormatConstraints.decodeOnly], the
- * Pdf417 / Aztec cases below should gain validator-level twins rather than move.
+ * can actually be minted in, which is every one of them.
  */
 class ScannableFormatConstraintsTest {
     @Test
-    fun decodeOnlyHoldsExactlyTheFormatsWithNoWriter() {
-        assertThat(ScannableFormatConstraints.decodeOnly)
-            .containsExactly(ScannableFormat.Pdf417, ScannableFormat.Aztec)
+    fun noFormatIsDecodeOnly() {
+        // Every roster member both decodes and encodes. The set stays on the surface as the
+        // create-boundary refusal a decode-first addition would need.
+        assertThat(ScannableFormatConstraints.decodeOnly).isEmpty()
     }
 
     @Test

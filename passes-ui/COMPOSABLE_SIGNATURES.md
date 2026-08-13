@@ -208,11 +208,11 @@ The sheets fire `telemetry.onSecuritySheetShown` on first composition,
 `telemetry.onSecuritySheetDismissed` on any other dismissal. Confirming closes the
 sheet AND calls `onConfirm`; dismissal closes WITHOUT firing `onConfirm`.
 
-## Create-time URI confirmation gate (QR only)
+## Create-time URI confirmation gate (byte-capable formats)
 
 ```kotlin
 /**
- * Create-time URI-scheme confirmation gate for a QR `ScannableCard`. Shown by the
+ * Create-time URI-scheme confirmation gate for a `ScannableCard`. Shown by the
  * consumer's create flow between input validation and persistence whenever the
  * classified [QrPayloadKind] would auto-act on a future scanner phone. Cancel is
  * the focused, filled action; Confirm is the lower-emphasis text button - inverted
@@ -240,10 +240,13 @@ public fun BarcodeCreateConfirmSheet(
 )
 
 /**
- * Returns `false` only for [QrPayloadKind.PlainText]. Consumer create flows
- * branch on this to persist a plain-text QR directly without invoking the gate.
+ * Returns `false` for [QrPayloadKind.PlainText] and for the 1D symbologies, which
+ * no scanner auto-acts on. Consumer create flows branch on this to persist
+ * directly without invoking the gate. [format] is a parameter rather than an
+ * assumed `Qr` so that a roster member added later is a compile error here rather
+ * than a gate that quietly stops covering a format (C4).
  */
-public fun QrPayloadKind.requiresCreateConfirmation(): Boolean
+public fun QrPayloadKind.requiresCreateConfirmation(format: ScannableFormat): Boolean
 
 /**
  * Test tags for the two action buttons on `BarcodeCreateConfirmSheet`. Exposed

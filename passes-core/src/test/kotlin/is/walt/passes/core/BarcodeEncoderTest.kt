@@ -1,6 +1,7 @@
 package `is`.walt.passes.core
 
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.internal.ZxingBarcodeEncoder
 import org.junit.Test
 
 /**
@@ -62,6 +63,43 @@ class BarcodeEncoderTest {
         assertThat(anyModuleSet(matrix)).isTrue()
     }
 
+    @Test
+    fun aztecEncodesProducingSquareMatrix() {
+        val result = BarcodeEncoder.encode(BCBP_SHAPED_PAYLOAD, ScannableFormat.Aztec)
+        val matrix = (result as EncodeResult.Success).matrix
+        // Aztec is square. Locks the dispatch to AztecWriter rather than the stacked PDF417
+        // writer, which the same boarding-pass payload would also encode successfully.
+        assertThat(matrix.width).isEqualTo(matrix.height)
+        assertThat(anyModuleSet(matrix)).isTrue()
+    }
+
+    @Test
+    fun pdf417EncodesProducingWideStackedMatrix() {
+        val result = BarcodeEncoder.encode(BCBP_SHAPED_PAYLOAD, ScannableFormat.Pdf417)
+        val matrix = (result as EncodeResult.Success).matrix
+        assertThat(anyModuleSet(matrix)).isTrue()
+        // Stacked, so taller than the one-module strip a 1D writer emits but far wider than
+        // tall. The band also pins the 2-module MARGIN: at ZXing's default 30-module quiet
+        // zone this same payload lands at 2.55:1 and fails the lower bound, which is the
+        // regression that would silently letterbox the render slot.
+        assertThat(matrix.height).isGreaterThan(1)
+        val aspect = matrix.width.toDouble() / matrix.height
+        assertThat(aspect).isGreaterThan(3.0)
+        assertThat(aspect).isLessThan(5.0)
+    }
+
+    @Test
+    fun theTwoDimensionalFormatsEncodeAtTheirValidatorCap() {
+        // Single-byte only, which is as far as the caps reach: they count characters while
+        // capacity is spent in bytes, so a multibyte payload can sit under the cap and still
+        // overflow (see multibytePayloadUnderTheCharacterCapStillLiftsToPayloadTooDense).
+        // Re-derive both caps if either error-correction pin rises.
+        for ((format, cap) in listOf(ScannableFormat.Pdf417 to 800, ScannableFormat.Aztec to 1_500)) {
+            val result = BarcodeEncoder.encode("A".repeat(cap), format)
+            assertThat(result).isInstanceOf(EncodeResult.Success::class.java)
+        }
+    }
+
     // ---- per-format encoder rejection ----
 
     @Test
@@ -84,6 +122,55 @@ class BarcodeEncoderTest {
     }
 
     @Test
+    fun multibytePayloadUnderTheCharacterCapStillLiftsToPayloadTooDense() {
+        // The caps are in CHARACTERS, capacity is in bytes: 700 CJK characters is under both
+        // 2D caps and over both byte capacities (Aztec fits 623, PDF417 528). The user has to
+        // be told to shorten it — WriterRejected would send them to change format instead, and
+        // no arm at all leaves a card that saves and then renders blank.
+        for (format in listOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
+            val result = BarcodeEncoder.encode("東".repeat(700), format)
+
+            assertThat((result as EncodeResult.Failure).reason)
+                .isEqualTo(EncoderFailureReason.PayloadTooDense)
+        }
+    }
+
+    @Test
+    fun pdf417RefusesSupplementaryCharactersWithoutEchoingThePayload() {
+        // Refused before the writer runs, which is what keeps the payload out of detail:
+        // PDF417Writer's own "Failed to encode" message interpolates the WHOLE input, and
+        // detail is the one third-party string crossing the kernel boundary. Named for the
+        // refusal rather than the scrub, because the refusal is what this input exercises.
+        val payload = "https://example.org/secret-token-abc123/👍"
+
+        val reason = (BarcodeEncoder.encode(payload, ScannableFormat.Pdf417) as EncodeResult.Failure).reason
+
+        assertThat((reason as EncoderFailureReason.WriterRejected).format).isEqualTo(ScannableFormat.Pdf417)
+        assertThat(reason.detail).doesNotContain("secret-token-abc123")
+    }
+
+    @Test
+    fun payloadScrubberRemovesThePayloadFromAThirdPartyMessage() {
+        // Exercised directly because no input reaches it end-to-end: the surrogate refusal
+        // above blocks the one ZXing message that echoes a whole payload. The scrub is the
+        // backstop if that guard is ever relaxed or a reworded message starts echoing input,
+        // so it needs coverage of its own or it rots unnoticed.
+        val payload = "MEMBER-9988776655-SECRET"
+
+        with(ZxingBarcodeEncoder) {
+            assertThat("""Failed to encode "$payload"""".withoutPayload(payload))
+                .doesNotContain(payload)
+            // Messages that never carried the payload are passed through untouched, so
+            // ordinary diagnostics keep their detail.
+            assertThat("Bad character in input: ASCII value=233".withoutPayload(payload))
+                .isEqualTo("Bad character in input: ASCII value=233")
+            // An empty payload must not turn every message into redactions.
+            assertThat("Empty message not allowed".withoutPayload(""))
+                .isEqualTo("Empty message not allowed")
+        }
+    }
+
+    @Test
     fun qrPayloadTooDenseLiftsToDedicatedArm() {
         // Largest QR version maxes out around ~2,953 bytes at error correction L; at level M
         // (the kernel's pin) the byte ceiling is ~2,331. A 4,000-char payload exceeds every
@@ -103,7 +190,7 @@ class BarcodeEncoderTest {
         // Locks no-throw AND per-format dispatch correctness in one test. Asserts on
         // WriterRejected.format specifically; PayloadTooDense is not a plausible arm for an
         // empty input (zero bytes can never exceed any ceiling).
-        for (format in ScannableFormat.entries - notEncodable) {
+        for (format in ScannableFormat.entries) {
             val result = BarcodeEncoder.encode("", format)
             val reason = (result as EncodeResult.Failure).reason
             assertThat(reason).isInstanceOf(EncoderFailureReason.WriterRejected::class.java)
@@ -112,16 +199,26 @@ class BarcodeEncoderTest {
     }
 
     @Test
-    fun decodeOnlyFormatsReportFormatNotEncodable() {
-        // Pdf417/Aztec decode but have no writer until wpass-pl7.6. The refusal must be the
-        // dedicated build-capability arm, not WriterRejected — a consumer that reads
-        // WriterRejected would tell the user to shorten a payload that was never the problem.
-        // Asserted on a valid payload so this cannot pass for the empty-input reason above.
-        for (format in notEncodable) {
-            val result = BarcodeEncoder.encode("WALT-CHECK-1", format)
+    fun everyRosterFormatEncodes() {
+        // Runs a writer per format rather than asking isCreatable(), which with an empty
+        // decodeOnly set answers true without encoding anything. Fails closed on a roster
+        // addition: the map has to gain a payload, and that payload has to actually render.
+        val payloads =
+            mapOf(
+                ScannableFormat.Code128 to "ABC123 xyz",
+                ScannableFormat.Code39 to "HELLO-123",
+                ScannableFormat.Ean13 to "1234567890128",
+                ScannableFormat.UpcA to "036000291452",
+                ScannableFormat.Qr to "https://example.org/loyalty/123",
+                ScannableFormat.Pdf417 to "WALT-CHECK-1",
+                ScannableFormat.Aztec to "WALT-CHECK-1",
+            )
+        assertThat(payloads.keys).containsExactlyElementsIn(ScannableFormat.entries)
 
-            assertThat((result as EncodeResult.Failure).reason)
-                .isEqualTo(EncoderFailureReason.FormatNotEncodable(format))
+        for ((format, payload) in payloads) {
+            val matrix = (BarcodeEncoder.encode(payload, format) as EncodeResult.Success).matrix
+            assertThat(anyModuleSet(matrix)).isTrue()
+            assertThat(format.isCreatable()).isTrue()
         }
     }
 
@@ -181,9 +278,6 @@ class BarcodeEncoderTest {
         assertThat(a).isNotEqualTo(different)
     }
 
-    /** Roster members that decode but do not yet encode; wpass-pl7.6 empties this set. */
-    private val notEncodable = setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)
-
     private fun anyModuleSet(matrix: BarcodeMatrix): Boolean {
         for (y in 0 until matrix.height) {
             for (x in 0 until matrix.width) {
@@ -191,5 +285,17 @@ class BarcodeEncoderTest {
             }
         }
         return false
+    }
+
+    private companion object {
+        /**
+         * A synthetic payload of IATA BCBP shape and length — the sizing case the Pdf417 /
+         * Aztec writers exist to serve. Invented, never a decoded boarding pass: a real BCBP
+         * string carries passenger name and PNR, which wpass-pl7 bars from any committed
+         * fixture, log line or bead note.
+         */
+        const val BCBP_SHAPED_PAYLOAD =
+            "M1TEST/PASSENGER      EABC123 CPHLHRSK 0501 227M014A0058 147>5180      " +
+                "B1A              2A05512345678901 0                          "
     }
 }

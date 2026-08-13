@@ -104,18 +104,14 @@ public sealed interface EncoderFailureReason {
     ) : EncoderFailureReason
 
     /**
-     * The payload is too dense to encode at the symbology's maximum version (only QR can
-     * surface this — the 1D writers reject density mismatches under [WriterRejected]). Distinct
-     * arm so the consumer UI can specifically suggest shortening the payload rather than
-     * switching format.
+     * The payload is too dense to encode at the symbology's maximum size. Surfaced by the three
+     * 2D symbologies — QR, PDF417 and Aztec; the 1D writers reject density mismatches under
+     * [WriterRejected]. Distinct arm so the consumer UI can specifically suggest shortening the
+     * payload rather than switching format.
+     *
+     * Reachable even for a payload that cleared [ScannableCardInputValidator]: the 2D length
+     * caps count characters while capacity is spent in bytes, so a multibyte payload can sit
+     * under its cap and still overflow.
      */
     public object PayloadTooDense : EncoderFailureReason
-
-    /**
-     * This kernel build has no writer wired for [format], so the symbol cannot be rendered.
-     * Distinct from [WriterRejected], which means a wired writer looked at this payload and
-     * said no: this arm is about the build, not the input, so a shorter payload cannot help.
-     * Temporary — wpass-pl7.6 removes it once every roster member encodes.
-     */
-    public data class FormatNotEncodable(public val format: ScannableFormat) : EncoderFailureReason
 }
