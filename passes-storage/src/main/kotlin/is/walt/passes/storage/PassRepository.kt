@@ -191,25 +191,32 @@ public interface PassRepository {
      * single insert-time choke point: a validation rejection bubbles up as
      * [StorageError.ScannableCardRejected] with the typed reason preserved, never as a
      * generic infra failure, and the row never reaches disk.
+     *
+     * An approved input is then trial-encoded with the kernel's `BarcodeEncoder` before
+     * the write, and an encoder refusal is rejected the same way, under
+     * [ScannableCardRejectionReason.EncoderFailure]. The validator alone cannot decide
+     * this: the 2D length caps count characters while writer capacity is spent in bytes,
+     * so a multibyte payload can clear its cap and still overflow the symbology. Without
+     * the encode such a card persists and renders blank with no reason attached.
      */
     public suspend fun createScannableCard(
         input: ScannableCardCreateInput,
     ): StorageResult<ScannableCardRecordId>
 
     /**
-     * Overwrites the payload / format / label of an existing scannable-card row. Re-runs
-     * the kernel `ScannableCardInputValidator` (the single insert-time choke point per
-     * [createScannableCard]'s KDoc) on the new [input] before the row is touched; a
-     * validation rejection bubbles up as [StorageError.ScannableCardRejected] with the
-     * typed reason preserved and shares the same `onScannableCardRejected` telemetry
-     * channel as [createScannableCard]. The row is not modified on rejection.
+     * Overwrites the payload / format / label of an existing scannable-card row. Runs the
+     * same validate-then-trial-encode gate as [createScannableCard] on the new [input]
+     * before the row is touched; either rejection bubbles up as
+     * [StorageError.ScannableCardRejected] with the typed reason preserved and shares the
+     * same `onScannableCardRejected` telemetry channel. The row is not modified on
+     * rejection, so an edit cannot turn a rendering card into a blank one.
      *
-     * Validation is checked before the row is loaded, so an invalid [input] against an
-     * unknown [id] surfaces as [StorageError.ScannableCardRejected], not
+     * The gate runs before the row is loaded, so an invalid [input] against an unknown
+     * [id] surfaces as [StorageError.ScannableCardRejected], not
      * [StorageError.IntegrityViolation], mirroring [updateDocumentLabel]'s precedence.
      *
      * Returns [StorageError.IntegrityViolation] if no row matches [id] and the input
-     * passed validation. On success the row's `created_at_epoch_ms` is unchanged (edit
+     * cleared the gate. On success the row's `created_at_epoch_ms` is unchanged (edit
      * is not a re-insert), so the row's position in [observeScannableCards] is preserved.
      */
     public suspend fun updateScannableCard(

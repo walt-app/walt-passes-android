@@ -66,9 +66,10 @@ public sealed interface StorageError {
 
     /**
      * A scannable-card insert was rejected by the kernel validator
-     * (`ScannableCardInputValidator`). Carries the typed kernel rejection so the
-     * consumer's error UI can localize a specific message without re-running
-     * validation. The row never reaches disk.
+     * (`ScannableCardInputValidator`) or by the trial encode that follows it
+     * (`BarcodeEncoder`). Carries the typed kernel rejection so the consumer's error UI
+     * can localize a specific message without re-running validation. The row never
+     * reaches disk.
      */
     public data class ScannableCardRejected(
         public val reason: ScannableCardRejectionReason,
@@ -103,12 +104,13 @@ public sealed interface StorageError {
 }
 
 /**
- * Why a [PassRepository.createScannableCard] call was refused. The first two arms
- * mirror what `ScannableCardInputValidator` produces today (structural payload and
- * label checks). The latter two cover the kernel result family's remaining arms; the
- * validator does not produce them in the current build, but typing them here keeps
- * the defensive path loud rather than collapsing them into [StorageError.Unknown] on
- * the day the kernel does start surfacing one.
+ * Why a [PassRepository.createScannableCard] or [PassRepository.updateScannableCard]
+ * call was refused. The first two arms mirror what `ScannableCardInputValidator`
+ * produces (structural payload and label checks); [EncoderFailure] comes from the trial
+ * encode the repository runs before persisting, which is the only check that can see a
+ * payload no writer can render. [UnsupportedFormat] is the one arm nothing produces in
+ * the current build — typed here so a decode-only format reaching the create path stays
+ * loud rather than collapsing into [StorageError.Unknown].
  */
 public sealed interface ScannableCardRejectionReason {
     public data class InvalidLabel(public val reason: LabelRejection) : ScannableCardRejectionReason
