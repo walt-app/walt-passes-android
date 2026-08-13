@@ -19,9 +19,8 @@ package `is`.walt.passes.core
  * DataMatrix stays out deliberately — it widens the same surface (encoder, storage, consumer
  * format pickers) for no reported user need.
  *
- * Every member both decodes and encodes; wpass-pl7.6 closed the read/write asymmetry by
- * wiring the [Pdf417] and [Aztec] writer arms with pinned error-correction, compaction and
- * quiet-zone defaults (see `ZxingBarcodeEncoder`).
+ * Every member both decodes and encodes. The error-correction, compaction and quiet-zone
+ * defaults each writer runs under are pinned and argued in `ZxingBarcodeEncoder`.
  *
  * Distinct type from [BarcodeFormat] (the PKPASS-pass barcode enum). The two are
  * deliberately not unified — a verified PKPASS barcode and a user-typed card barcode are
@@ -41,8 +40,8 @@ public enum class ScannableFormat {
 
 /**
  * Whether a user can create a [ScannableCard] in this format — which is to say whether this
- * build can render one. True for every member since wpass-pl7.6; it stays on the surface as
- * the gate a future decode-first roster addition needs.
+ * build can render one. True for every member today; it stays on the surface as the gate a
+ * decode-first roster addition would need.
  *
  * **Consumers building a format picker must filter on this.** The picker cannot be derived from
  * [ScannableFormat.entries] alone: [ScannableCardInputValidator] refuses a non-creatable format
@@ -60,10 +59,9 @@ public fun ScannableFormat.isCreatable(): Boolean = this !in ScannableFormatCons
  * hold membership numbers a scanner hands back as text.
  *
  * This is the format half of the C4 create-time confirmation gate in
- * `docs/SCANNABLE_CARD_THREAT_MODEL.md`; [QrPayloadClassifier] is the payload half. Keying
- * that gate on `== Qr` was correct only while QR was the roster's one byte-capable format —
- * wpass-pl7.6 wired the [Pdf417] and [Aztec] writers, so an Aztec carrying a URL would
- * otherwise render as a scannable code having never been confirmed.
+ * `docs/SCANNABLE_CARD_THREAT_MODEL.md`; [QrPayloadClassifier] is the payload half. Gating on
+ * `== Qr` instead would let an Aztec carrying a URL render as a scannable code having never
+ * been confirmed.
  *
  * An exhaustive `when` rather than a set lookup on purpose: a new roster member is a decision
  * someone has to make here, surfaced as a compile error. Deliberately NOT folded into

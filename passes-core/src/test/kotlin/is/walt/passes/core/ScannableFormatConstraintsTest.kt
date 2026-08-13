@@ -6,14 +6,13 @@ import org.junit.Test
 /**
  * Behavior lock for [ScannableFormatConstraints], the per-symbology charset / length / structural
  * table. [ScannableCardInputValidatorTest] covers the same rules end-to-end for the formats a card
- * can actually be minted in — which, since wpass-pl7.6 wired the Pdf417 / Aztec writers, is
- * every one of them.
+ * can actually be minted in, which is every one of them.
  */
 class ScannableFormatConstraintsTest {
     @Test
     fun noFormatIsDecodeOnly() {
-        // Empty since wpass-pl7.6: every roster member both decodes and encodes. The set stays
-        // on the surface as the create-boundary refusal a future decode-first addition needs.
+        // Every roster member both decodes and encodes. The set stays on the surface as the
+        // create-boundary refusal a decode-first addition would need.
         assertThat(ScannableFormatConstraints.decodeOnly).isEmpty()
     }
 

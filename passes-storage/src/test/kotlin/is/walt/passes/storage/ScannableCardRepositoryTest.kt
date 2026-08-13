@@ -150,9 +150,8 @@ class ScannableCardRepositoryTest {
 
     @Test
     fun createWithAnAztecCardPersistsIt() = runTest {
-        // Refused at this boundary until wpass-pl7.6 wired the writer. The whole point of the
-        // epic is that a boarding-pass payload lifted off a screenshot becomes a card the user
-        // can present, so persistence has to succeed and read back in the same format.
+        // A boarding-pass payload lifted off a screenshot has to become a card the user can
+        // present, so persistence must succeed and read back in the same format.
         val cards = FakeScannableCardStore()
         val telemetry = RecordingGuard()
         val repo = repo(cards, telemetry)
@@ -285,8 +284,8 @@ class ScannableCardRepositoryTest {
 
     @Test
     fun updateToPdf417RewritesTheStoredRow() = runTest {
-        // Edit shares the create gate, so the format the gate reopened has to be reachable on
-        // this path too — otherwise a card could be created as Pdf417 but never changed to it.
+        // Edit shares the create gate, so every creatable format has to be reachable here too
+        // — otherwise a card could be created as Pdf417 but never changed to it.
         val cards = FakeScannableCardStore()
         val telemetry = RecordingGuard()
         val repo = repo(cards, telemetry)

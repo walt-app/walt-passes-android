@@ -149,10 +149,9 @@ private fun BarcodeImage(
 /** Per-symbology min on-screen size in dp. Mirrors [BarcodeView] for gate consistency. */
 private fun ScannableFormat.minRenderSizeDp(): Pair<Int, Int> = when (this) {
     ScannableFormat.Qr, ScannableFormat.Aztec -> 240 to 240
-    // 4:1 matches the writer's measured output at the pinned EC and 2-module quiet zone
-    // (3.7:1 to 4.3:1 across the payload range), so ContentScale.Fit barely letterboxes and
-    // the modules land square. The provisional 320x120 this replaces was 2.7:1 and left a
-    // third of the slot as dead space.
+    // 4:1 approximates the writer's measured output at the pinned EC and quiet zone
+    // (3.4:1 to 4.4:1 across the payload range), so ContentScale.Fit letterboxes little and
+    // the modules land close to square.
     ScannableFormat.Pdf417 -> 320 to 80
     ScannableFormat.Code128,
     ScannableFormat.Ean13,

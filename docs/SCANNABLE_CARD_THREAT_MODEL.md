@@ -337,11 +337,26 @@ The PDF417 and Aztec caps (`wpass-pl7.1`) were set to hold at any plausible
 error-correction level, because the level itself was not pinned until the writer
 arms landed. `wpass-pl7.6` pinned PDF417 at error-correction level 3 and Aztec
 at 33%, and re-derived both caps against those pins by binary-searching the
-largest payload each writer accepts: PDF417 holds 1,766 characters against the
-800 the validator allows, Aztec 3,000 against 1,500. Both stand unchanged, with
-better than 2x headroom. Re-derive again if either pin rises — a cap the
-validator accepts but the encoder cannot fit converts a clean
-`InvalidPayload(TooLong)` rejection into a blank render.
+largest payload each writer accepts: **for single-byte payloads** PDF417 holds
+1,766 characters against the 800 the validator allows, and Aztec 3,000 against
+1,500. Re-derive if either pin rises.
+
+**The caps do not, however, guarantee encodability, and this section previously
+overstated that they did.** They count characters while writer capacity is
+consumed in bytes. Measured over three-byte characters the same writers hold 528
+(PDF417) and 623 (Aztec) — both far under the caps, so a 700-character CJK
+payload clears the validator and cannot be rendered. No exact predicate is
+available at the validator: each writer picks a compaction mode per run, so
+capacity swings with the payload's composition, and a byte ceiling tight enough
+to be safe would reject ordinary accented text well inside the character cap.
+
+What is in place instead is attribution rather than prevention: the encoder lifts
+both writers' over-capacity errors to `EncoderFailureReason.PayloadTooDense`, so
+the failure is typed and actionable ("shorten this") rather than opaque. That arm
+only reaches a user if something runs the encoder before persisting, and nothing
+currently does — `ScannableCardCreateResult.EncoderFailure` exists and is consumed
+but never produced. Tracked as `wpass-1kg`; until it lands, an oversized multibyte
+payload saves and renders as the accessible-but-empty placeholder.
 
 The same bead closed the charset half of that property, which the length caps do
 not cover. Both new writers default to ISO-8859-1 while the validator admits any
@@ -376,10 +391,16 @@ The fix makes the format part of the signature:
 `QrPayloadKind.requiresCreateConfirmation(format)` now consults
 `ScannableFormat.canCarryActionablePayload()`, an exhaustive `when` in `passes-core`.
 Two properties follow. A future roster member is a compile error at one kernel site
-rather than a gate that quietly stops covering a format. And the predicate lives in
-this repository rather than in the consumer, which the trust claim requires — the
-decision about which symbologies need confirming is security-critical, and
-walt-android must not parallel-implement it.
+rather than a gate that quietly stops covering a format. And the kernel now owns a
+predicate for which symbologies need confirming, which is where the trust claim
+requires that decision to live.
+
+**The consumer's copy is not yet retired.** walt-android still carries an identical
+`canCarryAutoActingPayload()` in `feature/passes/common/AutoActingSymbologies.kt`,
+and it is the copy actually in the path — called ahead of the kernel predicate at
+both create-time call sites. Until it is deleted (`wpass-j6b`) the two can drift,
+and a correction made here would not take effect on its own. The discharge above is
+therefore complete on the kernel side only.
 
 Widening the trigger also made the sheet's own copy wrong: every arm read "this QR
 will…". The strings now say "this code", since an Aztec boarding pass raising a

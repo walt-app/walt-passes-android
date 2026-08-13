@@ -9,9 +9,8 @@ import `is`.walt.passes.core.ScannableFormat
 import org.junit.Test
 
 /**
- * The wpass-pl7.6 acceptance round trip: every roster symbology encodes through the KERNEL's
- * [BarcodeEncoder] and decodes back through the KERNEL's [decodeLuminance], to the same payload
- * and the same [ScannableFormat].
+ * Every roster symbology encodes through the KERNEL's [BarcodeEncoder] and decodes back
+ * through the KERNEL's [decodeLuminance], to the same payload and the same [ScannableFormat].
  *
  * Distinct from [ZxingBarcodeSymbolDecoderTest], which encodes its fixtures with ZXing's own
  * `MultiFormatWriter` and therefore proves only the decoder. This suite closes the loop over
@@ -79,13 +78,28 @@ class BarcodeEncoderRoundTripTest {
     }
 
     @Test
-    fun nonAsciiPdf417PayloadSurvivesAutoCompaction() {
-        // AUTO compaction picks the mode; a payload outside the text alphabet must still come
-        // back byte-exact rather than transliterated.
-        val payload = "café — naïve — 東京"
+    fun nonAsciiPayloadsSurviveOnBothTwoDimensionalFormats() {
+        // The charset pins, and the reason they are pins rather than defaults. At ZXing's
+        // ISO-8859-1 default PDF417 throws outright while AZTEC IS THE DANGEROUS ONE: it encodes
+        // happily and decodes back "café ? naïve ? ??", a wrong scan with no error at any layer.
+        // Dropping either hint has to fail here, so both formats share the one payload.
+        for (format in listOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
+            assertThat(decodeLuminance(render(NON_ASCII_PAYLOAD, format)))
+                .isEqualTo(BarcodeDecodeResult.DecodedBarcode(NON_ASCII_PAYLOAD, format))
+        }
+    }
 
-        assertThat(decodeLuminance(render(payload, ScannableFormat.Pdf417)))
-            .isEqualTo(BarcodeDecodeResult.DecodedBarcode(payload, ScannableFormat.Pdf417))
+    @Test
+    fun aztecCarriesSupplementaryPlaneCharactersPdf417RefusesThem() {
+        // The validator admits emoji on both formats. Aztec round-trips them; ZXing cannot put a
+        // surrogate pair through PDF417 under any configuration, so the encoder names that limit
+        // itself rather than letting the writer raise a message with the payload inside it.
+        val payload = "https://example.org/é/👍"
+
+        assertThat(decodeLuminance(render(payload, ScannableFormat.Aztec)))
+            .isEqualTo(BarcodeDecodeResult.DecodedBarcode(payload, ScannableFormat.Aztec))
+        assertThat(BarcodeEncoder.encode(payload, ScannableFormat.Pdf417))
+            .isInstanceOf(EncodeResult.Failure::class.java)
     }
 
     /**
@@ -136,6 +150,9 @@ class BarcodeEncoderRoundTripTest {
 
         /** Stand-in vertical extent for the 1D writers, whose matrices are one module tall. */
         const val MIN_LINEAR_BAR_MODULES = 40
+
+        /** Spans Latin-1 (é), BMP punctuation (—) and CJK, the three widths UTF-8 encodes. */
+        const val NON_ASCII_PAYLOAD = "café — naïve — 東京"
 
         /** Synthetic, of IATA BCBP shape and length. Never a decoded boarding pass — those are PII. */
         const val BCBP_SHAPED_PAYLOAD =

@@ -344,10 +344,9 @@ class BarcodeCreateConfirmSheetTest {
 
     @Test
     fun theGateCoversEveryFormatThatCanCarryAnActionablePayload() {
-        // The C4 silent-bypass guard. Before wpass-pl7.6 the gate was keyed on QR alone, which
-        // was safe only while QR was the roster's one renderable byte-capable format; an Aztec
-        // carrying a URL would otherwise reach storage unconfirmed. Driven off
-        // ScannableFormat.entries so a future roster member cannot slip past unconsidered.
+        // The C4 silent-bypass guard. Keying the gate on QR alone would let an Aztec carrying
+        // a URL reach storage unconfirmed. Driven off ScannableFormat.entries so a new roster
+        // member cannot slip past unconsidered.
         val url = QrPayloadKind.Url("https", "example.com", "https://example.com")
         for (format in ScannableFormat.entries) {
             assertThat(url.requiresCreateConfirmation(format))

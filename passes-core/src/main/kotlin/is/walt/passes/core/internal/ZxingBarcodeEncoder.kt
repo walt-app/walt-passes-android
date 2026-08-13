@@ -27,10 +27,10 @@ import com.google.zxing.BarcodeFormat as ZxingFormat
  * encoder. The intermediate `MultiFormatWriter` would silently accept anything ZXing
  * supports, including formats the validator has not been taught to gate.
  *
- * Every roster member encodes as of wpass-pl7.6. A future decode-only addition has no
- * refusal path to opt into: [writeMatrix]'s `when` is compiler-exhaustive, so a new
- * [ScannableFormat] member breaks the build here and forces the writer (or a deliberate
- * refusal) to be a decision someone makes rather than one `MultiFormatWriter` makes for them.
+ * Every roster member encodes. A decode-only addition has no refusal path to opt into:
+ * [writeMatrix]'s `when` is compiler-exhaustive, so a new [ScannableFormat] member breaks the
+ * build here and forces the writer (or a deliberate refusal) to be a decision someone makes
+ * rather than one `MultiFormatWriter` makes for them.
  *
  * Hidden behind [BarcodeEncoder]; this object is package-internal so consumers cannot
  * reach for ZXing types directly.
@@ -119,7 +119,7 @@ internal object ZxingBarcodeEncoder {
                 onSuccess = { EncodeResult.Success(it) },
                 onFailure = {
                     if (it is CancellationException) throw it
-                    EncodeResult.Failure(translateFailure(format, it))
+                    EncodeResult.Failure(translateFailure(format, payload, it))
                 },
             )
     }
@@ -132,6 +132,16 @@ internal object ZxingBarcodeEncoder {
      * empty input and `AztecWriter` does not once a CHARACTER_SET is pinned, happily emitting a
      * 15x15 symbol that encodes nothing. Uniform refusal here beats six incidental behaviors
      * that a hint change can flip.
+     *
+     * PDF417 refuses supplementary-plane characters (emoji, historic scripts — anything outside
+     * the BMP, which Kotlin holds as a surrogate pair). ZXing cannot encode one in PDF417 under
+     * any configuration tried: with `PDF417_AUTO_ECI` it raises an `IllegalStateException` whose
+     * message embeds THE ENTIRE PAYLOAD, and without it a `WriterException` naming one half of
+     * the pair as an unpaired code unit. The validator admits these characters (they are visible
+     * and not Cf/Cc) and Aztec encodes them fine, so this is a PDF417-specific writer limit that
+     * has to be named as one rather than surfacing as an unattributable failure. Catching it
+     * before the writer runs is also what keeps the payload out of [EncoderFailureReason.
+     * WriterRejected.detail].
      *
      * The QR check is a proactive [EncoderFailureReason.PayloadTooDense], gated by the alphanumeric-mode
      * membership test: a payload that fits QR's numeric or alphanumeric mode has a much larger
@@ -150,6 +160,8 @@ internal object ZxingBarcodeEncoder {
         when {
             payload.isEmpty() ->
                 EncoderFailureReason.WriterRejected(format, EMPTY_PAYLOAD_MESSAGE)
+            format == ScannableFormat.Pdf417 && payload.any { it.isSurrogate() } ->
+                EncoderFailureReason.WriterRejected(format, NO_SUPPLEMENTARY_CHARS_MESSAGE)
             format == ScannableFormat.Qr &&
                 payload.any { !ScannableFormatConstraints.isQrAlphanumericChar(it) } &&
                 payload.toByteArray(Charsets.UTF_8).size >
@@ -182,6 +194,7 @@ internal object ZxingBarcodeEncoder {
 
     private fun translateFailure(
         format: ScannableFormat,
+        payload: String,
         cause: Throwable,
     ): EncoderFailureReason {
         // Belt-and-suspenders: the proactive byte-length check above handles the common QR
@@ -191,10 +204,10 @@ internal object ZxingBarcodeEncoder {
         // the encoder still surfaces WriterRejected and the consumer still gets a usable
         // error path, just without the PayloadTooDense-specific UI hint.
         val message = cause.message.orEmpty()
-        if (format == ScannableFormat.Qr && DATA_TOO_BIG_MESSAGE in message) {
+        if (OVER_CAPACITY_MESSAGES.getValue(format).any { it in message }) {
             return EncoderFailureReason.PayloadTooDense
         }
-        return EncoderFailureReason.WriterRejected(format, message)
+        return EncoderFailureReason.WriterRejected(format, message.withoutPayload(payload))
     }
 
     private fun BitMatrix.toBarcodeMatrix(): BarcodeMatrix {
@@ -207,10 +220,39 @@ internal object ZxingBarcodeEncoder {
         return BarcodeMatrix(width, height, flat)
     }
 
-    // ZXing's QRCodeWriter throws WriterException("Data too big") when no QR version fits.
-    // The exact substring is load-bearing — see PayloadTooDense lift above. Pinned by
-    // BarcodeEncoderTest.qrPayloadTooDenseLiftsToDedicatedArm.
-    private const val DATA_TOO_BIG_MESSAGE = "Data too big"
+    /**
+     * Strips [payload] out of a third-party exception message. `PDF417Writer` interpolates the
+     * whole input into its "Failed to encode" text, and [EncoderFailureReason.WriterRejected.
+     * detail] is the one third-party string that crosses the kernel boundary — its own KDoc
+     * warns consumers not to ship it verbatim. Removing the payload here means that warning no
+     * longer has to hold back the user's card number.
+     */
+    private fun String.withoutPayload(payload: String): String =
+        if (payload.isNotEmpty() && payload in this) replace(payload, REDACTED) else this
+
+    // Per-format substrings that mean "this payload does not fit", lifted to the dedicated
+    // PayloadTooDense arm so the consumer can say "shorten it" rather than "try another
+    // format". The matches are intentionally lossy: if ZXing rewords one on a version bump the
+    // encoder still reports WriterRejected, just without the specific UI hint.
+    //
+    // The three 2D formats need this because their length caps are in CHARACTERS while their
+    // capacity is in bytes, so a multibyte payload can clear the validator and still overflow
+    // (see ScannableFormatConstraints' cap KDoc). The 1D formats have no over-capacity message
+    // of their own — their fixed or short caps are reached long before any density limit.
+    private val OVER_CAPACITY_MESSAGES: Map<ScannableFormat, List<String>> =
+        mapOf(
+            ScannableFormat.Qr to listOf("Data too big"),
+            ScannableFormat.Aztec to listOf("Data too large for an Aztec code"),
+            ScannableFormat.Pdf417 to
+                listOf(
+                    "Unable to fit message in columns",
+                    "Encoded message contains too many code words",
+                ),
+            ScannableFormat.Code128 to emptyList(),
+            ScannableFormat.Code39 to emptyList(),
+            ScannableFormat.Ean13 to emptyList(),
+            ScannableFormat.UpcA to emptyList(),
+        )
 
     // The pins the class KDoc argues for. ScannableFormatConstraints' PDF417 / Aztec caps were
     // derived against these values; changing one means re-deriving the other.
@@ -219,6 +261,9 @@ internal object ZxingBarcodeEncoder {
     private const val PDF417_QUIET_ZONE_MODULES = 2
     private const val UTF_8 = "UTF-8"
 
-    // Walt's own wording, not a ZXing message — this refusal never reaches a writer.
+    // Walt's own wording, not ZXing messages — these refusals never reach a writer.
     private const val EMPTY_PAYLOAD_MESSAGE = "Empty payload"
+    private const val NO_SUPPLEMENTARY_CHARS_MESSAGE =
+        "PDF417 cannot encode supplementary-plane characters"
+    private const val REDACTED = "<payload>"
 }

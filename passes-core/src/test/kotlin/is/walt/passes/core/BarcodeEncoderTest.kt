@@ -89,9 +89,10 @@ class BarcodeEncoderTest {
 
     @Test
     fun theTwoDimensionalFormatsEncodeAtTheirValidatorCap() {
-        // The property the caps exist for: anything the validator accepts must fit the writer,
-        // or a clean InvalidPayload(TooLong) rejection becomes a blank render. Re-derive both
-        // caps if either error-correction pin rises.
+        // Single-byte only, which is as far as the caps reach: they count characters while
+        // capacity is spent in bytes, so a multibyte payload can sit under the cap and still
+        // overflow (see multibytePayloadUnderTheCharacterCapStillLiftsToPayloadTooDense).
+        // Re-derive both caps if either error-correction pin rises.
         for ((format, cap) in listOf(ScannableFormat.Pdf417 to 800, ScannableFormat.Aztec to 1_500)) {
             val result = BarcodeEncoder.encode("A".repeat(cap), format)
             assertThat(result).isInstanceOf(EncodeResult.Success::class.java)
@@ -117,6 +118,34 @@ class BarcodeEncoderTest {
         val failure = (result as EncodeResult.Failure).reason
         assertThat(failure).isInstanceOf(EncoderFailureReason.WriterRejected::class.java)
         assertThat((failure as EncoderFailureReason.WriterRejected).format).isEqualTo(ScannableFormat.UpcA)
+    }
+
+    @Test
+    fun multibytePayloadUnderTheCharacterCapStillLiftsToPayloadTooDense() {
+        // The caps are in CHARACTERS, capacity is in bytes: 700 CJK characters is under both
+        // 2D caps and over both byte capacities (Aztec fits 623, PDF417 528). The user has to
+        // be told to shorten it — WriterRejected would send them to change format instead, and
+        // no arm at all leaves a card that saves and then renders blank.
+        for (format in listOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
+            val result = BarcodeEncoder.encode("東".repeat(700), format)
+
+            assertThat((result as EncodeResult.Failure).reason)
+                .isEqualTo(EncoderFailureReason.PayloadTooDense)
+        }
+    }
+
+    @Test
+    fun writerRejectionNeverCarriesThePayloadInDetail() {
+        // PDF417Writer interpolates the whole input into its "Failed to encode" message, and
+        // detail is the one third-party string crossing the kernel boundary. A card number
+        // reaching a consumer's diagnostic surface through an error field is the leak.
+        val payload = "https://example.org/secret-token-abc123/👍"
+
+        val reason = (BarcodeEncoder.encode(payload, ScannableFormat.Pdf417) as EncodeResult.Failure).reason
+
+        assertThat((reason as EncoderFailureReason.WriterRejected).detail).doesNotContain(payload)
+        assertThat(reason.detail).doesNotContain("secret-token-abc123")
+        assertThat(reason.format).isEqualTo(ScannableFormat.Pdf417)
     }
 
     @Test
@@ -149,11 +178,24 @@ class BarcodeEncoderTest {
 
     @Test
     fun everyRosterFormatEncodes() {
-        // The whole roster renders as of wpass-pl7.6. Fails closed on a future decode-first
-        // addition: whoever adds it has to decide here whether it is genuinely unrenderable
-        // (then ScannableFormatConstraints.decodeOnly is the create-boundary refusal) rather
-        // than shipping a format that saves successfully and then shows blank.
-        for (format in ScannableFormat.entries) {
+        // Runs a writer per format rather than asking isCreatable(), which with an empty
+        // decodeOnly set answers true without encoding anything. Fails closed on a roster
+        // addition: the map has to gain a payload, and that payload has to actually render.
+        val payloads =
+            mapOf(
+                ScannableFormat.Code128 to "ABC123 xyz",
+                ScannableFormat.Code39 to "HELLO-123",
+                ScannableFormat.Ean13 to "1234567890128",
+                ScannableFormat.UpcA to "036000291452",
+                ScannableFormat.Qr to "https://example.org/loyalty/123",
+                ScannableFormat.Pdf417 to "WALT-CHECK-1",
+                ScannableFormat.Aztec to "WALT-CHECK-1",
+            )
+        assertThat(payloads.keys).containsExactlyElementsIn(ScannableFormat.entries)
+
+        for ((format, payload) in payloads) {
+            val matrix = (BarcodeEncoder.encode(payload, format) as EncodeResult.Success).matrix
+            assertThat(anyModuleSet(matrix)).isTrue()
             assertThat(format.isCreatable()).isTrue()
         }
     }

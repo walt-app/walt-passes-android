@@ -229,11 +229,11 @@ private fun BarcodeCreateActions(
  * symbologies, which no scanner auto-acts on. Callers branch on this to persist directly
  * without showing a no-op sheet.
  *
- * [format] is a parameter rather than an assumed `Qr` because that assumption was the C4
- * gate's silent-bypass risk: wpass-pl7.6 made Pdf417 and Aztec renderable, and both carry
- * the same actionable URIs QR does. Taking the format here puts the decision behind
- * [canCarryActionablePayload]'s exhaustive `when`, so a future roster member is a compile
- * error at one kernel site rather than a gate that quietly stops covering a format.
+ * [format] is a parameter rather than an assumed `Qr` because Pdf417 and Aztec carry the
+ * same actionable URIs QR does, and assuming the format is the C4 gate's silent-bypass risk.
+ * Taking it here puts the decision behind [canCarryActionablePayload]'s exhaustive `when`, so
+ * a new roster member is a compile error at one kernel site rather than a gate that quietly
+ * stops covering a format.
  */
 public fun QrPayloadKind.requiresCreateConfirmation(format: ScannableFormat): Boolean =
     format.canCarryActionablePayload() && this !is QrPayloadKind.PlainText

@@ -52,13 +52,12 @@ class ScannableCardInputValidatorTest {
         assertSuccessWithPayload(result, "https://example.org/é/👍")
     }
 
-    // ---- the two-dimensional formats wpass-pl7.6 opened for creation ----
+    // ---- the byte-capable two-dimensional formats ----
 
     @Test
     fun pdf417AndAztecHappyPath() {
-        // Both were refused at this boundary until their writers landed. Now they validate like
-        // any other byte-capable format, which is what makes an extracted boarding-pass payload
-        // mintable as a card the user can present at a gate.
+        // Validate like any other byte-capable format, which is what makes an extracted
+        // boarding-pass payload mintable as a card the user can present at a gate.
         for (format in setOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
             assertSuccessWithPayload(validate("WALT-CHECK-1", format), "WALT-CHECK-1")
         }
@@ -78,9 +77,8 @@ class ScannableCardInputValidatorTest {
 
     @Test
     fun aztecOverItsCapReportsTooLongRatherThanUnsupportedFormat() {
-        // Before wpass-pl7.6 the format refusal outranked everything typed. Now an over-cap
-        // payload has to reach the length rule, or the user is told the format is unusable
-        // when the fix is to shorten what they typed.
+        // An over-cap payload has to reach the length rule rather than a format refusal, or
+        // the user is told the format is unusable when the fix is to shorten what they typed.
         val result = validate("x".repeat(1501), ScannableFormat.Aztec)
 
         assertThat(result)
