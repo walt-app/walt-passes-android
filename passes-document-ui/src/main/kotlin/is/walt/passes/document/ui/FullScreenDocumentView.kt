@@ -97,9 +97,9 @@ public fun FullScreenDocumentView(
     doc: Document,
     pdfFile: ParcelFileDescriptor? = null,
     renderer: PdfRendererBinder? = null,
-    onClose: () -> Unit,
     imageFile: ParcelFileDescriptor? = null,
     imageDecoder: ImageDecodeBinder? = null,
+    onClose: () -> Unit,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     closeButton: @Composable (onClose: () -> Unit) -> Unit = { handler ->
@@ -133,26 +133,16 @@ public fun FullScreenDocumentView(
                     },
                     telemetry = telemetry,
                 )
-                is ImageDocument -> FullScreenImagePage(
-                    documentId = doc.id,
-                    imageFile = requireNotNull(imageFile) {
-                        "FullScreenDocumentView(ImageDocument) requires a non-null imageFile"
-                    },
-                    decoder = requireNotNull(imageDecoder) {
-                        "FullScreenDocumentView(ImageDocument) requires a non-null imageDecoder"
-                    },
-                    telemetry = telemetry,
-                )
                 // wpass-8lu / wpass-pl7.4: a composite's retained photo zooms through the same
                 // isolated image-decode surface as a plain image; the barcode half stays with
                 // the consumer's passes-ui composition.
-                is BarcodedImageDocument -> FullScreenImagePage(
+                is ImageDocument, is BarcodedImageDocument -> FullScreenImagePage(
                     documentId = doc.id,
                     imageFile = requireNotNull(imageFile) {
-                        "FullScreenDocumentView(BarcodedImageDocument) requires a non-null imageFile"
+                        "FullScreenDocumentView(${doc::class.simpleName}) requires a non-null imageFile"
                     },
                     decoder = requireNotNull(imageDecoder) {
-                        "FullScreenDocumentView(BarcodedImageDocument) requires a non-null imageDecoder"
+                        "FullScreenDocumentView(${doc::class.simpleName}) requires a non-null imageDecoder"
                     },
                     telemetry = telemetry,
                 )
@@ -216,10 +206,11 @@ private fun FullScreenPdfPager(
 
 /**
  * The image-arm zoom surface: a single decoded raster inside [ZoomableImage], no pager. The
- * decode is requested at the slot size scaled by [DEFAULT_MAX_SCALE] (clamped to the 4 MP
- * cap) so pinching to max zoom shows real source pixels where the source has them — the
- * sandbox bounds the output to fit the request and never upscales beyond the source, so
- * over-asking costs only what the image actually carries.
+ * decode is requested at the slot size scaled by [DEFAULT_MAX_SCALE], clamped to the 4 MP
+ * cap — the sandbox bounds the output to fit the request and never upscales beyond the
+ * source, so over-asking costs only what the image actually carries. On a phone-sized slot
+ * the cap binds well below the full 5x request, so deep zoom still upsamples; the raster is
+ * simply the sharpest one the sandbox will legally produce.
  */
 @Composable
 private fun FullScreenImagePage(

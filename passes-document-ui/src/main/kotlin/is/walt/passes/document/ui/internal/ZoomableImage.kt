@@ -18,6 +18,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -116,6 +117,11 @@ internal fun ZoomableImage(
     Box(
         modifier = modifier
             .fillMaxSize()
+            // The graphicsLayer scale below draws outside layout bounds unless an ancestor
+            // clips. Clip HERE (an unscaled layer) — not via clip=true on the scaled layer,
+            // whose clip shape would scale with it — so zoomed content can never overdraw
+            // the trust-caption dock beside this slot (ADR 0005 Z.8, ZoomableImageClipTest).
+            .clipToBounds()
             .onSizeChanged { slotSize = it }
             .pointerInput(Unit) {
                 detectTapGestures(

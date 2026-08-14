@@ -100,7 +100,7 @@ class DocumentSurfaceLockTest {
 
     @Test
     fun fullScreenDocumentViewHasExactlyNineUserVisibleParameters() {
-        // (doc, pdfFile, renderer, onClose, imageFile, imageDecoder, modifier,
+        // (doc, pdfFile, renderer, imageFile, imageDecoder, onClose, modifier,
         // telemetry, closeButton). D5: trust caption is composed inside the surface,
         // docked outside the zoom transform; no parameter omits it. Required onClose
         // forces the host to provide a back path — there is no "stuck in full-screen"
