@@ -8,6 +8,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * Behavioural coverage for [doDecode], the service-side orchestration that wraps the bounded
@@ -21,7 +22,9 @@ import org.robolectric.annotation.Config
  *    escaping the sandbox;
  *  - the source descriptor is closed on every outcome;
  *  - the real fd glue ([decodeRasterFromPfd]) rejects an over-cap source and an out-of-bounds
- *    output request without closing the source PFD (the dup idiom prevents a double-close).
+ *    output request without closing the source PFD (the dup idiom prevents a double-close);
+ *  - the read rewinds a seekable fd to offset 0 and tolerates a non-seekable pipe, so a decode
+ *    never inherits another consumer's EOF offset (wpass-07h).
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -84,6 +87,31 @@ class ImageDecodeServiceTest {
 
         assertThat(result).isEqualTo(ImageDecodeResult.Rejected(ImageDecodeRejectedKind.OversizedAtImport))
         assertThat(readEnd.fileDescriptor.valid()).isTrue()
+        readEnd.close()
+    }
+
+    @Test
+    fun decodeRasterFromPfdRereadsFromOffsetZeroAfterAPriorFullConsume() {
+        // wpass-07h regression pin: dup() shares the open file description, so a shared fd
+        // arrives at EOF after another consumer read it. The decode must rewind rather than
+        // silently read zero bytes; with the tiny cap the re-read trips OversizedAtImport,
+        // which proves the bytes were read again from offset 0.
+        val file = File.createTempFile("wpass-07h", ".bin").apply { writeBytes(ByteArray(64)) }
+        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        ParcelFileDescriptor.AutoCloseInputStream(pfd.dup()).use { it.readBytes() }
+
+        val result = decodeRasterFromPfd(pfd, MAX_W, MAX_H, ImageDecodeConfig(maxBytes = 4))
+
+        assertThat(result).isEqualTo(ImageDecodeResult.Rejected(ImageDecodeRejectedKind.OversizedAtImport))
+        pfd.close()
+        file.delete()
+    }
+
+    @Test
+    fun rewindToStartToleratesANonSeekablePipe() {
+        // Pipes have no offset to rewind; ESPIPE is swallowed rather than failing the decode.
+        val readEnd = pipeReadEnd()
+        rewindToStart(readEnd)
         readEnd.close()
     }
 

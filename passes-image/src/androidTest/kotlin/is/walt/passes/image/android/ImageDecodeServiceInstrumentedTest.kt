@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.os.Build
 import android.os.IBinder
 import android.os.Parcel
 import android.os.ParcelFileDescriptor
@@ -14,7 +15,10 @@ import android.os.Process
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
+import `is`.walt.passes.isolation.MemfdPfdFactory
 import kotlinx.coroutines.runBlocking
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
@@ -100,6 +104,40 @@ class ImageDecodeServiceInstrumentedTest {
 
         assertThat(result)
             .isEqualTo(ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DimensionsTooLarge))
+    }
+
+    @Test
+    fun sameMemfdDecodesTwiceThroughTheRealService() {
+        // wpass-07h regression guard: decoding one shared PFD from two surfaces (inline card +
+        // full-screen overlay) must both succeed. dup()/binder passing share the open file
+        // description, so without the per-decode rewind the second decode reads from EOF and
+        // silently renders blank. memfd is the production shape (passes-isolation materializes
+        // stored bytes into one); memfd_create needs API 30, so API 28 relies on the
+        // file-backed variant below — the shared-offset semantics are identical.
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+        val png = ByteArrayOutputStream()
+            .also { solidBitmap(80, 40, Color.YELLOW).compress(Bitmap.CompressFormat.PNG, 100, it) }
+            .toByteArray()
+        val pfd = MemfdPfdFactory("wpass-07h-guard").fromBytes(png)
+        pfd.use { assertDecodesTwice(it) }
+    }
+
+    @Test
+    fun sameFileFdDecodesTwiceThroughTheRealService() {
+        // File-backed companion to the memfd guard: runs on the full API matrix (28+), same
+        // shared-offset semantics.
+        val pfd = pngFd("decode-twice", solidBitmap(80, 40, Color.YELLOW))
+        pfd.use { assertDecodesTwice(it) }
+    }
+
+    private fun assertDecodesTwice(pfd: ParcelFileDescriptor) {
+        repeat(2) { pass ->
+            val result = decode(pfd, maxWidthPx = 64, maxHeightPx = 64)
+            assertWithMessage("decode pass ${pass + 1} of the same PFD")
+                .that(result)
+                .isInstanceOf(ImageDecodeResult.Ok::class.java)
+            (result as ImageDecodeResult.Ok).sharedMemory.close()
+        }
     }
 
     @Test

@@ -19,7 +19,8 @@ import android.os.ParcelFileDescriptor
  *
  * Ownership: the caller retains ownership of the [ContentResolver], the [Uri], and any
  * [ParcelFileDescriptor] passed in. The decoder reads from these but does not close them;
- * closing remains the caller's responsibility once `decode` returns.
+ * closing remains the caller's responsibility once `decode` returns. A seekable descriptor is
+ * rewound per decode, so the same PFD may be decoded any number of times (wpass-07h).
  */
 public sealed interface ImageSource {
     public class ContentUri(
