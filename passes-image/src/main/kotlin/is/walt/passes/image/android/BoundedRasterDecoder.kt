@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
+import android.system.ErrnoException
+import android.system.Os
 import android.system.OsConstants
 import `is`.walt.passes.image.decode.BoundedBitmap
 import `is`.walt.passes.image.decode.BoundedDecodePolicy
@@ -49,6 +51,7 @@ internal fun decodeRasterFromPfd(
     }
     val read =
         runCatching {
+            rewindToStart(image)
             ParcelFileDescriptor.AutoCloseInputStream(image.dup()).use { readBoundedBytes(it, config.maxBytes) }
         }
     val bytes = read.getOrNull()
@@ -61,6 +64,20 @@ internal fun decodeRasterFromPfd(
 
 internal fun isOutputSizeValid(maxWidthPx: Int, maxHeightPx: Int, maxOutputPixels: Long): Boolean =
     maxWidthPx > 0 && maxHeightPx > 0 && maxWidthPx.toLong() * maxHeightPx.toLong() <= maxOutputPixels
+
+/**
+ * Seek [image] back to offset 0 so a decode never depends on the offset a shared open file
+ * description arrived with, making decode idempotent for a given PFD. `ESPIPE` (non-seekable
+ * source: pipes here and in the tests, some `ContentResolver` fds) is swallowed — such an fd
+ * has no offset to rewind. Any other errno propagates to the caller's containment.
+ */
+internal fun rewindToStart(image: ParcelFileDescriptor) {
+    try {
+        Os.lseek(image.fileDescriptor, 0, OsConstants.SEEK_SET)
+    } catch (e: ErrnoException) {
+        if (e.errno != OsConstants.ESPIPE) throw e
+    }
+}
 
 /**
  * Read at most [maxBytes] from [input], returning null the moment the source exceeds the cap

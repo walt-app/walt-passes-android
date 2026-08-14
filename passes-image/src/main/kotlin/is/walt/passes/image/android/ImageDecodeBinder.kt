@@ -30,7 +30,10 @@ import android.os.SharedMemory
  *
  * PFD ownership: the caller retains ownership of the [ParcelFileDescriptor] it passes. The
  * binder duplicates the underlying fd on the way across; the decode service owns and closes
- * its received copy. The returned [ImageDecodeResult.Ok.sharedMemory] is owned by the caller,
+ * its received copy. Duplication shares the open file description — offset included — so the
+ * service rewinds seekable fds before reading; decoding the same PFD from several surfaces is
+ * supported sequentially — concurrent decodes of one descriptor race the shared offset
+ * (wpass-07h). The returned [ImageDecodeResult.Ok.sharedMemory] is owned by the caller,
  * which must [SharedMemory.close] it once the raster has been consumed.
  */
 public interface ImageDecodeBinder {
