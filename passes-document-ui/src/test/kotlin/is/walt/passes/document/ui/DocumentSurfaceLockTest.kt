@@ -99,19 +99,36 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun fullScreenDocumentViewHasExactlySevenUserVisibleParameters() {
-        // (doc, pdfFile, renderer, onClose, modifier, telemetry, closeButton). D5:
-        // trust caption is composed inside the surface; no parameter omits it. Required
-        // onClose forces the host to provide a back path — there is no "stuck in
-        // full-screen" state. The seventh slot is a host-supplied close-button
-        // composable (icon vs. text, host chrome) that does not touch the trust caption
-        // or any other surface affordance, so D5 is unaffected. Bumping from 6 to 7 is
-        // the deliberate change for that slot, not a slip.
+    fun fullScreenDocumentViewHasExactlyNineUserVisibleParameters() {
+        // (doc, pdfFile, renderer, onClose, imageFile, imageDecoder, modifier,
+        // telemetry, closeButton). D5: trust caption is composed inside the surface,
+        // docked outside the zoom transform; no parameter omits it. Required onClose
+        // forces the host to provide a back path — there is no "stuck in full-screen"
+        // state. `closeButton` is a host-supplied close-button composable (icon vs.
+        // text, host chrome) that does not touch the trust caption or any other surface
+        // affordance. Bumping from 7 to 9 is the deliberate wpass-pl7.4 generalization:
+        // `doc` widened to the sealed Document, and the image / composite arms take the
+        // `imageFile` / `imageDecoder` backend pair exactly as DocumentView does —
+        // neither new slot can suppress the caption or add an extraction affordance.
         assertUserVisibleParamCount(
             "FullScreenDocumentViewKt",
             "FullScreenDocumentView",
-            expected = 7,
+            expected = 9,
         )
+    }
+
+    @Test
+    fun fullScreenDocumentViewConsumesImageDecodeBinderInterfaceNotConcreteClient() {
+        // Same contract as DocumentView's image arm: the full-screen surface takes the
+        // binder interface so test fakes inject cleanly.
+        val method = findComposable("FullScreenDocumentViewKt", "FullScreenDocumentView")
+        val typeNames = method.parameterTypes.map { it.simpleName }
+        assertWithMessage("FullScreenDocumentView must accept the ImageDecodeBinder interface")
+            .that(typeNames)
+            .contains("ImageDecodeBinder")
+        assertWithMessage("FullScreenDocumentView must NOT bind to the concrete ImageDecodeClient")
+            .that(typeNames)
+            .doesNotContain("ImageDecodeClient")
     }
 
     @Test

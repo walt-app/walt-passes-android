@@ -9,9 +9,12 @@ import androidx.compose.ui.test.onNodeWithText
 import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.image.android.ImageDecodeBinder
 import `is`.walt.passes.image.android.ImageDecodeRejectedKind
 import `is`.walt.passes.image.android.ImageDecodeResult
+import `is`.walt.passes.document.BarcodedImageDocument
+import `is`.walt.passes.document.BarcodedImageDocumentId
 import `is`.walt.passes.document.ImageDocument
 import `is`.walt.passes.document.ImageDocumentId
 import `is`.walt.passes.document.PdfDocument
@@ -232,6 +235,88 @@ class DocumentTrustSurfaceTest {
             ).fetchSemanticsNodes().let { nodes ->
                 assertThat(nodes).isEmpty()
             }
+        } finally {
+            pfd.close()
+            file.delete()
+        }
+    }
+
+    @Test
+    fun fullScreenImageDocumentRendersTheNonSuppressibleTrustCaption() {
+        // wpass-pl7.4: the full-screen surface generalized past PDF-only. The image arm
+        // composes the same docked caption as the PDF arm — structurally outside the zoom
+        // transform — and it shows regardless of decode outcome (a rejecting fake keeps
+        // the zoom region empty; the caption must still display).
+        val doc = ImageDocument(
+            id = ImageDocumentId("img-fs"),
+            displayLabel = "boarding.png",
+            byteCount = 2048L,
+            widthPx = 1080,
+            heightPx = 2340,
+            importedAtEpochMs = 0L,
+        )
+        withImagePfd { pfd ->
+            composeRule.setContent {
+                ThemedHost {
+                    FullScreenDocumentView(
+                        doc = doc,
+                        imageFile = pfd,
+                        imageDecoder = rejectingDecoder(),
+                        onClose = {},
+                    )
+                }
+            }
+            composeRule.onNodeWithText(
+                "User-provided document. Walt has not verified the source.",
+            ).assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun fullScreenBarcodedImageDocumentRendersTheNonSuppressibleTrustCaption() {
+        // wpass-pl7.4: the composite arm routes its retained photo through the same
+        // full-screen image surface (wpass-8lu routing), so the docked caption anchors
+        // it identically. Payload is a synthetic non-PII fixture (epic constraint 7).
+        val doc = BarcodedImageDocument(
+            id = BarcodedImageDocumentId("comp-fs"),
+            displayLabel = "boarding.png",
+            byteCount = 2048L,
+            widthPx = 1080,
+            heightPx = 2340,
+            barcodePayload = "TEST-PAYLOAD-000",
+            barcodeFormat = ScannableFormat.Aztec,
+            importedAtEpochMs = 0L,
+        )
+        withImagePfd { pfd ->
+            composeRule.setContent {
+                ThemedHost {
+                    FullScreenDocumentView(
+                        doc = doc,
+                        imageFile = pfd,
+                        imageDecoder = rejectingDecoder(),
+                        onClose = {},
+                    )
+                }
+            }
+            composeRule.onNodeWithText(
+                "User-provided document. Walt has not verified the source.",
+            ).assertIsDisplayed()
+        }
+    }
+
+    private fun rejectingDecoder(): ImageDecodeBinder = object : ImageDecodeBinder {
+        override suspend fun decode(
+            image: ParcelFileDescriptor,
+            maxWidthPx: Int,
+            maxHeightPx: Int,
+        ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
+    }
+
+    private fun withImagePfd(block: (ParcelFileDescriptor) -> Unit) {
+        val file = File.createTempFile("walt-image-doc", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
+        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        try {
+            block(pfd)
         } finally {
             pfd.close()
             file.delete()
