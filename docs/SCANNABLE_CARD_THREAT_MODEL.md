@@ -366,10 +366,14 @@ visible character on a byte-capable format, so a payload the user can legitimate
 type was unrenderable: `PDF417Writer` threw outright, and `AztecWriter` did worse
 — it encoded and decoded back transliterated, a silent corruption. Pinned
 `PDF417_AUTO_ECI` and `CHARACTER_SET` respectively; both measured to leave the
-all-ASCII case byte-identical in matrix size and capacity. **QR has the same
-silent-transliteration defect and is not yet fixed** (`wpass-qj6`): it predates
-these writers, and adding an ECI header changes the symbol emitted for every
-non-ASCII QR card already stored, so it needs its own scanner verification.
+all-ASCII case byte-identical in matrix size and capacity. QR had the same
+silent-transliteration defect (it predates these writers) and was closed
+separately by `wpass-qj6` with the same `CHARACTER_SET` pin. QR's pin is not free
+the way Aztec's was: `QRCodeWriter` prepends a UTF-8 ECI header to every
+byte-mode symbol, so ASCII byte-mode symbols keep their matrix size but change
+bit pattern, the v40-M byte-mode ceiling drops one byte (2,331 to 2,330, tracked
+in `ScannableFormatConstraints`), and every stored non-ASCII QR card re-renders
+as a different — now correctly decoding — symbol.
 
 **C4. Create-time URI-scheme preview for the byte-capable symbologies.** When the
 user creates a ScannableCard in a format that can carry an actionable payload,

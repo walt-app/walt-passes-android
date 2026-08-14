@@ -66,25 +66,31 @@ import com.google.zxing.BarcodeFormat as ZxingFormat
  * space the render layer then letterboxes, on top of the quiet zone it already applies
  * itself. This is the one place the kernel overrides a writer's own margin.
  *
- * **Character set.** Both writers default to ISO-8859-1, and the validator admits any visible
+ * **Character set.** The writers default to ISO-8859-1, and the validator admits any visible
  * character for the byte-capable formats, so the default loses payloads a user can legitimately
- * type. The two symbologies fail differently and both are addressed: `PDF417Writer` throws
+ * type. The three symbologies fail differently and all are addressed: `PDF417Writer` throws
  * outright on a non-Latin-1 character, fixed by `PDF417_AUTO_ECI`, which emits an ECI header
- * only when one is actually needed; `AztecWriter` is the worse case — it encodes happily and
- * decodes back transliterated ("東京" returns as "??"), a silent corruption fixed by pinning
- * CHARACTER_SET. Measured: both fixes leave the all-ASCII case byte-identical in matrix size
- * and capacity, so they cost nothing at boarding-pass payloads.
+ * only when one is actually needed; `AztecWriter` and `QRCodeWriter` are the worse case — they
+ * encode happily and decode back transliterated ("東京" returns as "??"), a silent corruption
+ * fixed by pinning CHARACTER_SET. Measured: the PDF417 and Aztec pins leave the all-ASCII case
+ * byte-identical in matrix size and capacity, so they cost nothing at boarding-pass payloads.
  *
- * QR has the same silent-transliteration defect and is NOT fixed here — it predates this bead
- * and changing the emitted symbol for existing QR cards needs its own scanner verification.
- * Tracked as wpass-qj6.
+ * The QR pin (wpass-qj6) is not free in the same way, because `QRCodeWriter` prepends a UTF-8
+ * ECI header to every BYTE-MODE symbol once the hint is set: numeric/alphanumeric-mode symbols
+ * stay byte-identical, ASCII byte-mode symbols keep their matrix size but change bit pattern,
+ * and the 12-bit header lowers the v40-M byte-mode ceiling by one byte (see
+ * [ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M_BYTE_MODE]). Every non-ASCII QR card
+ * created before the pin re-renders as a different (now correct) symbol.
  */
 internal object ZxingBarcodeEncoder {
     // Per-writer hint maps. Each writer reads ERROR_CORRECTION as a different type —
     // ErrorCorrectionLevel for QR, an Int percentage for Aztec, an Int level for PDF417 —
     // so the maps cannot be merged. See the class KDoc for how each value was chosen.
     private val qrHints: Map<EncodeHintType, Any> =
-        mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
+        mapOf(
+            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
+            EncodeHintType.CHARACTER_SET to UTF_8,
+        )
 
     private val aztecHints: Map<EncodeHintType, Any> =
         mapOf(
