@@ -33,13 +33,6 @@ import kotlin.math.roundToInt
  * source fd. Pulling the compressed bytes into the sandbox heap is fine: isolation keeps them
  * off the *caller's* heap; the file-size cap bounds how many can be read.
  *
- * The read starts with a rewind to offset 0 ([rewindToStart]) rather than trusting the fd's
- * inherited offset: `dup()` and binder fd passing share the open file *description*, so after
- * one decode a shared fd sits at EOF and a second decode of the same PFD would silently read
- * zero bytes (wpass-07h — two surfaces decoding one stored image fd). Non-seekable sources
- * (pipes) reject the seek with `ESPIPE`, which is swallowed: a pipe has no offset to inherit,
- * so stream semantics are already correct there.
- *
  * Stays a top-level function (not a class) so its phases are unit-testable without a live
  * service: [readBoundedBytes] against a pipe, [headerRejection] against the cap table, and
  * [outputDims] against the scaling math.
