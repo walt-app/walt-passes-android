@@ -151,7 +151,7 @@ internal object ZxingBarcodeEncoder {
      *
      * The QR check is a proactive [EncoderFailureReason.PayloadTooDense], gated by the alphanumeric-mode
      * membership test: a payload that fits QR's numeric or alphanumeric mode has a much larger
-     * capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs 2,331
+     * capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs 2,330
      * bytes), and ZXing's QRCodeWriter auto-selects the densest fitting mode, so pre-rejecting
      * such payloads against the byte-mode ceiling would over-reject. Anything outside the
      * alphanumeric set must use byte mode, where the byte-count check applies — UTF-8 because

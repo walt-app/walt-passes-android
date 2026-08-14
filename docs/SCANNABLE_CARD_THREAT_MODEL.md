@@ -355,10 +355,9 @@ re-derived.
 What is in place instead is attribution rather than prevention: the encoder lifts
 both writers' over-capacity errors to `EncoderFailureReason.PayloadTooDense`, so
 the failure is typed and actionable ("shorten this") rather than opaque. That arm
-only reaches a user if something runs the encoder before persisting, and nothing
-currently does — `ScannableCardCreateResult.EncoderFailure` exists and is consumed
-but never produced. Tracked as `wpass-1kg`; until it lands, an oversized multibyte
-payload saves and renders as the accessible-but-empty placeholder.
+reaches the user because the repository trial-encodes before persisting
+(`wpass-1kg`): an oversized multibyte payload is refused at create/update time
+instead of saving and rendering as the accessible-but-empty placeholder.
 
 The same bead closed the charset half of that property, which the length caps do
 not cover. Both new writers default to ISO-8859-1 while the validator admits any

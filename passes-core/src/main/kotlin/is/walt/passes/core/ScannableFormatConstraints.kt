@@ -174,8 +174,8 @@ internal object ScannableFormatConstraints {
      *
      * What closes the hole instead is the encoder lifting the writers' over-capacity errors to
      * [EncoderFailureReason.PayloadTooDense], so an oversized multibyte payload gets an
-     * actionable "shorten this" rather than a silent failure. That arm only reaches the user if
-     * something runs the encoder before persisting, which nothing currently does — see wpass-1kg.
+     * actionable "shorten this" rather than a silent failure. The arm reaches the user because
+     * the repository trial-encodes before persisting (wpass-1kg).
      *
      * A boarding pass is the sizing case that matters and is nowhere near either: an IATA
      * BCBP payload runs ~60 characters per leg.
