@@ -173,7 +173,7 @@ class BarcodeEncoderTest {
     @Test
     fun qrPayloadTooDenseLiftsToDedicatedArm() {
         // Largest QR version maxes out around ~2,953 bytes at error correction L; at level M
-        // (the kernel's pin) the byte ceiling is ~2,331. A 4,000-char payload exceeds every
+        // (the kernel's pin) the byte ceiling is ~2,330. A 4,000-char payload exceeds every
         // version regardless of mode, forcing the writer's "Data too big" path.
         val result = BarcodeEncoder.encode("A".repeat(4_000), ScannableFormat.Qr)
         val failure = (result as EncodeResult.Failure).reason
@@ -224,7 +224,7 @@ class BarcodeEncoderTest {
 
     @Test
     fun proactiveQrByteCeilingHandlesNonAsciiByteCountCorrectly() {
-        // Char count of 1,200 sits below QR_BYTE_CEILING_ECC_M_BYTE_MODE (2,331) — but each
+        // Char count of 1,200 sits below QR_BYTE_CEILING_ECC_M_BYTE_MODE (2,330) — but each
         // "é" is two UTF-8 bytes, so the byte count is 2,400 and the proactive guard must
         // fire. Pins the load-bearing detail that the byte-length check is on UTF-8 bytes,
         // not chars; a regression to String.length would let this slip through to ZXing.
@@ -237,8 +237,24 @@ class BarcodeEncoderTest {
     }
 
     @Test
+    fun qrByteModeCeilingIsExactAtTheBoundary() {
+        // Pins the measured ceiling itself, not just the far-over cases: 2,330 one-byte chars
+        // is the longest byte-mode payload ZXing 3.5.4 fits at v40-M with the UTF-8 ECI header
+        // the CHARACTER_SET pin adds, and 2,331 must refuse as PayloadTooDense. Lowercase keeps
+        // the payload out of alphanumeric mode so the byte-mode path is the one exercised. If a
+        // ZXing bump moves real capacity, the success half fails and the constant gets
+        // re-measured rather than silently going stale.
+        val atCeiling = BarcodeEncoder.encode("a".repeat(2_330), ScannableFormat.Qr)
+        assertThat(atCeiling).isInstanceOf(EncodeResult.Success::class.java)
+
+        val overCeiling = BarcodeEncoder.encode("a".repeat(2_331), ScannableFormat.Qr)
+        assertThat((overCeiling as EncodeResult.Failure).reason)
+            .isEqualTo(EncoderFailureReason.PayloadTooDense)
+    }
+
+    @Test
     fun denseNumericQrPayloadEncodesViaNumericMode() {
-        // Pure-digit payload of 3,000 chars: above QR_BYTE_CEILING_ECC_M_BYTE_MODE (2,331)
+        // Pure-digit payload of 3,000 chars: above QR_BYTE_CEILING_ECC_M_BYTE_MODE (2,330)
         // and above QR v40-M alphanumeric capacity (~3,391 chars — close but under), but
         // well under v40-M numeric capacity (~5,596 digits). ZXing's QRCodeWriter
         // auto-selects numeric mode and encodes successfully. Pins that the proactive

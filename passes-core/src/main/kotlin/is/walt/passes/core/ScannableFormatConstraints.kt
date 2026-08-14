@@ -118,17 +118,21 @@ internal object ScannableFormatConstraints {
 
     /**
      * UTF-8 byte ceiling for a **byte-mode** QR payload at the encoder's pinned ECC level
-     * (M) and the largest QR version (40). Sourced from the QR spec's capacity tables.
-     * Used by the encoder for a proactive PayloadTooDense check that does not depend on
-     * matching ZXing's English exception text. ECC-M was chosen at the encoder; if that
-     * pin changes, this constant must change in lockstep.
+     * (M) and the largest QR version (40). The spec's table says 2,331, minus one for the
+     * 12-bit ECI header the encoder's pinned UTF-8 CHARACTER_SET adds to every byte-mode
+     * symbol (measured against ZXing 3.5.4: the longest fitting byte-mode payload drops
+     * from 2,331 to 2,330 with the pin). Used by the encoder for a proactive
+     * PayloadTooDense check that does not depend on matching ZXing's English exception
+     * text. ECC-M and UTF-8 were chosen at the encoder; if either pin changes, this
+     * constant must change in lockstep.
      *
      * **Mode-scoped.** QR's numeric and alphanumeric modes have larger ceilings (~5,596
-     * digits, ~3,391 alphanumeric chars at v40-M). The encoder gates this byte-mode
-     * ceiling behind a charset check ([isQrAlphanumericChar]); payloads that fit a denser
-     * mode bypass the proactive check and fall through to ZXing's mode selection.
+     * digits, ~3,391 alphanumeric chars at v40-M) and carry no ECI header. The encoder
+     * gates this byte-mode ceiling behind a charset check ([isQrAlphanumericChar]);
+     * payloads that fit a denser mode bypass the proactive check and fall through to
+     * ZXing's mode selection.
      */
-    internal const val QR_BYTE_CEILING_ECC_M_BYTE_MODE: Int = 2_331
+    internal const val QR_BYTE_CEILING_ECC_M_BYTE_MODE: Int = 2_330
 
     /**
      * QR alphanumeric mode's character set (per ISO/IEC 18004): digits, uppercase A-Z, and
@@ -170,8 +174,8 @@ internal object ScannableFormatConstraints {
      *
      * What closes the hole instead is the encoder lifting the writers' over-capacity errors to
      * [EncoderFailureReason.PayloadTooDense], so an oversized multibyte payload gets an
-     * actionable "shorten this" rather than a silent failure. That arm only reaches the user if
-     * something runs the encoder before persisting, which nothing currently does — see wpass-1kg.
+     * actionable "shorten this" rather than a silent failure. The arm reaches the user because
+     * the repository trial-encodes before persisting (wpass-1kg).
      *
      * A boarding pass is the sizing case that matters and is nowhere near either: an IATA
      * BCBP payload runs ~60 characters per leg.

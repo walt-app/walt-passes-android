@@ -78,26 +78,30 @@ class BarcodeEncoderRoundTripTest {
     }
 
     @Test
-    fun nonAsciiPayloadsSurviveOnBothTwoDimensionalFormats() {
+    fun nonAsciiPayloadsSurviveOnTheCharsetPinnedFormats() {
         // The charset pins, and the reason they are pins rather than defaults. At ZXing's
-        // ISO-8859-1 default PDF417 throws outright while AZTEC IS THE DANGEROUS ONE: it encodes
-        // happily and decodes back "café ? naïve ? ??", a wrong scan with no error at any layer.
-        // Dropping either hint has to fail here, so both formats share the one payload.
-        for (format in listOf(ScannableFormat.Pdf417, ScannableFormat.Aztec)) {
+        // ISO-8859-1 default PDF417 throws outright while AZTEC AND QR ARE THE DANGEROUS ONES:
+        // they encode happily and decode back "café ? naïve ? ??", a wrong scan with no error at
+        // any layer (QR's fix is wpass-qj6). Dropping any of the three hints has to fail here,
+        // so all byte-capable formats share the one payload.
+        for (format in listOf(ScannableFormat.Pdf417, ScannableFormat.Aztec, ScannableFormat.Qr)) {
             assertThat(decodeLuminance(render(NON_ASCII_PAYLOAD, format)))
                 .isEqualTo(BarcodeDecodeResult.DecodedBarcode(NON_ASCII_PAYLOAD, format))
         }
     }
 
     @Test
-    fun aztecCarriesSupplementaryPlaneCharactersPdf417RefusesThem() {
-        // The validator admits emoji on both formats. Aztec round-trips them; ZXing cannot put a
-        // surrogate pair through PDF417 under any configuration, so the encoder names that limit
-        // itself rather than letting the writer raise a message with the payload inside it.
+    fun aztecAndQrCarrySupplementaryPlaneCharactersPdf417RefusesThem() {
+        // The validator admits emoji on all three formats. Aztec and QR round-trip them; ZXing
+        // cannot put a surrogate pair through PDF417 under any configuration, so the encoder
+        // names that limit itself rather than letting the writer raise a message with the
+        // payload inside it.
         val payload = "https://example.org/é/👍"
 
-        assertThat(decodeLuminance(render(payload, ScannableFormat.Aztec)))
-            .isEqualTo(BarcodeDecodeResult.DecodedBarcode(payload, ScannableFormat.Aztec))
+        for (format in listOf(ScannableFormat.Aztec, ScannableFormat.Qr)) {
+            assertThat(decodeLuminance(render(payload, format)))
+                .isEqualTo(BarcodeDecodeResult.DecodedBarcode(payload, format))
+        }
         assertThat(BarcodeEncoder.encode(payload, ScannableFormat.Pdf417))
             .isInstanceOf(EncodeResult.Failure::class.java)
     }
