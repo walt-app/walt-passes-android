@@ -7,6 +7,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -108,30 +109,23 @@ public fun DocumentView(
             fullScreenAffordance = fullScreenAffordance,
             faceTint = faceTint,
         )
-        is ImageDocument -> ImageDocumentView(
-            documentId = doc.id,
-            imageFile = requireNotNull(imageFile) { "DocumentView(ImageDocument) requires a non-null imageFile" },
-            decoder = requireNotNull(imageDecoder) { "DocumentView(ImageDocument) requires a non-null imageDecoder" },
-            modifier = modifier,
-            telemetry = telemetry,
-            trustCaption = trustCaption,
-            faceTint = faceTint,
-        )
         // wpass-8lu: a composite renders its IMAGE half through the same isolated image-decode
         // surface as a plain image (same imageFile / imageDecoder pair, no new DocumentView
         // parameter). The generated barcode + format switcher are composed by the consumer with
         // passes-ui, keeping the two UI towers independent — this surface stays image-only.
-        is BarcodedImageDocument -> ImageDocumentView(
+        is ImageDocument, is BarcodedImageDocument -> ImageDocumentView(
             documentId = doc.id,
             imageFile = requireNotNull(imageFile) {
-                "DocumentView(BarcodedImageDocument) requires a non-null imageFile"
+                "DocumentView(${doc::class.simpleName}) requires a non-null imageFile"
             },
             decoder = requireNotNull(imageDecoder) {
-                "DocumentView(BarcodedImageDocument) requires a non-null imageDecoder"
+                "DocumentView(${doc::class.simpleName}) requires a non-null imageDecoder"
             },
             modifier = modifier,
             telemetry = telemetry,
             trustCaption = trustCaption,
+            onOpenFullScreen = onOpenFullScreen,
+            fullScreenAffordance = fullScreenAffordance,
             faceTint = faceTint,
         )
     }
@@ -230,28 +224,16 @@ private fun PdfDocumentView(
             TrustCaptionPlacement.HostedTypeRow -> Unit
         }
 
-        // The face paints behind the pager only — the document-surface tone the page sits
-        // on (showing through ContentScale.Fit letterbox bars). The page region is a Box so
-        // a host-supplied affordance can float over its bottom edge.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .documentFace(faceTint),
-        ) {
-            // Page tap opens full screen; clickable and the pager's drag coexist (Compose
-            // routes quick press-release to the click, horizontal drag to the pager).
-            val pagerModifier = Modifier
-                .fillMaxSize()
-                .let {
-                    if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
-                }
-                .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
+        DocumentFaceSlot(
+            faceTint = faceTint,
+            onOpenFullScreen = onOpenFullScreen,
+            fullScreenAffordance = fullScreenAffordance,
+        ) { contentModifier ->
             // Adjacent page rasterises ahead of the viewport so a swipe or peek reveals a
             // ready page (wpass-tjc.3); up to 4 live pages mid-swipe, inside DEFAULT_PAGE_WINDOW.
             HorizontalPager(
                 state = pagerState,
-                modifier = pagerModifier,
+                modifier = contentModifier,
                 beyondViewportPageCount = 1,
             ) { page ->
                 DocumentPage(
@@ -263,25 +245,6 @@ private fun PdfDocumentView(
                     telemetry = telemetry,
                 )
             }
-
-            // A host-supplied affordance floats over the page bottom-centre (wpass-emn);
-            // the host accepts that overlap by choosing a floating affordance.
-            if (onOpenFullScreen != null && fullScreenAffordance != null) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 16.dp),
-                ) {
-                    fullScreenAffordance(onOpenFullScreen)
-                }
-            }
-        }
-
-        // No custom affordance: the neutral banner docks below the page (original
-        // layout), so default consumers' page content is never obscured. The trust
-        // caption above this Column cannot be pushed off-screen by it.
-        if (onOpenFullScreen != null && fullScreenAffordance == null) {
-            FullScreenBanner(onClick = onOpenFullScreen)
         }
     }
 }
@@ -308,9 +271,10 @@ private fun PdfDocumentView(
  *  - Fixed 1x: no pinch-zoom or pan inline, matching the PDF inline surface.
  *
  * [imageFile] is the ORIGINAL image bytes, owned by the caller; it MUST stay open while this
- * view is composed. Close after `DocumentView` leaves composition. Full-screen zoom for images
- * is intentionally out of scope here (the PDF `FullScreenDocumentView` is unchanged); the inline
- * surface is the image-document presentation this step ships.
+ * view is composed. Close after `DocumentView` leaves composition. Inline stays fixed 1x;
+ * full-screen zoom lives on `FullScreenDocumentView`, whose image arm this view's
+ * [onOpenFullScreen] / [fullScreenAffordance] pair (wired identically to the PDF arm,
+ * wpass-pl7.4) is the entry path to.
  */
 @Composable
 @Suppress("LongParameterList")
@@ -321,6 +285,8 @@ private fun ImageDocumentView(
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
+    onOpenFullScreen: (() -> Unit)? = null,
+    fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
     faceTint: Color = Color.Unspecified,
 ) {
     Column(
@@ -337,45 +303,114 @@ private fun ImageDocumentView(
             TrustCaptionPlacement.HostedTypeRow -> Unit
         }
 
-        // The face paints behind the image only — the document-surface tone the image sits on
-        // (showing through the ContentScale.Fit letterbox bars), so the caption above reads as
-        // host chrome rather than part of the document surface, matching the PDF arm.
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .documentFace(faceTint),
-        ) {
-            val density = LocalDensity.current
-            val requestWidthPx = with(density) {
-                TARGET_PAGE_WIDTH_DP.dp.toPx().toInt().coerceAtLeast(1)
-            }
-            val requestHeightPx = with(density) {
-                TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1)
-            }
-            val state = rememberDocumentImage(
-                documentId = documentId,
-                imageFile = imageFile,
-                decoder = decoder,
-                targetSizePx = IntSize(requestWidthPx, requestHeightPx),
-                telemetry = telemetry,
-            )
-            // Loading / Failed render nothing inline; the lane tone is the placeholder, matching
-            // DocumentPage. A future retry affordance belongs on DocumentTile, not here.
-            when (state) {
-                is DocumentImageState.Loading, is DocumentImageState.Failed -> Unit
-                is DocumentImageState.Rendered -> Image(
-                    bitmap = state.image,
-                    // ADR 0005 D4 forbids extracting text/metadata from the image; a fixed
-                    // neutral description is the only safe TalkBack fallback.
-                    contentDescription = "Image document",
-                    contentScale = ContentScale.Fit,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp)),
+        DocumentFaceSlot(
+            faceTint = faceTint,
+            onOpenFullScreen = onOpenFullScreen,
+            fullScreenAffordance = fullScreenAffordance,
+        ) { contentModifier ->
+            Box(modifier = contentModifier) {
+                InlineDecodedImage(
+                    documentId = documentId,
+                    imageFile = imageFile,
+                    decoder = decoder,
+                    telemetry = telemetry,
                 )
             }
         }
+    }
+}
+
+/**
+ * The face-slot trio both arms compose identically: the [documentFace] frame holding the
+ * tappable content region, the floating host affordance, and the docked [FullScreenBanner]
+ * fallback. One implementation so the PDF and image arms cannot drift apart on the
+ * full-screen entry path — the same reason [documentFace] itself is shared.
+ *
+ * The face paints behind the content only — the document-surface tone the page render /
+ * decoded image sits on (showing through ContentScale.Fit letterbox bars), so the caption
+ * above reads as host chrome rather than part of the document surface.
+ *
+ * [content] receives the slot-filling, tap-wired, padded modifier to place its surface
+ * with. Content tap opens full screen; the clickable and drag gestures coexist (Compose
+ * routes quick press-release to the click, drags to the content), and it sits on the slot
+ * region rather than the bitmap so the tap target exists through Loading / Failed too.
+ */
+@Composable
+private fun ColumnScope.DocumentFaceSlot(
+    faceTint: Color,
+    onOpenFullScreen: (() -> Unit)?,
+    fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)?,
+    content: @Composable (contentModifier: Modifier) -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .weight(1f)
+            .documentFace(faceTint),
+    ) {
+        val contentModifier = Modifier
+            .fillMaxSize()
+            .let {
+                if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
+            }
+            .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
+        content(contentModifier)
+
+        // A host-supplied affordance floats over the content bottom-centre (wpass-emn);
+        // the host accepts that overlap by choosing a floating affordance.
+        if (onOpenFullScreen != null && fullScreenAffordance != null) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 16.dp),
+            ) {
+                fullScreenAffordance(onOpenFullScreen)
+            }
+        }
+    }
+
+    // No custom affordance: the neutral banner docks below the content (original layout),
+    // so default consumers' content is never obscured. The trust caption above this
+    // Column cannot be pushed off-screen by it.
+    if (onOpenFullScreen != null && fullScreenAffordance == null) {
+        FullScreenBanner(onClick = onOpenFullScreen)
+    }
+}
+
+/** The inline image arm's decode-and-render body, the single-image analogue of [DocumentPage]. */
+@Composable
+private fun InlineDecodedImage(
+    documentId: DocumentId,
+    imageFile: ParcelFileDescriptor,
+    decoder: ImageDecodeBinder,
+    telemetry: DocumentTelemetryGuard,
+) {
+    val density = LocalDensity.current
+    val requestWidthPx = with(density) {
+        TARGET_PAGE_WIDTH_DP.dp.toPx().toInt().coerceAtLeast(1)
+    }
+    val requestHeightPx = with(density) {
+        TARGET_PAGE_HEIGHT_DP.dp.toPx().toInt().coerceAtLeast(1)
+    }
+    val state = rememberDocumentImage(
+        documentId = documentId,
+        imageFile = imageFile,
+        decoder = decoder,
+        targetSizePx = IntSize(requestWidthPx, requestHeightPx),
+        telemetry = telemetry,
+    )
+    // Loading / Failed render nothing inline; the lane tone is the placeholder, matching
+    // DocumentPage. A future retry affordance belongs on DocumentTile, not here.
+    when (state) {
+        is DocumentImageState.Loading, is DocumentImageState.Failed -> Unit
+        is DocumentImageState.Rendered -> Image(
+            bitmap = state.image,
+            // ADR 0005 D4 forbids extracting text/metadata from the image; a fixed
+            // neutral description is the only safe TalkBack fallback.
+            contentDescription = "Image document",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.fillMaxSize(),
+        )
     }
 }
 

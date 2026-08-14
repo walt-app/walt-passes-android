@@ -29,9 +29,16 @@ import androidx.compose.ui.test.swipeLeft
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.ScannableFormat
+import `is`.walt.passes.document.BarcodedImageDocument
+import `is`.walt.passes.document.BarcodedImageDocumentId
 import `is`.walt.passes.document.DocumentRejectedKind
+import `is`.walt.passes.document.ImageDocument
+import `is`.walt.passes.document.ImageDocumentId
 import `is`.walt.passes.document.PdfDocument
 import `is`.walt.passes.document.PdfDocumentId
+import `is`.walt.passes.image.android.ImageDecodeBinder
+import `is`.walt.passes.image.android.ImageDecodeResult
 import `is`.walt.passes.pdf.android.PdfRendererBinder
 import `is`.walt.passes.pdf.android.ProbeResult
 import `is`.walt.passes.pdf.android.RenderResult
@@ -508,6 +515,148 @@ class DocumentViewInstrumentedTest {
             .isEqualTo((untinted.bottom - untinted.top).value)
     }
 
+    @Test
+    fun tapOnInlineImageInvokesTheFullScreenCallbackAndShowsTheDefaultBanner() {
+        // wpass-pl7.4: the image arm wires onOpenFullScreen exactly as the PDF arm does —
+        // banner docked below the image by default, image tap as the second entry path.
+        var opened = 0
+        composeRule.setContent {
+            ThemedHost {
+                DocumentView(
+                    doc = imageDoc(),
+                    imageFile = pipeRead,
+                    imageDecoder = RecordingImageDecoder(),
+                    onOpenFullScreen = { opened++ },
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Tap for full screen").assertIsDisplayed()
+        composeRule.onNodeWithContentDescription("Image document").performClick()
+        composeRule.onNodeWithText("Tap for full screen").performClick()
+        composeRule.waitForIdle()
+        assertThat(opened).isEqualTo(2)
+    }
+
+    @Test
+    fun fullScreenImageSurfaceShowsTheTrustCaption() {
+        // wpass-pl7.4: the generalized full-screen surface docks the same caption on the
+        // image arm, visible as soon as the surface composes.
+        composeRule.setContent {
+            ThemedHost {
+                FullScreenDocumentView(
+                    doc = imageDoc(),
+                    imageFile = pipeRead,
+                    imageDecoder = RecordingImageDecoder(),
+                    onClose = {},
+                )
+            }
+        }
+        composeRule.onNodeWithText(
+            "User-provided document. Walt has not verified the source.",
+        ).assertIsDisplayed()
+    }
+
+    @Test
+    fun pinchOnFullScreenImageKeepsTheDockedTrustCaptionFixedAndDoesNotRedecode() {
+        // wpass-pl7.4 acceptance: the docked caption stays fixed and legible at zoom. The
+        // caption is structurally outside the zoom transform, so its on-screen bounds
+        // must be IDENTICAL before and after a pinch — not merely still-displayed. And
+        // unlike the PDF arm's sub-rect re-render, the image arm decodes exactly once
+        // (the base decode already carries max-zoom resolution); a pinch must not drive
+        // a second decode call.
+        val decoder = RecordingImageDecoder()
+        composeRule.setContent {
+            ThemedHost {
+                FullScreenDocumentView(
+                    doc = imageDoc(),
+                    imageFile = pipeRead,
+                    imageDecoder = decoder,
+                    onClose = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Image document").assertIsDisplayed()
+        val captionBefore = composeRule
+            .onNodeWithText("User-provided document. Walt has not verified the source.")
+            .getUnclippedBoundsInRoot()
+
+        composeRule.onNodeWithContentDescription("Image document").performTouchInput {
+            pinch(
+                start0 = center + Offset(-100f, 0f),
+                end0 = center + Offset(-300f, 0f),
+                start1 = center + Offset(100f, 0f),
+                end1 = center + Offset(300f, 0f),
+            )
+        }
+        composeRule.waitForIdle()
+
+        val captionAfter = composeRule
+            .onNodeWithText("User-provided document. Walt has not verified the source.")
+            .getUnclippedBoundsInRoot()
+        assertThat(captionAfter).isEqualTo(captionBefore)
+        composeRule.onNodeWithText(
+            "User-provided document. Walt has not verified the source.",
+        ).assertIsDisplayed()
+        assertThat(decoder.decodeCount()).isEqualTo(1)
+    }
+
+    @Test
+    fun pinchOnFullScreenCompositeImageKeepsTheDockedTrustCaptionFixed() {
+        // wpass-pl7.4 acceptance: a composite's retained photo gets the same full-screen
+        // zoom surface as a plain image (wpass-8lu routing), with the caption equally
+        // fixed. Payload is a synthetic non-PII fixture (epic constraint 7).
+        composeRule.setContent {
+            ThemedHost {
+                FullScreenDocumentView(
+                    doc = BarcodedImageDocument(
+                        id = BarcodedImageDocumentId("comp-instrumented"),
+                        displayLabel = "fixture.png",
+                        byteCount = 4096L,
+                        widthPx = 1080,
+                        heightPx = 2340,
+                        barcodePayload = "TEST-PAYLOAD-000",
+                        barcodeFormat = ScannableFormat.Aztec,
+                        importedAtEpochMs = 0L,
+                    ),
+                    imageFile = pipeRead,
+                    imageDecoder = RecordingImageDecoder(),
+                    onClose = {},
+                )
+            }
+        }
+        composeRule.waitForIdle()
+        composeRule.onNodeWithContentDescription("Image document").assertIsDisplayed()
+        val captionBefore = composeRule
+            .onNodeWithText("User-provided document. Walt has not verified the source.")
+            .getUnclippedBoundsInRoot()
+
+        composeRule.onNodeWithContentDescription("Image document").performTouchInput {
+            pinch(
+                start0 = center + Offset(-100f, 0f),
+                end0 = center + Offset(-300f, 0f),
+                start1 = center + Offset(100f, 0f),
+                end1 = center + Offset(300f, 0f),
+            )
+        }
+        composeRule.waitForIdle()
+
+        val captionAfter = composeRule
+            .onNodeWithText("User-provided document. Walt has not verified the source.")
+            .getUnclippedBoundsInRoot()
+        assertThat(captionAfter).isEqualTo(captionBefore)
+    }
+
+    private fun imageDoc() = ImageDocument(
+        id = ImageDocumentId("img-instrumented"),
+        displayLabel = "fixture.png",
+        byteCount = 4096L,
+        widthPx = 1080,
+        heightPx = 2340,
+        importedAtEpochMs = 0L,
+    )
+
     private fun doc(pageCount: Int) = PdfDocument(
         id = PdfDocumentId("doc-instrumented"),
         displayLabel = "fixture.pdf",
@@ -579,7 +728,32 @@ class DocumentViewInstrumentedTest {
         }
     }
 
+    /**
+     * Image-arm sibling of [RecordingBinder]: records every decode() call and returns a
+     * fresh Ok SharedMemory bounded to the request, like the real sandbox (which never
+     * upscales; a small fixed raster inside any plausible request keeps this simple).
+     */
+    private class RecordingImageDecoder : ImageDecodeBinder {
+        private val calls = AtomicInteger(0)
+
+        override suspend fun decode(
+            image: ParcelFileDescriptor,
+            maxWidthPx: Int,
+            maxHeightPx: Int,
+        ): ImageDecodeResult {
+            val n = calls.incrementAndGet()
+            val w = DECODED_WIDTH.coerceAtMost(maxWidthPx)
+            val h = DECODED_HEIGHT.coerceAtMost(maxHeightPx)
+            val sm = SharedMemory.create("walt-test-image-decode-$n", w * h * BYTES_PER_PIXEL)
+            return ImageDecodeResult.Ok(sm, w, h, w.toFloat() / h.toFloat())
+        }
+
+        fun decodeCount(): Int = calls.get()
+    }
+
     private companion object {
         const val BYTES_PER_PIXEL = 4
+        const val DECODED_WIDTH = 108
+        const val DECODED_HEIGHT = 234
     }
 }

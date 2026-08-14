@@ -23,8 +23,8 @@ package `is`.walt.passes.document.ui
  * walt-android test that the details section renders a "Pass type" row enumerating the
  * artifact class — NOT (as before) that the host mounts the kernel caption.
  *
- * Relocation applies to the inline `DocumentView` only. `FullScreenDocumentView` is
- * unchanged: its caption stays docked and non-suppressible (ADR 0005 Z.8). A host's
+ * Relocation applies to the inline `DocumentView` only. `FullScreenDocumentView` takes no
+ * placement: its caption stays docked and non-suppressible on every arm (ADR 0005 Z.8). A host's
  * collapsible details section is an inline-surface affordance; the full-screen zoom
  * surface has no host details chrome to fold into.
  */
