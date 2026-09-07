@@ -54,6 +54,12 @@ The Kotlin compiler is configured with `explicitApi()`. Every API element carrie
 
 Rationale: walt-android imports this module directly. A removed `public` modifier becomes a downstream compile error rather than a silent API change.
 
+### D7. `PassEncoder` writes an unsigned archive; it never writes a `signature`
+
+`PassEncoder.encode(pass, config)` (added 2026-09-08, bead `wpass-59i.4`) turns a parsed `Pass` back into a `.pkpass` containing `pass.json`, `manifest.json`, the top-level role images, and one `<tag>.lproj/pass.strings` per locale. It returns `PassEncodeResult`, a sealed interface: `Success(bytes)`, `LimitExceeded(ResourceLimit)`, `InvalidLocaleTag(tag)`. It exists for rows stored before ADR 0002 D6 retained archive bytes; a pass whose original bytes exist is exported byte-exact and never re-encoded.
+
+Rationale: Walt's export container requires every pass entry to be a `.pkpass`, and a JSON projection of the model would be a second, Walt-only pass shape with its own parser, which the parallel-implementation rule forbids. The encoder is lossy by construction (it emits only what `Pass` keeps; `passTypeIdentifier`, `teamIdentifier`, `webServiceURL`, `authenticationToken`, `nfc`, extra barcodes and localized images are absent) and Walt's parser requires none of the dropped keys. `manifest.json` is written because the parser rejects an archive without one and rejects entries it does not list; it is the SHA-1 integrity index, not provenance (D2). No `signature` is ever written, so re-import is `SignatureStatus.Unsigned` under the default policy and `Tampered(SignatureCryptoFailure)` under `Strict`: nothing the kernel produces can be mistaken for issuer-signed. Output is checked against the same `ParserConfig` the parser enforces before it is returned, and is byte-deterministic for an equal `Pass` (fixed entry order, sorted keys, fixed local-calendar timestamp) so a consumer can hash it.
+
 ## Consequences
 
 - The implementation bead (follow-up to `wpass-epb`) can land the parser body without renegotiating any types; the public surface is fixed.

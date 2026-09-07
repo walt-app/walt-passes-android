@@ -33,7 +33,7 @@ Pre-alpha. Architecture and design phase. No releases yet.
 
 ## Modules
 
-- **`passes-core`** — Pure Kotlin/JVM. PKPASS parser, model, signature verifier, `.strings` parser, secure-defaults `ParserConfig`, `TelemetryGuard` interface, `PassBundleReader` for `.pkpasses` bundles with outer-layer cumulative caps. No Android dependencies. KMP-friendly.
+- **`passes-core`** — Pure Kotlin/JVM. PKPASS parser, model, signature verifier, `.strings` parser, secure-defaults `ParserConfig`, `TelemetryGuard` interface, `PassBundleReader` for `.pkpasses` bundles with outer-layer cumulative caps, and `PassEncoder` (parsed `Pass` back to an unsigned `.pkpass`; never writes a `signature`, so re-import surfaces as `Unsigned`). No Android dependencies. KMP-friendly.
 - **`passes-storage`** — Android. SQLCipher database with Keystore-sourced key, Android Auto Backup exclusion, irreversible deletion with cache wipe.
 - **`passes-ui`** — Android + Jetpack Compose. Pass front/back composables, barcode/QR rendering, B3 URL confirmation sheet, expired badge, bounded image rendering. Themable.
 
