@@ -579,6 +579,8 @@ class PassRepositoryContractTest {
         assertThat(methods).doesNotContain("undelete")
         assertThat(methods).doesNotContain("restore")
         assertThat(methods).doesNotContain("softDelete")
+        // Exact lowercase match on purpose: guards a soft-delete "archive" verb, not
+        // loadArchiveBytes.
         assertThat(methods).doesNotContain("archive")
     }
 

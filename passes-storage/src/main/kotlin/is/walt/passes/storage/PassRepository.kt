@@ -35,9 +35,9 @@ public interface PassRepository {
      * [archiveBytes] is the ORIGINAL `.pkpass` archive [pass] was parsed from, retained
      * verbatim in the `pass_archives` sidecar for [loadArchiveBytes]. Stored as a copy and
      * never parsed, sniffed, or decoded here. On replacement the image, locale, and archive
-     * rows are all swapped atomically in one transaction. At rest this now includes
+     * rows are all swapped atomically in one transaction. The archive carries
      * `webServiceURL` / `authenticationToken` where present, under the same SQLCipher +
-     * Keystore envelope and Auto Backup exclusion (ADR 0002; amendment tracked separately).
+     * Keystore envelope and Auto Backup exclusion (ADR 0002).
      *
      * Defense in depth, mirroring [insertDocument]: rejects an empty archive with
      * [PassUpdateRejectedKind.ArchiveEmpty] and one larger than
@@ -360,7 +360,9 @@ public object PassUserLabelBounds {
 /**
  * Defensive cap `passes-storage` enforces on the retained archive in [PassRepository.upsert].
  * Same figure the parser applies (`ParserConfig.maxArchiveBytes` default), carried again
- * here so a future caller bug cannot land an oversized sidecar row.
+ * here so a future caller bug cannot land an oversized sidecar row. This is a hard storage
+ * ceiling independent of a consumer's configured `ParserConfig.maxArchiveBytes`: a parser
+ * configured above it still gets [PassUpdateRejectedKind.ArchiveOversized] at storage.
  */
 public object PassArchiveBounds {
     public const val MAX_BYTES: Long = ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES

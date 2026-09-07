@@ -41,7 +41,7 @@ StrongBox is requested via `KeyGenParameterSpec.Builder.setIsStrongBoxBacked(tru
 
 ### D3. Schema separates query columns, blob, images, and locales
 
-Four tables. Schema version 1:
+Four tables at schema version 1 (a fifth pass-side table, `pass_archives`, joined at v8):
 
 ```sql
 CREATE TABLE schema_meta (
@@ -122,7 +122,7 @@ The assertion validates by content, not resource identity. It opens whichever XM
 `PassRepository.delete(id)`:
 
 1. Begins a transaction.
-2. Issues `DELETE FROM passes WHERE id = ?` (cascades to `pass_images` and `pass_locales`).
+2. Issues `DELETE FROM passes WHERE id = ?` (cascades to `pass_images`, `pass_locales`, and `pass_archives`).
 3. Commits.
 4. Updates the in-memory `StateFlow<List<PassSummary>>` to remove the deleted entry, before returning.
 5. Emits `StorageTelemetryGuard.onPassDeleted(PassType, SignatureStatusKind)` (no PII).
