@@ -203,12 +203,13 @@ class PublicApiSurfaceTest {
     }
 
     @Test
-    fun schemaDeclaresSevenTablesAndIsAtVersionSeven() {
-        assertThat(Schema.VERSION).isEqualTo(7)
+    fun schemaDeclaresEightTablesAndIsAtVersionEight() {
+        assertThat(Schema.VERSION).isEqualTo(8)
         assertThat(Schema.Tables.SCHEMA_META).isEqualTo("schema_meta")
         assertThat(Schema.Tables.PASSES).isEqualTo("passes")
         assertThat(Schema.Tables.PASS_IMAGES).isEqualTo("pass_images")
         assertThat(Schema.Tables.PASS_LOCALES).isEqualTo("pass_locales")
+        assertThat(Schema.Tables.PASS_ARCHIVES).isEqualTo("pass_archives")
         assertThat(Schema.Tables.DOCUMENTS).isEqualTo("documents")
         assertThat(Schema.Tables.DOCUMENT_THUMBNAILS).isEqualTo("document_thumbnails")
         assertThat(Schema.Tables.SCANNABLE_CARDS).isEqualTo("scannable_cards")
@@ -217,9 +218,10 @@ class PublicApiSurfaceTest {
         // + scannable_cards (v4 shape, no color_argb) + 1 scannable-card index
         // + 3 v5->v6 document ALTERs (format / width_px / height_px)
         // + 2 v6->v7 document ALTERs (barcode_payload / barcode_format)
-        // = 17 statements.
-        assertThat(Schema.DDL).hasSize(17)
-        assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2, 3, 4, 5, 6)
+        // + 1 v7->v8 pass_archives sidecar table
+        // = 18 statements.
+        assertThat(Schema.DDL).hasSize(18)
+        assertThat(Schema.MIGRATIONS.keys).containsExactly(1, 2, 3, 4, 5, 6, 7)
     }
 
     @Test

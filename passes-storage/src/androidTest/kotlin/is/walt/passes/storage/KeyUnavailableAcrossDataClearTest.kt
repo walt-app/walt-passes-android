@@ -134,7 +134,11 @@ class KeyUnavailableAcrossDataClearTest {
         }
         val repo = repoResult.value
         runBlocking {
-            val upsertOutcome = repo.upsert(buildSamplePass(), SignatureStatus.AppleVerified)
+            val upsertOutcome = repo.upsert(
+                buildSamplePass(),
+                SignatureStatus.AppleVerified,
+                archiveBytes = byteArrayOf(0x50, 0x4B, 0x03, 0x04),
+            )
             check(upsertOutcome is StorageResult.Success) {
                 "Sample pass upsert failed: $upsertOutcome"
             }

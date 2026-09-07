@@ -707,9 +707,13 @@ class DocumentRepositoryTest {
         override fun upsert(
             pass: Pass,
             signatureStatus: SignatureStatus,
+            archiveBytes: ByteArray,
             nowEpochMs: Long,
         ): UpsertOutcome = error("unused in document tests")
         override fun delete(id: PassRecordId): DeleteOutcome? = null
+        override fun loadArchiveBytes(
+            id: PassRecordId,
+        ): `is`.walt.passes.storage.internal.ArchiveBytesOutcome? = null
         override fun updateUserLabel(
             id: PassRecordId,
             label: String?,

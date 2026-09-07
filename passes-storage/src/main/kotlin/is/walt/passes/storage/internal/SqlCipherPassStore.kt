@@ -40,10 +40,7 @@ internal class SqlCipherPassStore(
 
     override fun listSummaries(): List<PassSummary> {
         val out = ArrayList<PassSummary>()
-        db.rawQuery(
-            "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} ORDER BY created_at_epoch_ms DESC",
-            emptyArray(),
-        ).use { c ->
+        db.rawQuery(LIST_SUMMARIES_SQL, emptyArray()).use { c ->
             while (c.moveToNext()) {
                 val summary = c.toSummaryOrNull() ?: continue
                 out += summary
@@ -53,10 +50,7 @@ internal class SqlCipherPassStore(
     }
 
     override fun loadById(id: PassRecordId): StoredPass? {
-        val (summary, blob) = db.rawQuery(
-            "SELECT $SUMMARY_COLUMNS, pass_json FROM ${Schema.Tables.PASSES} WHERE id = ?",
-            arrayOf(id.value.toString()),
-        ).use { c ->
+        val (summary, blob) = db.rawQuery(LOAD_BY_ID_SQL, arrayOf(id.value.toString())).use { c ->
             if (!c.moveToNext()) return null
             val s = c.toSummaryOrNull() ?: return null
             val passJson = c.getBlob(c.getColumnIndexOrThrow("pass_json"))
@@ -79,10 +73,7 @@ internal class SqlCipherPassStore(
     }
 
     override fun summaryById(id: PassRecordId): PassSummary? {
-        return db.rawQuery(
-            "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} WHERE id = ?",
-            arrayOf(id.value.toString()),
-        ).use { c ->
+        return db.rawQuery(SUMMARY_BY_ID_SQL, arrayOf(id.value.toString())).use { c ->
             if (!c.moveToNext()) null else c.toSummaryOrNull()
         }
     }
@@ -90,6 +81,7 @@ internal class SqlCipherPassStore(
     override fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
+        archiveBytes: ByteArray,
         nowEpochMs: Long,
     ): UpsertOutcome {
         db.beginTransaction()
@@ -103,65 +95,22 @@ internal class SqlCipherPassStore(
             val existingId: Long? = existing?.first
             val createdAt: Long = existing?.second ?: nowEpochMs
 
-            val signatureKind = signatureStatus.toKind().name
-            val passJson = PassJsonCodec.encode(pass)
-
+            val cv = passRowValues(pass, signatureStatus, nowEpochMs)
             val rowId: Long = if (existingId != null) {
-                val cv = ContentValues().apply {
-                    put("type", pass.type.name)
-                    put("serial_number", pass.serialNumber)
-                    put("organization_name", pass.organizationName)
-                    put("description", pass.description)
-                    pass.expirationDate?.let { put("expiration_epoch_ms", it.epochMillis) }
-                        ?: putNull("expiration_epoch_ms")
-                    put("voided", if (pass.voided) 1 else 0)
-                    put("signature_status_kind", signatureKind)
-                    put("pass_json", passJson)
-                    put("updated_at_epoch_ms", nowEpochMs)
-                }
-                db.update(
-                    Schema.Tables.PASSES,
-                    cv,
-                    "id = ?",
-                    arrayOf(existingId.toString()),
-                )
-                db.delete(Schema.Tables.PASS_IMAGES, "pass_id = ?", arrayOf(existingId.toString()))
-                db.delete(Schema.Tables.PASS_LOCALES, "pass_id = ?", arrayOf(existingId.toString()))
+                val args = arrayOf(existingId.toString())
+                db.update(Schema.Tables.PASSES, cv, "id = ?", args)
+                // Children are replaced wholesale inside this transaction: images,
+                // locales, and the retained archive all follow the new import.
+                db.delete(Schema.Tables.PASS_IMAGES, "pass_id = ?", args)
+                db.delete(Schema.Tables.PASS_LOCALES, "pass_id = ?", args)
+                db.delete(Schema.Tables.PASS_ARCHIVES, "pass_id = ?", args)
                 existingId
             } else {
-                val cv = ContentValues().apply {
-                    put("type", pass.type.name)
-                    put("serial_number", pass.serialNumber)
-                    put("organization_name", pass.organizationName)
-                    put("description", pass.description)
-                    pass.expirationDate?.let { put("expiration_epoch_ms", it.epochMillis) }
-                        ?: putNull("expiration_epoch_ms")
-                    put("voided", if (pass.voided) 1 else 0)
-                    put("signature_status_kind", signatureKind)
-                    put("pass_json", passJson)
-                    put("created_at_epoch_ms", createdAt)
-                    put("updated_at_epoch_ms", nowEpochMs)
-                }
+                cv.put("created_at_epoch_ms", createdAt)
                 db.insertOrThrow(Schema.Tables.PASSES, null, cv)
             }
 
-            for ((role, bytes) in pass.images) {
-                val cv = ContentValues().apply {
-                    put("pass_id", rowId)
-                    put("role", role.name)
-                    put("bytes", bytes.bytes)
-                }
-                db.insertOrThrow(Schema.Tables.PASS_IMAGES, null, cv)
-            }
-            for ((locale, strings) in pass.locales) {
-                val cv = ContentValues().apply {
-                    put("pass_id", rowId)
-                    put("locale_tag", locale.tag)
-                    put("strings_json", PassJsonCodec.encodeStrings(strings))
-                }
-                db.insertOrThrow(Schema.Tables.PASS_LOCALES, null, cv)
-            }
-
+            insertChildren(rowId, pass, archiveBytes)
             db.setTransactionSuccessful()
 
             val summary = PassSummary(
@@ -190,13 +139,68 @@ internal class SqlCipherPassStore(
         val summary = summaryById(id) ?: return null
         db.beginTransaction()
         try {
-            // ON DELETE CASCADE on pass_images and pass_locales drops the children.
+            // ON DELETE CASCADE on pass_images, pass_locales, and pass_archives drops the children.
             db.delete(Schema.Tables.PASSES, "id = ?", arrayOf(id.value.toString()))
             db.setTransactionSuccessful()
         } finally {
             db.endTransaction()
         }
         return DeleteOutcome(summary)
+    }
+
+    override fun loadArchiveBytes(id: PassRecordId): ArchiveBytesOutcome? = db.rawQuery(
+        LOAD_ARCHIVE_SQL,
+        arrayOf(id.value.toString()),
+    ).use { c ->
+        // LEFT JOIN: no row = unknown pass; a row with NULL bytes = legacy pass, no sidecar.
+        if (!c.moveToNext()) return null
+        ArchiveBytesOutcome(if (c.isNull(0)) null else c.getBlob(0))
+    }
+
+    /**
+     * The `passes` row for an insert or a replace. `created_at_epoch_ms` is added by the
+     * insert path only; a replace keeps the original import time.
+     */
+    private fun passRowValues(
+        pass: Pass,
+        signatureStatus: SignatureStatus,
+        nowEpochMs: Long,
+    ): ContentValues = ContentValues().apply {
+        put("type", pass.type.name)
+        put("serial_number", pass.serialNumber)
+        put("organization_name", pass.organizationName)
+        put("description", pass.description)
+        pass.expirationDate?.let { put("expiration_epoch_ms", it.epochMillis) }
+            ?: putNull("expiration_epoch_ms")
+        put("voided", if (pass.voided) 1 else 0)
+        put("signature_status_kind", signatureStatus.toKind().name)
+        put("pass_json", PassJsonCodec.encode(pass))
+        put("updated_at_epoch_ms", nowEpochMs)
+    }
+
+    /** Image, locale, and archive rows for [rowId]. Runs inside the caller's transaction. */
+    private fun insertChildren(rowId: Long, pass: Pass, archiveBytes: ByteArray) {
+        for ((role, bytes) in pass.images) {
+            val cv = ContentValues().apply {
+                put("pass_id", rowId)
+                put("role", role.name)
+                put("bytes", bytes.bytes)
+            }
+            db.insertOrThrow(Schema.Tables.PASS_IMAGES, null, cv)
+        }
+        for ((locale, strings) in pass.locales) {
+            val cv = ContentValues().apply {
+                put("pass_id", rowId)
+                put("locale_tag", locale.tag)
+                put("strings_json", PassJsonCodec.encodeStrings(strings))
+            }
+            db.insertOrThrow(Schema.Tables.PASS_LOCALES, null, cv)
+        }
+        val archiveCv = ContentValues().apply {
+            put("pass_id", rowId)
+            put("bytes", archiveBytes)
+        }
+        db.insertOrThrow(Schema.Tables.PASS_ARCHIVES, null, archiveCv)
     }
 
     @Suppress("ReturnCount")
@@ -312,10 +316,27 @@ internal class SqlCipherPassStore(
         )
     }
 
-    private companion object {
-        const val SUMMARY_COLUMNS: String =
+    /**
+     * Query shapes, exposed so the JVM `SqlCipherPassStoreQueryShapeTest` can pin that the
+     * list / detail / summary paths select from `passes` only and never join the archive.
+     */
+    internal companion object {
+        private const val SUMMARY_COLUMNS: String =
             "id, type, serial_number, organization_name, description, " +
                 "expiration_epoch_ms, voided, signature_status_kind, " +
                 "created_at_epoch_ms, updated_at_epoch_ms, user_label"
+
+        const val LIST_SUMMARIES_SQL: String =
+            "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} ORDER BY created_at_epoch_ms DESC"
+
+        const val LOAD_BY_ID_SQL: String =
+            "SELECT $SUMMARY_COLUMNS, pass_json FROM ${Schema.Tables.PASSES} WHERE id = ?"
+
+        const val SUMMARY_BY_ID_SQL: String =
+            "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} WHERE id = ?"
+
+        const val LOAD_ARCHIVE_SQL: String =
+            "SELECT a.bytes FROM ${Schema.Tables.PASSES} p " +
+                "LEFT JOIN ${Schema.Tables.PASS_ARCHIVES} a ON a.pass_id = p.id WHERE p.id = ?"
     }
 }

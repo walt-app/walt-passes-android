@@ -19,8 +19,19 @@ internal interface PassStore {
     fun listSummaries(): List<PassSummary>
     fun loadById(id: PassRecordId): StoredPass?
     fun summaryById(id: PassRecordId): PassSummary?
-    fun upsert(pass: Pass, signatureStatus: SignatureStatus, nowEpochMs: Long): UpsertOutcome
+    fun upsert(
+        pass: Pass,
+        signatureStatus: SignatureStatus,
+        archiveBytes: ByteArray,
+        nowEpochMs: Long,
+    ): UpsertOutcome
     fun delete(id: PassRecordId): DeleteOutcome?
+
+    /**
+     * Reads the retained archive for [id]. Returns `null` when no pass row matches;
+     * an outcome with `null` bytes when the pass exists but pre-dates archive retention.
+     */
+    fun loadArchiveBytes(id: PassRecordId): ArchiveBytesOutcome?
 
     /**
      * Sets or clears the `user_label` column on the row matching [id]. Returns the
@@ -46,4 +57,9 @@ internal data class DeleteOutcome(
 internal data class UpdateUserLabelOutcome(
     val summary: PassSummary,
     val hadPriorLabel: Boolean,
+)
+
+/** [bytes] is `null` for a legacy pass row that has no `pass_archives` sidecar row. */
+internal class ArchiveBytesOutcome(
+    val bytes: ByteArray?,
 )

@@ -39,7 +39,7 @@ class SchemaMigrationTest {
         // V1 was schema_meta + passes + 3 pass-side indexes + pass_images + pass_locales
         // = 7 statements at the head of Schema.DDL.
         conn.createStatement().use { stmt ->
-            for (sql in V1_DDL) stmt.execute(sql)
+            for (sql in V1_SCHEMA_SNAPSHOT) stmt.execute(sql)
         }
     }
 
@@ -726,59 +726,5 @@ class SchemaMigrationTest {
                 ).isEqualTo(1)
             }
         }
-    }
-
-    private companion object {
-        /**
-         * Snapshot of the v1 schema. Hard-coded so the test sees the *historical* shape,
-         * not whatever the current Schema.DDL happens to declare. Any future v2 -> v3
-         * migration will get its own test that walks v1 -> v2 -> v3 against the same
-         * snapshot.
-         */
-        val V1_DDL: List<String> = listOf(
-            """
-            CREATE TABLE IF NOT EXISTS schema_meta (
-                key   TEXT PRIMARY KEY NOT NULL,
-                value BLOB NOT NULL
-            )
-            """.trimIndent(),
-            """
-            CREATE TABLE IF NOT EXISTS passes (
-                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-                type                  TEXT    NOT NULL,
-                serial_number         TEXT    NOT NULL,
-                organization_name     TEXT    NOT NULL,
-                description           TEXT    NOT NULL,
-                expiration_epoch_ms   INTEGER,
-                voided                INTEGER NOT NULL DEFAULT 0,
-                signature_status_kind TEXT    NOT NULL,
-                pass_json             BLOB    NOT NULL,
-                created_at_epoch_ms   INTEGER NOT NULL,
-                updated_at_epoch_ms   INTEGER NOT NULL
-            )
-            """.trimIndent(),
-            "CREATE INDEX IF NOT EXISTS idx_passes_type ON passes(type)",
-            "CREATE INDEX IF NOT EXISTS idx_passes_expiration ON passes(expiration_epoch_ms)",
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_passes_identity
-                ON passes(type, serial_number, organization_name)
-            """.trimIndent(),
-            """
-            CREATE TABLE IF NOT EXISTS pass_images (
-                pass_id INTEGER NOT NULL REFERENCES passes(id) ON DELETE CASCADE,
-                role    TEXT    NOT NULL,
-                bytes   BLOB    NOT NULL,
-                PRIMARY KEY (pass_id, role)
-            )
-            """.trimIndent(),
-            """
-            CREATE TABLE IF NOT EXISTS pass_locales (
-                pass_id      INTEGER NOT NULL REFERENCES passes(id) ON DELETE CASCADE,
-                locale_tag   TEXT    NOT NULL,
-                strings_json BLOB    NOT NULL,
-                PRIMARY KEY (pass_id, locale_tag)
-            )
-            """.trimIndent(),
-        )
     }
 }

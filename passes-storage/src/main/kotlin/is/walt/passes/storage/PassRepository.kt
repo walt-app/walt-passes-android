@@ -31,18 +31,33 @@ public interface PassRepository {
      * `(type, serial_number, organization_name)` identity matches. Returns the assigned
      * [PassRecordId] in [StorageResult.Success.value].
      *
-     * On replacement the existing image and locale rows are atomically replaced inside the
-     * same transaction. The decoded summary is recomputed from [pass]; callers do not pass
-     * a separate summary.
+     * [archiveBytes] is the ORIGINAL `.pkpass` archive [pass] was parsed from, retained
+     * verbatim in the `pass_archives` sidecar so [loadArchiveBytes] can hand it back
+     * byte-exact (export, re-import with a real signature check). The repository stores
+     * a copy: mutating the array after the call does not reach the stored bytes. It is
+     * never parsed, sniffed, or decoded here, and no other kernel path reads it. The caller
+     * already holds these bytes (it just parsed them); a stream-parsed import must be
+     * buffered first, bounded by `ParserConfig.maxArchiveBytes` the same way the parser
+     * bounds it.
+     *
+     * At-rest consequence: the archive carries everything the parser drops, including
+     * `webServiceURL` and `authenticationToken` where present. Same SQLCipher file, same
+     * Keystore-wrapped key, same Auto Backup exclusion (ADR 0002, amended for wpass-59i).
+     *
+     * On replacement the existing image, locale, and archive rows are atomically replaced
+     * inside the same transaction. The decoded summary is recomputed from [pass]; callers
+     * do not pass a separate summary.
      */
     public suspend fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
+        archiveBytes: ByteArray,
     ): StorageResult<PassRecordId>
 
     /**
      * Load a stored pass with all images and locales materialized. Use [summaryOf] for the
-     * list view; [load] is the detail-view path.
+     * list view; [load] is the detail-view path. The retained archive is NOT loaded here;
+     * see [loadArchiveBytes].
      */
     public suspend fun load(id: PassRecordId): StorageResult<StoredPass>
 
@@ -52,8 +67,21 @@ public interface PassRepository {
     public suspend fun summaryOf(id: PassRecordId): StorageResult<PassSummary>
 
     /**
-     * Irreversible delete (ADR 0002 D6). Deletes the `passes` row and its cascaded image
-     * and locale rows in one transaction, updates the [passes] StateFlow, then emits the
+     * Loads the original `.pkpass` archive bytes retained by [upsert] for the pass with
+     * [id], byte-exact. Returns `null` (inside [StorageResult.Success]) for a legacy row
+     * imported before archive retention landed (schema v8): the pass exists, its archive
+     * was never stored, and nothing can backfill it. Such a pass can only be exported as
+     * a regenerated, unsigned archive. Returns [StorageError.IntegrityViolation] if no row
+     * matches [id].
+     *
+     * This is the ONLY path that reads the `pass_archives` sidecar; [passes], [load], and
+     * [summaryOf] never touch it. Each call returns a fresh array.
+     */
+    public suspend fun loadArchiveBytes(id: PassRecordId): StorageResult<ByteArray?>
+
+    /**
+     * Irreversible delete (ADR 0002 D6). Deletes the `passes` row and its cascaded image,
+     * locale, and archive rows in one transaction, updates the [passes] StateFlow, then emits the
      * `onPassDeleted` telemetry event. No undo, no soft-delete, no VACUUM.
      *
      * Confirmation UI is the caller's responsibility; the repository trusts the call.

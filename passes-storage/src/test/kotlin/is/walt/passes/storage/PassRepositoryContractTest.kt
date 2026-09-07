@@ -19,6 +19,7 @@ import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.storage.internal.ArchiveBytesOutcome
 import `is`.walt.passes.storage.internal.DeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentDeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentInsertOutcome
@@ -92,7 +93,7 @@ class PassRepositoryContractTest {
         )
 
         val pass = samplePass(serial = "S1")
-        val result = repo.upsert(pass, SignatureStatus.AppleVerified)
+        val result = repo.upsert(pass, SignatureStatus.AppleVerified, sampleArchive())
 
         check(result is StorageResult.Success)
         assertThat(repo.passes.value.map { it.serialNumber }).containsExactly("S1")
@@ -363,6 +364,122 @@ class PassRepositoryContractTest {
     }
 
     @Test
+    fun upsertRetainsTheArchiveAndLoadArchiveBytesRoundTripsItByteExact() = runTest {
+        val store = FakePassStore()
+        val repo = newRepo(store)
+
+        val archive = sampleArchive()
+        val id = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, archive)
+            as StorageResult.Success).value
+
+        val loaded = repo.loadArchiveBytes(id)
+        check(loaded is StorageResult.Success)
+        assertThat(loaded.value).isNotNull()
+        assertThat(loaded.value!!.size).isEqualTo(archive.size)
+        assertThat(loaded.value).isEqualTo(archive)
+    }
+
+    @Test
+    fun upsertReplaceSwapsTheRetainedArchiveForTheNewOne() = runTest {
+        val store = FakePassStore()
+        val repo = newRepo(store)
+
+        val first = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, sampleArchive())
+            as StorageResult.Success).value
+        val replacement = byteArrayOf(0x50, 0x4B, 0x03, 0x04, 0x7F, 0x7E)
+        val second = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.SelfSigned, replacement)
+            as StorageResult.Success).value
+
+        assertThat(second).isEqualTo(first)
+        val loaded = repo.loadArchiveBytes(first)
+        check(loaded is StorageResult.Success)
+        assertThat(loaded.value).isEqualTo(replacement)
+        assertThat(store.archiveCount).isEqualTo(1)
+    }
+
+    @Test
+    fun loadArchiveBytesReturnsNullForALegacyRowImportedBeforeRetention() = runTest {
+        // Seeded summaries model rows that pre-date the v8 sidecar: the pass row exists,
+        // the archive does not, and there is nothing to backfill it from.
+        val store = FakePassStore(initial = listOf(sampleSummary(id = 1L)))
+        val telemetry = RecordingGuard()
+        val repo = newRepo(store, telemetry)
+
+        val loaded = repo.loadArchiveBytes(PassRecordId(1L))
+        check(loaded is StorageResult.Success)
+        assertThat(loaded.value).isNull()
+        // A legacy null is a success, not a failure: no onStorageFailure event.
+        assertThat(telemetry.events).containsExactly("init:StrongBox")
+    }
+
+    @Test
+    fun loadArchiveBytesOfUnknownIdReturnsIntegrityViolation() = runTest {
+        val store = FakePassStore()
+        val telemetry = RecordingGuard()
+        val repo = newRepo(store, telemetry)
+
+        val loaded = repo.loadArchiveBytes(PassRecordId(404L))
+        check(loaded is StorageResult.Failure)
+        assertThat(loaded.error).isEqualTo(StorageError.IntegrityViolation(PassRecordId(404L)))
+        assertThat(telemetry.events).containsExactly(
+            "init:StrongBox",
+            "failure:IntegrityViolation:n/a",
+        ).inOrder()
+    }
+
+    @Test
+    fun retainedArchiveIsIsolatedFromCallerMutationOnBothSides() = runTest {
+        val store = FakePassStore()
+        val repo = newRepo(store)
+
+        val input = sampleArchive()
+        val original = input.copyOf()
+        val id = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, input)
+            as StorageResult.Success).value
+        // Mutating the array after upsert must not reach the stored copy.
+        input.fill(0x00)
+
+        val first = (repo.loadArchiveBytes(id) as StorageResult.Success).value!!
+        assertThat(first).isEqualTo(original)
+        // Mutating a returned array must not reach the stored copy either.
+        first.fill(0x00)
+        val second = (repo.loadArchiveBytes(id) as StorageResult.Success).value!!
+        assertThat(second).isEqualTo(original)
+    }
+
+    @Test
+    fun listDetailAndSummaryPathsNeverReadTheArchive() = runTest {
+        val store = FakePassStore()
+        val repo = newRepo(store)
+        val id = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, sampleArchive())
+            as StorageResult.Success).value
+
+        repo.passes.value
+        check(repo.load(id) is StorageResult.Success)
+        check(repo.summaryOf(id) is StorageResult.Success)
+        check(repo.updatePassUserLabel(id, "label") is StorageResult.Success)
+        assertThat(store.archiveReads).isEqualTo(0)
+
+        check(repo.loadArchiveBytes(id) is StorageResult.Success)
+        assertThat(store.archiveReads).isEqualTo(1)
+    }
+
+    @Test
+    fun deleteDropsTheRetainedArchiveWithThePass() = runTest {
+        val store = FakePassStore()
+        val repo = newRepo(store)
+        val id = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, sampleArchive())
+            as StorageResult.Success).value
+
+        check(repo.delete(id) is StorageResult.Success)
+
+        assertThat(store.archiveCount).isEqualTo(0)
+        val loaded = repo.loadArchiveBytes(id)
+        check(loaded is StorageResult.Failure)
+        assertThat(loaded.error).isEqualTo(StorageError.IntegrityViolation(id))
+    }
+
+    @Test
     fun deleteIsIrreversibleNoUndoArmOnPublicSurface() {
         // Compile-time lock: the only mutating method on PassRepository for an existing row
         // is `delete(id)`. No `undelete`, `restore`, `softDelete`, or `archive` arms exist.
@@ -381,7 +498,13 @@ class PassRepositoryContractTest {
     private class FakePassStore(initial: List<PassSummary> = emptyList()) : PassStore {
         private val rows: LinkedHashMap<Long, StoredPass> = LinkedHashMap()
         private val summaries: LinkedHashMap<Long, PassSummary> = LinkedHashMap()
+        // Sidecar, like the `pass_archives` table: seeded rows have no entry (legacy).
+        private val archives: HashMap<Long, ByteArray> = HashMap()
         private var nextId: Long = 0L
+
+        var archiveReads: Int = 0
+            private set
+        val archiveCount: Int get() = archives.size
 
         init {
             for (s in initial) {
@@ -404,6 +527,7 @@ class PassRepositoryContractTest {
         override fun upsert(
             pass: Pass,
             signatureStatus: SignatureStatus,
+            archiveBytes: ByteArray,
             nowEpochMs: Long,
         ): UpsertOutcome {
             val existing = summaries.values.firstOrNull {
@@ -433,6 +557,8 @@ class PassRepositoryContractTest {
                 createdAt = createdAt,
                 updatedAt = PassInstant(nowEpochMs),
             )
+            // Value semantics, like a BLOB column: the caller's array is never aliased.
+            archives[id.value] = archiveBytes.copyOf()
             return UpsertOutcome(
                 recordId = id,
                 summary = summary,
@@ -443,7 +569,14 @@ class PassRepositoryContractTest {
         override fun delete(id: PassRecordId): DeleteOutcome? {
             val summary = summaries.remove(id.value) ?: return null
             rows.remove(id.value)
+            archives.remove(id.value)
             return DeleteOutcome(summary)
+        }
+
+        override fun loadArchiveBytes(id: PassRecordId): ArchiveBytesOutcome? {
+            if (!summaries.containsKey(id.value)) return null
+            archiveReads++
+            return ArchiveBytesOutcome(archives[id.value]?.copyOf())
         }
 
         override fun updateUserLabel(
@@ -552,7 +685,24 @@ class PassRepositoryContractTest {
         override fun close() = Unit
     }
 
+    private fun newRepo(
+        store: FakePassStore,
+        telemetry: RecordingGuard = RecordingGuard(),
+    ): SqlCipherPassRepository = SqlCipherPassRepository(
+        store = store,
+        documentStore = NoOpDocumentStore,
+        scannableCardStore = NoOpScannableCardStore,
+        telemetryGuard = telemetry,
+        ioDispatcher = UnconfinedTestDispatcher(),
+        clock = { 1_000L },
+        keyBacking = KeyBacking.StrongBox,
+    )
+
     private companion object {
+        /** Stand-in archive: a ZIP local-file-header magic plus filler. Never parsed here. */
+        fun sampleArchive(): ByteArray =
+            byteArrayOf(0x50, 0x4B, 0x03, 0x04) + ByteArray(64) { (it * 7).toByte() }
+
         fun sampleSummary(
             id: Long,
             userLabel: String? = null,

@@ -29,7 +29,7 @@ class SchemaDdlTest {
     }
 
     @Test
-    fun ddlExecutesCleanlyAndCreatesTheSevenDocumentedTables() {
+    fun ddlExecutesCleanlyAndCreatesTheEightDocumentedTables() {
         applyDdl().use { conn ->
             val tables = mutableSetOf<String>()
             conn.createStatement().use { stmt ->
@@ -41,10 +41,75 @@ class SchemaDdlTest {
                 Schema.Tables.PASSES,
                 Schema.Tables.PASS_IMAGES,
                 Schema.Tables.PASS_LOCALES,
+                Schema.Tables.PASS_ARCHIVES,
                 Schema.Tables.DOCUMENTS,
                 Schema.Tables.DOCUMENT_THUMBNAILS,
                 Schema.Tables.SCANNABLE_CARDS,
             )
+        }
+    }
+
+    @Test
+    fun passArchivesTableIsASidecarKeyedByPassId() {
+        // The archive BLOB lives in its own table, not on `passes`: the list and detail
+        // queries select from `passes` and so cannot pay for the archive by accident.
+        applyDdl().use { conn ->
+            val columns = mutableSetOf<String>()
+            conn.createStatement().use { stmt ->
+                val rs = stmt.executeQuery("PRAGMA table_info(${Schema.Tables.PASS_ARCHIVES})")
+                while (rs.next()) columns.add(rs.getString("name"))
+            }
+            assertThat(columns).containsExactly("pass_id", "bytes")
+        }
+    }
+
+    @Test
+    fun foreignKeyCascadeDropsTheArchiveRowWithTheParentPass() {
+        applyDdl().use { conn ->
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASSES}" +
+                    "(id, type, serial_number, organization_name, description, voided, " +
+                    "signature_status_kind, pass_json, created_at_epoch_ms, updated_at_epoch_ms) " +
+                    "VALUES (1, 'BoardingPass', 'S1', 'AcmeAir', 'desc', 0, 'AppleVerified', " +
+                    "x'00', 1, 1)",
+            ).use { it.executeUpdate() }
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASS_ARCHIVES} (pass_id, bytes) VALUES (1, x'504b0304')",
+            ).use { it.executeUpdate() }
+
+            conn.prepareStatement("DELETE FROM ${Schema.Tables.PASSES} WHERE id = 1")
+                .use { it.executeUpdate() }
+
+            conn.createStatement().use { stmt ->
+                val archiveRows = stmt.executeQuery(
+                    "SELECT COUNT(*) FROM ${Schema.Tables.PASS_ARCHIVES}",
+                ).also { it.next() }.getInt(1)
+                assertThat(archiveRows).isEqualTo(0)
+            }
+        }
+    }
+
+    @Test
+    fun passArchivesHoldsAtMostOneArchivePerPass() {
+        applyDdl().use { conn ->
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASSES}" +
+                    "(id, type, serial_number, organization_name, description, voided, " +
+                    "signature_status_kind, pass_json, created_at_epoch_ms, updated_at_epoch_ms) " +
+                    "VALUES (1, 'BoardingPass', 'S1', 'AcmeAir', 'desc', 0, 'AppleVerified', " +
+                    "x'00', 1, 1)",
+            ).use { it.executeUpdate() }
+            conn.prepareStatement(
+                "INSERT INTO ${Schema.Tables.PASS_ARCHIVES} (pass_id, bytes) VALUES (1, x'00')",
+            ).use { it.executeUpdate() }
+            try {
+                conn.prepareStatement(
+                    "INSERT INTO ${Schema.Tables.PASS_ARCHIVES} (pass_id, bytes) VALUES (1, x'01')",
+                ).use { it.executeUpdate() }
+                error("expected primary-key violation")
+            } catch (expected: SQLException) {
+                assertThat(expected.message).contains("UNIQUE")
+            }
         }
     }
 

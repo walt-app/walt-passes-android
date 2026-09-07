@@ -78,9 +78,10 @@ public class SqlCipherPassRepository internal constructor(
     override suspend fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
+        archiveBytes: ByteArray,
     ): StorageResult<PassRecordId> = runIo {
         val outcome = writeMutex.withLock {
-            val o = store.upsert(pass, signatureStatus, clock())
+            val o = store.upsert(pass, signatureStatus, archiveBytes, clock())
             _passes.value = store.listSummaries()
             o
         }
@@ -102,6 +103,13 @@ public class SqlCipherPassRepository internal constructor(
         val summary = store.summaryById(id)
             ?: return@runIo failure(StorageError.IntegrityViolation(id))
         StorageResult.Success(summary)
+    }
+
+    override suspend fun loadArchiveBytes(id: PassRecordId): StorageResult<ByteArray?> = runIo {
+        // A legacy row (no sidecar) is a Success(null), not a failure: the pass exists.
+        val outcome = store.loadArchiveBytes(id)
+            ?: return@runIo failure(StorageError.IntegrityViolation(id))
+        StorageResult.Success(outcome.bytes)
     }
 
     override suspend fun delete(id: PassRecordId): StorageResult<Unit> = runIo {
