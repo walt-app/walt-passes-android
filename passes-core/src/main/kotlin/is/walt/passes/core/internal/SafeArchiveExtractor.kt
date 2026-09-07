@@ -5,90 +5,37 @@ import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.PassSource
 import `is`.walt.passes.core.ResourceLimit
 import java.io.BufferedInputStream
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.zip.ZipEntry
-import java.util.zip.ZipException
 import java.util.zip.ZipInputStream
 
 /**
- * The single hardened ZIP-extraction entry point shared by passes-core. Every guard the
- * threat model lists for untrusted PKPASS input is centralized here:
+ * The single hardened ZIP-extraction entry point for one PKPASS archive. Guards: magic-byte
+ * preflight, compressed-size cap (declared size, then a streaming bound), entry count,
+ * per-entry decompressed cap (directory payloads drained through it too), zip-slip names,
+ * a root-only extension allowlist plus the bare `signature` file, duplicate names, and
+ * in-memory-only extraction. The stream chain and the shared checks live in
+ * `ArchiveStreams.kt`. Symlink attributes are invisible to `java.util.zip`; nothing here
+ * touches the file system, so a symlink-shaped entry is plain bytes.
  *
- *  - **Magic-byte preflight.** [ZipInputStream] silently treats unrecognized leading bytes
- *    as "no entries", which would let raw garbage and 0-byte input round-trip as
- *    [ExtractResult.Success] with an empty map. The first 4 bytes are sniffed and
- *    anything that isn't a local-file-header (`PK\x03\x04`) or end-of-central-directory
- *    (`PK\x05\x06` — a legitimate empty archive) signature is rejected up front.
- *  - **Archive size** (compressed). Checked twice. Once up-front against the declared size
- *    ([PassSource.Bytes.bytes].size or [PassSource.Stream.sizeHintBytes]). Then again at
- *    streaming time via [BoundedInputStream], which throws as soon as a read pushes the
- *    cumulative byte count past [ParserConfig.maxArchiveBytes]. The streaming check is
- *    load-bearing: a hostile [PassSource.Stream] can lie about its
- *    [PassSource.Stream.sizeHintBytes].
- *  - **Entry count.** [ParserConfig.maxEntries] caps the number of file entries surfaced
- *    to the caller. Directory entries are skipped before the count, so a bag of nested
- *    `.lproj/` directories cannot push a real archive past the cap.
- *  - **Per-entry decompressed size.** [readEntryBytes] caps each entry at
- *    [ParserConfig.maxEntryBytes]. This is the zip-bomb guard: a 10 KB compressed entry
- *    that decompresses to 10 GB hits the cap and aborts before the buffer materializes.
- *  - **Path traversal (zip-slip).** [pathTraversalReason] rejects entry names containing
- *    `..` or `.` segments, leading `/` (absolute path), backslashes (Windows-flavored
- *    separator), Windows drive-letter prefixes, or empty segments. Structural — no
- *    file-system canonicalization, because we never touch the file system.
- *  - **Symlink-shaped entries.** With JDK-only zip APIs (no Apache Commons Compress in
- *    this module's deps; see `gradle/libs.versions.toml`) the file-mode bits used to
- *    detect Info-ZIP symlink entries live in the central directory's external file
- *    attributes, which [ZipInputStream] does not expose. Mitigation: extraction is
- *    in-memory only; [readEntryBytes] writes into a [ByteArrayOutputStream] and we never
- *    invoke any file system operation that could resolve a symlink. Combined with the
- *    path-traversal check and extension allowlist, this is sufficient for the trust
- *    claim. A follow-up bead may swap in a parser that exposes external attributes if
- *    true symlink rejection is wanted.
- *  - **Extension allowlist.** Entry names must end in `.json`, `.png`, or `.strings`, OR
- *    be exactly `signature` at the archive root (the PKCS#7 detached-signature blob has
- *    no extension by PKPASS convention; the exemption is intentionally root-only so an
- *    attacker can't smuggle arbitrary content under a nested `signature` name). Anything
- *    else is rejected before any bytes are decompressed.
- *  - **Duplicate entry names.** Two entries with the same name are rejected. PKPASS does
- *    not permit duplicates and JDK [ZipInputStream] would silently let the second one
- *    win, which would let an attacker shadow a legitimate `manifest.json` with a
- *    tampered second copy.
- *  - **In-memory only.** No [java.io.FileOutputStream] is ever opened on an entry name.
- *    The entire archive is materialized into a [Map] of [ByteArray] values bounded by
- *    the per-entry cap, so a hostile name has no path on which to land even if the
- *    path-traversal check is somehow bypassed.
- *
- * Limit hits surface as [MalformedReason.ResourceLimitExceeded] with the relevant
- * [ResourceLimit] value. Structural rejections (path traversal, disallowed extension,
- * duplicate name) currently surface as [MalformedReason.NotAZipArchive] because the
- * public [MalformedReason] surface is frozen for this slice; a follow-up bead adds a
- * dedicated [MalformedReason] arm.
+ * Limit hits surface as [MalformedReason.ResourceLimitExceeded]; structural rejections
+ * (path traversal, disallowed extension, duplicate name) surface as
+ * [MalformedReason.NotAZipArchive] because the public [MalformedReason] surface is frozen
+ * (ADR 0001).
  */
 internal fun extractSafely(
     source: PassSource,
     config: ParserConfig,
 ): ExtractResult {
-    val declaredSize: Long? =
-        when (source) {
-            is PassSource.Bytes -> source.bytes.size.toLong()
-            is PassSource.Stream -> source.sizeHintBytes
-        }
+    val declaredSize = source.declaredSizeBytes()
     return if (declaredSize != null && declaredSize > config.maxArchiveBytes) {
         ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.ArchiveSize))
     } else {
-        runZipPipeline(openSource(source), config)
+        runZipPipeline(source.openStream(), config)
     }
 }
-
-private fun openSource(source: PassSource): InputStream =
-    when (source) {
-        is PassSource.Bytes -> ByteArrayInputStream(source.bytes)
-        is PassSource.Stream -> NonClosingInputStream(source.stream)
-    }
 
 private fun runZipPipeline(
     rawStream: InputStream,
@@ -99,54 +46,39 @@ private fun runZipPipeline(
     // BoundedInputStream MUST sit *outside* BufferedInputStream so that bytes the sniff
     // pulled into the buffer still flow through the counter when ZipInputStream reads
     // them back. Reordering (e.g. moving BufferedInputStream above BoundedInputStream)
-    // would silently let the first 4 sniffed bytes — and any others the buffer prefetched
-    // — escape the maxArchiveBytes accounting.
+    // would silently let the first 4 sniffed bytes, and any others the buffer prefetched,
+    // escape the maxArchiveBytes accounting.
     val sniffer = BufferedInputStream(rawStream)
-    val magicCheck = looksLikeZip(sniffer)
-    if (magicCheck != null) return ExtractResult.Failure(magicCheck)
     val bounded = BoundedInputStream(sniffer, config.maxArchiveBytes)
     return try {
-        // [BoundedInputStream.bytesRead] is read post-`use`: it accumulates as
-        // [ZipInputStream] pulls bytes through and is final once the stream closes.
-        // Plumbed into [ExtractResult.Success.archiveBytes] for telemetry on stream
-        // sources whose size hint was absent.
-        val outcome = ZipInputStream(bounded).use { zis -> extractAllEntries(zis, config) }
-        when (outcome) {
-            is ExtractResult.Success -> outcome.copy(archiveBytes = bounded.bytesRead)
-            is ExtractResult.Failure -> outcome
+        if (hasZipMagic(sniffer)) {
+            extractBounded(bounded, config)
+        } else {
+            ExtractResult.Failure(MalformedReason.NotAZipArchive)
         }
     } catch (_: ArchiveSizeExceededException) {
         ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.ArchiveSize))
-    } catch (_: ZipException) {
-        ExtractResult.Failure(MalformedReason.NotAZipArchive)
     } catch (_: IOException) {
+        ExtractResult.Failure(MalformedReason.NotAZipArchive)
+    } catch (_: IllegalArgumentException) {
+        // ZipInputStream decodes EFS-flagged names as strict UTF-8 and throws this on a bad byte.
         ExtractResult.Failure(MalformedReason.NotAZipArchive)
     }
 }
 
-/**
- * Returns [MalformedReason.NotAZipArchive] if the next 4 bytes of [stream] are neither a
- * local-file-header signature (`PK\x03\x04`) nor an end-of-central-directory signature
- * (`PK\x05\x06`). The EOCD prefix is legal only for a structurally valid empty archive
- * (no local file headers, just the EOCD record); a non-empty zip starts with a local
- * file header. Anything else with `PK\x05\x06` at the front is rejected by
- * [ZipInputStream] on the next read. Leaves the stream re-positioned at byte 0 so the
- * subsequent [ZipInputStream] reads the same bytes the sniff observed.
- */
-private fun looksLikeZip(stream: BufferedInputStream): MalformedReason? {
-    stream.mark(MAGIC_PREFIX_LENGTH)
-    val head = ByteArray(MAGIC_PREFIX_LENGTH)
-    var read = 0
-    while (read < head.size) {
-        val n = stream.read(head, read, head.size - read)
-        if (n == -1) break
-        read += n
+private fun extractBounded(
+    bounded: BoundedInputStream,
+    config: ParserConfig,
+): ExtractResult {
+    // [BoundedInputStream.bytesRead] is read post-`use`: it accumulates as
+    // [ZipInputStream] pulls bytes through and is final once the stream closes.
+    // Plumbed into [ExtractResult.Success.archiveBytes] for telemetry on stream
+    // sources whose size hint was absent.
+    val outcome = ZipInputStream(bounded).use { zis -> extractAllEntries(zis, config) }
+    return when (outcome) {
+        is ExtractResult.Success -> outcome.copy(archiveBytes = bounded.bytesRead)
+        is ExtractResult.Failure -> outcome
     }
-    stream.reset()
-    val matches =
-        read == MAGIC_PREFIX_LENGTH &&
-            (head.contentEquals(LOCAL_FILE_HEADER_MAGIC) || head.contentEquals(END_OF_CENTRAL_DIR_MAGIC))
-    return if (matches) null else MalformedReason.NotAZipArchive
 }
 
 private fun extractAllEntries(
@@ -174,13 +106,9 @@ private fun processEntry(
     // skip. A `../foo/` directory is harmless today (nothing acts on directory
     // entries), but checking up-front means a future change that does act on them
     // can't accidentally bypass the path-traversal guard.
-    val pathRejection = pathTraversalReason(entry.name)
     return when {
-        pathRejection != null -> ExtractResult.Failure(pathRejection)
-        entry.isDirectory -> {
-            zis.closeEntry()
-            null
-        }
+        isUnsafeEntryName(entry.name) -> ExtractResult.Failure(MalformedReason.NotAZipArchive)
+        entry.isDirectory -> drainOrStore(zis, entry.name, entries = null, config.maxEntryBytes)
         else -> validateAndRead(zis, entry.name, entries, config)
     }
 }
@@ -191,13 +119,13 @@ private fun validateAndRead(
     entries: MutableMap<String, ByteArray>,
     config: ParserConfig,
 ): ExtractResult.Failure? {
-    // pathTraversalReason already ran in processEntry; the chain picks up here.
+    // isUnsafeEntryName already ran in processEntry; the chain picks up here.
     val rejection =
         extensionReason(name)
             ?: duplicateEntryReason(entries, name)
             ?: entryCountReason(entries, config)
     return rejection?.let { ExtractResult.Failure(it) }
-        ?: readEntryAndStore(zis, name, entries, config.maxEntryBytes)
+        ?: drainOrStore(zis, name, entries, config.maxEntryBytes)
 }
 
 private fun extensionReason(name: String): MalformedReason? {
@@ -222,21 +150,6 @@ private fun entryCountReason(
     }
 }
 
-private fun pathTraversalReason(name: String): MalformedReason? {
-    val isWindowsAbsolute = name.length >= 2 && name[1] == ':'
-    // Strip a single trailing `/` so a legitimate directory entry name like
-    // "en.lproj/" doesn't trip the empty-segment check on the trailing split slot.
-    // Empty intermediate segments ("foo//bar") and a bare "/" still fail.
-    val canonical = name.trimEnd('/')
-    val unsafe =
-        name.isEmpty() ||
-            canonical.startsWith('/') ||
-            canonical.contains('\\') ||
-            isWindowsAbsolute ||
-            canonical.split('/').any { it == ".." || it == "." || it.isEmpty() }
-    return if (unsafe) MalformedReason.NotAZipArchive else null
-}
-
 private fun hasAllowedName(name: String): Boolean {
     // The PKCS#7 signature file ("signature") is the only PKPASS member with no
     // extension. Allow it only at the archive root: a nested `nested/signature` is
@@ -247,92 +160,26 @@ private fun hasAllowedName(name: String): Boolean {
     return lastDot >= 0 && baseName.substring(lastDot + 1).lowercase() in ALLOWED_EXTENSIONS
 }
 
-private fun readEntryAndStore(
+/**
+ * Inflates the current entry under [maxEntryBytes], storing it under [name] when
+ * [entries] is given and draining it otherwise (directory entries).
+ */
+private fun drainOrStore(
     zis: ZipInputStream,
     name: String,
-    entries: MutableMap<String, ByteArray>,
+    entries: MutableMap<String, ByteArray>?,
     maxEntryBytes: Long,
 ): ExtractResult.Failure? {
-    val bytes =
-        readEntryBytes(zis, maxEntryBytes)
-            ?: return ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.EntrySize))
-    entries[name] = bytes
-    return null
-}
-
-private fun readEntryBytes(
-    zis: ZipInputStream,
-    maxEntryBytes: Long,
-): ByteArray? {
-    val output = ByteArrayOutputStream()
-    val buffer = ByteArray(READ_BUFFER_SIZE)
-    var totalRead = 0L
-    while (true) {
-        val n = zis.read(buffer)
-        if (n == -1) return output.toByteArray()
-        totalRead += n
-        if (totalRead > maxEntryBytes) return null
-        output.write(buffer, 0, n)
-    }
-}
-
-/**
- * Tracks bytes pulled from the underlying compressed stream and short-circuits with
- * [ArchiveSizeExceededException] the moment the cumulative count crosses the budget.
- * Throwing instead of returning -1 keeps the failure mode unambiguous: a normal
- * end-of-stream is still distinguishable from "hostile archive went past the cap".
- */
-private class BoundedInputStream(
-    delegate: InputStream,
-    private val maxBytes: Long,
-) : FilterInputStream(delegate) {
-    private var count: Long = 0
-
-    /**
-     * Cumulative bytes pulled through this wrapper. Read after the wrapping
-     * [ZipInputStream] closes to recover an honest "bytes consumed" count for
-     * telemetry on stream sources without a caller-supplied size hint.
-     */
-    val bytesRead: Long get() = count
-
-    override fun read(): Int {
-        val b = `in`.read()
-        if (b != -1) {
-            count += 1
-            if (count > maxBytes) throw ArchiveSizeExceededException()
+    val buffer = if (entries != null) ByteArrayOutputStream() else null
+    return when (inflateBounded(zis, buffer, maxEntryBytes)) {
+        null -> {
+            if (entries != null && buffer != null) entries[name] = buffer.toByteArray()
+            null
         }
-        return b
-    }
-
-    override fun read(
-        b: ByteArray,
-        off: Int,
-        len: Int,
-    ): Int {
-        val n = `in`.read(b, off, len)
-        if (n > 0) {
-            count += n
-            if (count > maxBytes) throw ArchiveSizeExceededException()
-        }
-        return n
+        // No cumulative budget in single-archive mode, so CumulativeSize is unreachable; both are the entry cap.
+        InflateLimit.EntrySize, InflateLimit.CumulativeSize ->
+            ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.EntrySize))
     }
 }
 
-/**
- * A passthrough that ignores [close]. [`is`.walt.passes.core.PassParser]'s contract leaves
- * the caller-owned [PassSource.Stream.stream] open; [ZipInputStream.use] would otherwise
- * close it for us.
- */
-private class NonClosingInputStream(delegate: InputStream) : FilterInputStream(delegate) {
-    override fun close() {
-        // No-op. Caller owns the underlying stream's lifecycle.
-    }
-}
-
-private class ArchiveSizeExceededException : IOException()
-
-private const val READ_BUFFER_SIZE = 8 * 1024
-private const val MAGIC_PREFIX_LENGTH = 4
-private val LOCAL_FILE_HEADER_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
-private val END_OF_CENTRAL_DIR_MAGIC = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
 private val ALLOWED_EXTENSIONS = setOf("json", "png", "strings")
