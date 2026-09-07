@@ -35,8 +35,17 @@ internal fun PassSource.openStream(): InputStream =
  * non-empty zip starts with a local file header. Anything else with `PK\x05\x06` at the
  * front is rejected by [ZipInputStream] on the next read. Leaves the stream re-positioned
  * at byte 0 so the subsequent [ZipInputStream] reads the same bytes the sniff observed.
+ * A stream that cannot be read has no ZIP magic: an [IOException] here is `false`, so
+ * neither reader lets a caller stream's failure escape its never-throws contract.
  */
-internal fun hasZipMagic(stream: BufferedInputStream): Boolean {
+internal fun hasZipMagic(stream: BufferedInputStream): Boolean =
+    try {
+        readsZipMagic(stream)
+    } catch (_: IOException) {
+        false
+    }
+
+private fun readsZipMagic(stream: BufferedInputStream): Boolean {
     stream.mark(MAGIC_PREFIX_LENGTH)
     val head = ByteArray(MAGIC_PREFIX_LENGTH)
     var read = 0

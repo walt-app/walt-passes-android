@@ -8,10 +8,6 @@ import `is`.walt.passes.core.PassSource
 import `is`.walt.passes.core.ResourceLimit
 import org.junit.Test
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 /**
  * Behavior tests for the hardened ZIP extractor. Every malicious archive shape the
@@ -289,8 +285,14 @@ class SafeArchiveExtractorTest {
         // EFS-flagged names decode as strict UTF-8 inside ZipInputStream, which throws
         // IllegalArgumentException (not an IOException) on a bad byte.
         val zip = buildArchive { entry("pass.json", "{}".toByteArray()) }
-        zip[findLocalHeaderOffset(zip) + 30] = 0xFF.toByte()
+        zip[findNthLocalHeaderOffset(zip, 1) + 30] = 0xFF.toByte()
         val result = extractSafely(PassSource.Bytes(zip), ParserConfig())
+        assertMalformed(result, MalformedReason.NotAZipArchive)
+    }
+
+    @Test
+    fun streamThatThrowsOnFirstReadIsMalformedNotAThrow() {
+        val result = extractSafely(PassSource.Stream(ThrowingInputStream()), ParserConfig())
         assertMalformed(result, MalformedReason.NotAZipArchive)
     }
 
@@ -331,118 +333,5 @@ class SafeArchiveExtractorTest {
         Truth.assertWithMessage("expected ResourceLimit=$expected, got $actualLimit")
             .that(actualLimit)
             .isEqualTo(expected)
-    }
-}
-
-private fun buildArchive(block: ArchiveBuilder.() -> Unit): ByteArray {
-    val baos = ByteArrayOutputStream()
-    ZipOutputStream(baos).use { zos ->
-        ArchiveBuilder(zos).block()
-    }
-    return baos.toByteArray()
-}
-
-private class ArchiveBuilder(private val zos: ZipOutputStream) {
-    fun entry(
-        name: String,
-        content: ByteArray,
-    ) {
-        zos.putNextEntry(ZipEntry(name))
-        zos.write(content)
-        zos.closeEntry()
-    }
-
-    fun directory(name: String) {
-        require(name.endsWith('/')) { "directory entries must end with '/'" }
-        zos.putNextEntry(ZipEntry(name))
-        zos.closeEntry()
-    }
-}
-
-/**
- * Synthesizes a malformed archive where the same entry name appears twice in the local
- * file header stream. Approach: build two valid single-entry archives, splice their
- * local-file-header bodies before the first archive's central directory + EOCD. The JDK's
- * [ZipOutputStream] rejects duplicate names with a [java.util.zip.ZipException], and the
- * `--add-opens` configuration needed to clear its private `names` set via reflection is
- * heavier than the surgery here.
- *
- * This is the canonical attack archive for "shadow a legitimate `manifest.json` with a
- * tampered second copy" — the JDK's [java.util.zip.ZipInputStream] reads local headers
- * sequentially without consulting the central directory, so without an explicit duplicate
- * check the second entry would silently win.
- */
-private fun buildArchiveWithDuplicateEntry(
-    name: String,
-    first: ByteArray,
-    second: ByteArray,
-): ByteArray {
-    val archiveA = buildArchive { entry(name, first) }
-    val archiveB = buildArchive { entry(name, second) }
-    val cdAOffset = findCentralDirectoryOffset(archiveA)
-    val cdBOffset = findCentralDirectoryOffset(archiveB)
-    val out = ByteArrayOutputStream()
-    out.write(archiveA, 0, cdAOffset)
-    out.write(archiveB, 0, cdBOffset)
-    out.write(archiveA, cdAOffset, archiveA.size - cdAOffset)
-    return out.toByteArray()
-}
-
-private fun findLocalHeaderOffset(bytes: ByteArray): Int {
-    val sig = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
-    for (i in 0..bytes.size - sig.size) {
-        if (matchesAt(bytes, i, sig)) return i
-    }
-    error("no local file header found in synthetic archive")
-}
-
-private fun findCentralDirectoryOffset(bytes: ByteArray): Int {
-    val sig = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
-    for (i in 0..bytes.size - sig.size) {
-        if (matchesAt(bytes, i, sig)) return i
-    }
-    error("no central directory found in synthetic archive — buildArchive output is malformed")
-}
-
-private fun matchesAt(
-    haystack: ByteArray,
-    offset: Int,
-    needle: ByteArray,
-): Boolean {
-    for (k in needle.indices) {
-        if (haystack[offset + k] != needle[k]) return false
-    }
-    return true
-}
-
-/**
- * Test seam to verify the extractor honors [PassSource]'s "caller owns the stream"
- * contract. Tracks both bytes pulled and whether [close] was ever called.
- */
-private class OpenTrackingInputStream(private val delegate: InputStream) : InputStream() {
-    var closed: Boolean = false
-        private set
-    var bytesRead: Long = 0
-        private set
-
-    override fun read(): Int {
-        val b = delegate.read()
-        if (b != -1) bytesRead += 1
-        return b
-    }
-
-    override fun read(
-        b: ByteArray,
-        off: Int,
-        len: Int,
-    ): Int {
-        val n = delegate.read(b, off, len)
-        if (n > 0) bytesRead += n
-        return n
-    }
-
-    override fun close() {
-        closed = true
-        delegate.close()
     }
 }

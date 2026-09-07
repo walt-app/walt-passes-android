@@ -7,10 +7,10 @@ package `is`.walt.passes.core
  *
  * [maxEntryBytes] defaults to [ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES]: an inner pass the
  * parser would refuse anyway is not worth inflating, so a consumer that raises
- * [ParserConfig.maxArchiveBytes] must raise this too. [maxCumulativeBytes] is the new
- * guard this type exists for: the sum of every entry's decompressed bytes, accepted or
- * skipped, which no single-archive limit bounds. [maxArchiveBytes] caps the outer file's
- * compressed bytes and defaults to the cumulative cap.
+ * [ParserConfig.maxArchiveBytes] must raise this too. [maxCumulativeBytes] bounds the sum
+ * of every entry's decompressed bytes, accepted or skipped, which no single-archive limit
+ * does. [maxArchiveBytes] caps the outer file's compressed bytes and defaults to the
+ * cumulative cap.
  */
 public data class BundleConfig(
     public val maxArchiveBytes: Long = DEFAULT_MAX_ARCHIVE_BYTES,
@@ -20,10 +20,10 @@ public data class BundleConfig(
     public val allowlist: BundleEntryAllowlist = BundleEntryAllowlist.PkpassOnly,
 ) {
     public companion object {
-        public const val DEFAULT_MAX_ARCHIVE_BYTES: Long = 256L * 1024 * 1024
+        public const val DEFAULT_MAX_CUMULATIVE_BYTES: Long = 256L * 1024 * 1024
+        public const val DEFAULT_MAX_ARCHIVE_BYTES: Long = DEFAULT_MAX_CUMULATIVE_BYTES
         public const val DEFAULT_MAX_ENTRIES: Int = 200
         public const val DEFAULT_MAX_ENTRY_BYTES: Long = ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES
-        public const val DEFAULT_MAX_CUMULATIVE_BYTES: Long = 256L * 1024 * 1024
     }
 }
 
@@ -38,14 +38,14 @@ public fun interface BundleEntryAllowlist {
 
     public companion object {
         /**
-         * The kernel default and Apple's `.pkpasses` shape: root-level `*.pkpass` only,
-         * case-insensitive. A nested `passes/1.pkpass` is a consumer layout and needs a
-         * consumer allowlist.
+         * The kernel default and Apple's `.pkpasses` shape: root-level `<stem>.pkpass` only,
+         * case-insensitive, with a non-empty stem. A nested `passes/1.pkpass` is a consumer
+         * layout and needs a consumer allowlist.
          */
         public val PkpassOnly: BundleEntryAllowlist =
             BundleEntryAllowlist { name ->
-                !name.contains('/') &&
-                    name.endsWith(".${PassBundleReader.PASS_ENTRY_EXTENSION}", ignoreCase = true)
+                val suffix = ".${PassBundleReader.PASS_ENTRY_EXTENSION}"
+                !name.contains('/') && name.length > suffix.length && name.endsWith(suffix, ignoreCase = true)
             }
     }
 }

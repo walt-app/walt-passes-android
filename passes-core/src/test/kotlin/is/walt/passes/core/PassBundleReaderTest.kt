@@ -1,17 +1,19 @@
 package `is`.walt.passes.core
 
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.internal.OpenTrackingInputStream
+import `is`.walt.passes.core.internal.ThrowingInputStream
+import `is`.walt.passes.core.internal.buildArchive
+import `is`.walt.passes.core.internal.buildArchiveWithDuplicateEntry
+import `is`.walt.passes.core.internal.findCentralDirectoryOffset
+import `is`.walt.passes.core.internal.findNthLocalHeaderOffset
 import org.junit.Test
 import java.io.ByteArrayInputStream
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
-import java.util.zip.ZipEntry
-import java.util.zip.ZipOutputStream
 
 /**
- * Behavior tests for the outer-layer bundle reader. Archives are synthesized in-memory
- * with [ZipOutputStream] so every hostile shape is readable source, not a binary fixture.
- * Inner `.pkpass` payloads are opaque bytes here: the reader never opens them.
+ * Behavior tests for the outer-layer bundle reader. Archives come from the shared
+ * in-memory fixtures in `ZipFixtures.kt`, so every hostile shape is readable source, not a
+ * binary fixture. Inner `.pkpass` payloads are opaque bytes here: the reader never opens them.
  */
 class PassBundleReaderTest {
     @Test
@@ -285,6 +287,49 @@ class PassBundleReaderTest {
     }
 
     @Test
+    fun callerStreamThatThrowsOnFirstReadIsATypedRejection() {
+        val sink = RecordingSink()
+        val result = PassBundleReader.create().read(PassSource.Stream(ThrowingInputStream()), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 0, 0))
+        assertThat(sink.names).isEmpty()
+    }
+
+    @Test
+    fun nonAsciiEntryNameSniffsAsBundleAndIsDeliveredVerbatim() {
+        val zip = buildArchive { entry("billet-\u00e9.pkpass", "x".toByteArray()) }
+        assertThat(sniffPassBundle(zip)).isEqualTo(PassBundleSniff.Bundle)
+        val sink = RecordingSink()
+        val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Completed(accepted = 1, skipped = 0))
+        assertThat(sink.names).containsExactly("billet-\u00e9.pkpass")
+    }
+
+    @Test
+    fun sinkStopFromASkippedEntryHaltsDelivery() {
+        val zip =
+            buildArchive {
+                entry("junk.txt", "j".toByteArray())
+                entry("a.pkpass", "A".toByteArray())
+            }
+        val sink = RecordingSink(stopAfter = 1)
+        val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Stopped(accepted = 0, skipped = 1))
+        assertThat(sink.names).containsExactly("junk.txt")
+    }
+
+    @Test
+    fun defaultAllowlistRequiresANonEmptyStem() {
+        assertThat(BundleEntryAllowlist.PkpassOnly.accepts(".pkpass")).isFalse()
+        assertThat(BundleEntryAllowlist.PkpassOnly.accepts("a.pkpass")).isTrue()
+        val zip = buildArchive { entry(".pkpass", "x".toByteArray()) }
+        assertThat(sniffPassBundle(zip)).isEqualTo(PassBundleSniff.NotBundle)
+        val sink = RecordingSink()
+        val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Completed(accepted = 0, skipped = 1))
+        assertThat(sink.skippedNames).containsExactly(".pkpass")
+    }
+
+    @Test
     fun declaredSizeOverOuterArchiveCapFailsFastWithoutReading() {
         val tracker = OpenTrackingInputStream(ByteArrayInputStream(ByteArray(0)))
         val config = BundleConfig(maxArchiveBytes = 1_024)
@@ -469,49 +514,6 @@ private class RecordingSink(private val stopAfter: Int = Int.MAX_VALUE) : Bundle
     }
 }
 
-private fun buildArchive(block: ArchiveBuilder.() -> Unit): ByteArray {
-    val baos = ByteArrayOutputStream()
-    ZipOutputStream(baos).use { zos -> ArchiveBuilder(zos).block() }
-    return baos.toByteArray()
-}
-
-private class ArchiveBuilder(private val zos: ZipOutputStream) {
-    fun entry(
-        name: String,
-        content: ByteArray,
-    ) {
-        zos.putNextEntry(ZipEntry(name))
-        zos.write(content)
-        zos.closeEntry()
-    }
-
-    fun directory(name: String) {
-        require(name.endsWith('/')) { "directory entries must end with '/'" }
-        zos.putNextEntry(ZipEntry(name))
-        zos.closeEntry()
-    }
-}
-
-/**
- * Splices the local-file-header bodies of two single-entry archives ahead of the first
- * archive's central directory, since [ZipOutputStream] refuses duplicate names itself.
- */
-private fun buildArchiveWithDuplicateEntry(
-    name: String,
-    first: ByteArray,
-    second: ByteArray,
-): ByteArray {
-    val archiveA = buildArchive { entry(name, first) }
-    val archiveB = buildArchive { entry(name, second) }
-    val cdA = findCentralDirectoryOffset(archiveA)
-    val cdB = findCentralDirectoryOffset(archiveB)
-    val out = ByteArrayOutputStream()
-    out.write(archiveA, 0, cdA)
-    out.write(archiveB, 0, cdB)
-    out.write(archiveA, cdA, archiveA.size - cdA)
-    return out.toByteArray()
-}
-
 /**
  * Rewrites the first central-directory header the way Info-ZIP marks a Unix symlink:
  * "version made by" host = Unix (3) and external attributes = `0120777 << 16`.
@@ -532,52 +534,4 @@ private fun corruptFirstNameByte(zip: ByteArray): ByteArray {
     val patched = zip.copyOf()
     patched[findNthLocalHeaderOffset(zip, 1) + 30] = 0xFF.toByte()
     return patched
-}
-
-private fun findNthLocalHeaderOffset(
-    bytes: ByteArray,
-    n: Int,
-): Int {
-    val sig = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
-    var remaining = n
-    for (i in 0..bytes.size - sig.size) {
-        if (sig.indices.all { k -> bytes[i + k] == sig[k] } && --remaining == 0) return i
-    }
-    error("fewer than $n local headers in synthetic archive")
-}
-
-private fun findCentralDirectoryOffset(bytes: ByteArray): Int {
-    val sig = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
-    for (i in 0..bytes.size - sig.size) {
-        if (sig.indices.all { k -> bytes[i + k] == sig[k] }) return i
-    }
-    error("no central directory found in synthetic archive")
-}
-
-private class OpenTrackingInputStream(private val delegate: InputStream) : InputStream() {
-    var closed: Boolean = false
-        private set
-    var bytesRead: Long = 0
-        private set
-
-    override fun read(): Int {
-        val b = delegate.read()
-        if (b != -1) bytesRead += 1
-        return b
-    }
-
-    override fun read(
-        b: ByteArray,
-        off: Int,
-        len: Int,
-    ): Int {
-        val n = delegate.read(b, off, len)
-        if (n > 0) bytesRead += n
-        return n
-    }
-
-    override fun close() {
-        closed = true
-        delegate.close()
-    }
 }

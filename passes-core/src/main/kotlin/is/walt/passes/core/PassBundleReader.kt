@@ -21,16 +21,13 @@ import `is`.walt.passes.core.internal.sniffFirstLocalHeaderName
  * What it deliberately does NOT do: open, parse, or validate an inner `.pkpass`. Each
  * accepted entry is delivered as bytes and the caller runs [PassParser] on it, so the
  * per-archive limits and signature validation apply unchanged and the kernel stays
- * agnostic to where the bundle came from. Symlinks: `java.util.zip` never exposes the
- * central-directory attributes Info-ZIP uses to mark one, and nothing here touches the
- * file system, so a symlink-shaped entry is just bytes (its link-target text).
+ * agnostic to where the bundle came from. A symlink-shaped entry is just bytes: nothing
+ * here touches the file system, and `java.util.zip` exposes no symlink attribute.
  *
  * **Delivery shape.** Entries are delivered one at a time through [BundleEntrySink], each
- * as a bounded [ByteArray]. Heap is bounded by [BundleConfig.maxEntryBytes], not by the
- * cumulative cap: a materialized `List<BundleEntry>` would let a bundle at the cumulative
- * cap occupy hundreds of megabytes of phone heap at once, and an `InputStream` valid only
- * during the callback would push the typed per-entry cap into the inner parser's untyped
- * I/O failure path. The sink may return [BundleVisit.Stop] to abandon the rest.
+ * as a [ByteArray] bounded by [BundleConfig.maxEntryBytes], so heap is bounded per entry
+ * rather than by the cumulative cap. The sink may return [BundleVisit.Stop] to abandon
+ * the rest.
  *
  * **Mid-stream rejection contract.** A rejection stops delivery at the offending entry and
  * surfaces as [BundleReadResult.Rejected]. Entries the sink already received stay
@@ -82,7 +79,8 @@ public enum class BundleVisit {
 /**
  * One file entry of the outer ZIP. [ordinal] is the 0-based position among file entries
  * (accepted and skipped alike; directory entries take no ordinal), so a consumer can bind
- * `(ordinal, name)` across two reads of the same file.
+ * `(ordinal, name)` across two reads of the same file. [name] is attacker-controlled text
+ * from the archive: never log it or send it to telemetry.
  */
 public sealed interface BundleEntry {
     public val name: String
@@ -124,7 +122,7 @@ public enum class PassBundleSniff {
     /**
      * Not decidable from [header]: not a ZIP local file header, an empty archive, a
      * directory entry first, or too few bytes to hold the first name. Run the reader to
-     * find out; it handles leading junk by skipping it.
+     * find out; the reader rejects a non-ZIP prefix as [BundleRejection.NotAZipArchive].
      */
     Undetermined,
 
