@@ -20,6 +20,7 @@ Pre-alpha. Architecture and design phase. No releases yet.
 |---|---|
 | PKPASS parser is hardened against malicious input | `passes-core` — `PassParser`, `ParserConfig`, ZIP/JSON/PNG hardening |
 | Signature verification rejects tampering; provenance is shown to the user | `passes-core` — `SignatureVerifier`, `SignatureStatus` |
+| Bundles of passes (`.pkpasses`) are capped at the outer layer before any inner pass is parsed | `passes-core` — `PassBundleReader`, `BundleConfig` (entry count, per-entry and cumulative decompressed bytes) |
 | Pass blob storage is encrypted at rest with hardware-backed keys | `passes-storage` — SQLCipher integration, Keystore key provider |
 | Pass data is excluded from Android Auto Backup | `passes-storage` — backup rules / manifest config |
 | Pass content never appears in logs or telemetry | `passes-core` — `TelemetryGuard` interface; structurally PII-forbidden by API shape |
@@ -32,7 +33,7 @@ Pre-alpha. Architecture and design phase. No releases yet.
 
 ## Modules
 
-- **`passes-core`** — Pure Kotlin/JVM. PKPASS parser, model, signature verifier, `.strings` parser, secure-defaults `ParserConfig`, `TelemetryGuard` interface. No Android dependencies. KMP-friendly.
+- **`passes-core`** — Pure Kotlin/JVM. PKPASS parser, model, signature verifier, `.strings` parser, secure-defaults `ParserConfig`, `TelemetryGuard` interface, `PassBundleReader` for `.pkpasses` bundles with outer-layer cumulative caps. No Android dependencies. KMP-friendly.
 - **`passes-storage`** — Android. SQLCipher database with Keystore-sourced key, Android Auto Backup exclusion, irreversible deletion with cache wipe.
 - **`passes-ui`** — Android + Jetpack Compose. Pass front/back composables, barcode/QR rendering, B3 URL confirmation sheet, expired badge, bounded image rendering. Themable.
 

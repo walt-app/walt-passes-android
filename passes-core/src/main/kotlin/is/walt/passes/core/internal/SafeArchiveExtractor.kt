@@ -5,9 +5,7 @@ import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.PassSource
 import `is`.walt.passes.core.ResourceLimit
 import java.io.BufferedInputStream
-import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
-import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.zip.ZipEntry
@@ -72,23 +70,13 @@ internal fun extractSafely(
     source: PassSource,
     config: ParserConfig,
 ): ExtractResult {
-    val declaredSize: Long? =
-        when (source) {
-            is PassSource.Bytes -> source.bytes.size.toLong()
-            is PassSource.Stream -> source.sizeHintBytes
-        }
+    val declaredSize = source.declaredSizeBytes()
     return if (declaredSize != null && declaredSize > config.maxArchiveBytes) {
         ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.ArchiveSize))
     } else {
-        runZipPipeline(openSource(source), config)
+        runZipPipeline(source.openStream(), config)
     }
 }
-
-private fun openSource(source: PassSource): InputStream =
-    when (source) {
-        is PassSource.Bytes -> ByteArrayInputStream(source.bytes)
-        is PassSource.Stream -> NonClosingInputStream(source.stream)
-    }
 
 private fun runZipPipeline(
     rawStream: InputStream,
@@ -102,8 +90,7 @@ private fun runZipPipeline(
     // would silently let the first 4 sniffed bytes — and any others the buffer prefetched
     // — escape the maxArchiveBytes accounting.
     val sniffer = BufferedInputStream(rawStream)
-    val magicCheck = looksLikeZip(sniffer)
-    if (magicCheck != null) return ExtractResult.Failure(magicCheck)
+    if (!hasZipMagic(sniffer)) return ExtractResult.Failure(MalformedReason.NotAZipArchive)
     val bounded = BoundedInputStream(sniffer, config.maxArchiveBytes)
     return try {
         // [BoundedInputStream.bytesRead] is read post-`use`: it accumulates as
@@ -122,31 +109,6 @@ private fun runZipPipeline(
     } catch (_: IOException) {
         ExtractResult.Failure(MalformedReason.NotAZipArchive)
     }
-}
-
-/**
- * Returns [MalformedReason.NotAZipArchive] if the next 4 bytes of [stream] are neither a
- * local-file-header signature (`PK\x03\x04`) nor an end-of-central-directory signature
- * (`PK\x05\x06`). The EOCD prefix is legal only for a structurally valid empty archive
- * (no local file headers, just the EOCD record); a non-empty zip starts with a local
- * file header. Anything else with `PK\x05\x06` at the front is rejected by
- * [ZipInputStream] on the next read. Leaves the stream re-positioned at byte 0 so the
- * subsequent [ZipInputStream] reads the same bytes the sniff observed.
- */
-private fun looksLikeZip(stream: BufferedInputStream): MalformedReason? {
-    stream.mark(MAGIC_PREFIX_LENGTH)
-    val head = ByteArray(MAGIC_PREFIX_LENGTH)
-    var read = 0
-    while (read < head.size) {
-        val n = stream.read(head, read, head.size - read)
-        if (n == -1) break
-        read += n
-    }
-    stream.reset()
-    val matches =
-        read == MAGIC_PREFIX_LENGTH &&
-            (head.contentEquals(LOCAL_FILE_HEADER_MAGIC) || head.contentEquals(END_OF_CENTRAL_DIR_MAGIC))
-    return if (matches) null else MalformedReason.NotAZipArchive
 }
 
 private fun extractAllEntries(
@@ -223,18 +185,7 @@ private fun entryCountReason(
 }
 
 private fun pathTraversalReason(name: String): MalformedReason? {
-    val isWindowsAbsolute = name.length >= 2 && name[1] == ':'
-    // Strip a single trailing `/` so a legitimate directory entry name like
-    // "en.lproj/" doesn't trip the empty-segment check on the trailing split slot.
-    // Empty intermediate segments ("foo//bar") and a bare "/" still fail.
-    val canonical = name.trimEnd('/')
-    val unsafe =
-        name.isEmpty() ||
-            canonical.startsWith('/') ||
-            canonical.contains('\\') ||
-            isWindowsAbsolute ||
-            canonical.split('/').any { it == ".." || it == "." || it.isEmpty() }
-    return if (unsafe) MalformedReason.NotAZipArchive else null
+    return if (isUnsafeEntryName(name)) MalformedReason.NotAZipArchive else null
 }
 
 private fun hasAllowedName(name: String): Boolean {
@@ -276,63 +227,4 @@ private fun readEntryBytes(
     }
 }
 
-/**
- * Tracks bytes pulled from the underlying compressed stream and short-circuits with
- * [ArchiveSizeExceededException] the moment the cumulative count crosses the budget.
- * Throwing instead of returning -1 keeps the failure mode unambiguous: a normal
- * end-of-stream is still distinguishable from "hostile archive went past the cap".
- */
-private class BoundedInputStream(
-    delegate: InputStream,
-    private val maxBytes: Long,
-) : FilterInputStream(delegate) {
-    private var count: Long = 0
-
-    /**
-     * Cumulative bytes pulled through this wrapper. Read after the wrapping
-     * [ZipInputStream] closes to recover an honest "bytes consumed" count for
-     * telemetry on stream sources without a caller-supplied size hint.
-     */
-    val bytesRead: Long get() = count
-
-    override fun read(): Int {
-        val b = `in`.read()
-        if (b != -1) {
-            count += 1
-            if (count > maxBytes) throw ArchiveSizeExceededException()
-        }
-        return b
-    }
-
-    override fun read(
-        b: ByteArray,
-        off: Int,
-        len: Int,
-    ): Int {
-        val n = `in`.read(b, off, len)
-        if (n > 0) {
-            count += n
-            if (count > maxBytes) throw ArchiveSizeExceededException()
-        }
-        return n
-    }
-}
-
-/**
- * A passthrough that ignores [close]. [`is`.walt.passes.core.PassParser]'s contract leaves
- * the caller-owned [PassSource.Stream.stream] open; [ZipInputStream.use] would otherwise
- * close it for us.
- */
-private class NonClosingInputStream(delegate: InputStream) : FilterInputStream(delegate) {
-    override fun close() {
-        // No-op. Caller owns the underlying stream's lifecycle.
-    }
-}
-
-private class ArchiveSizeExceededException : IOException()
-
-private const val READ_BUFFER_SIZE = 8 * 1024
-private const val MAGIC_PREFIX_LENGTH = 4
-private val LOCAL_FILE_HEADER_MAGIC = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
-private val END_OF_CENTRAL_DIR_MAGIC = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
 private val ALLOWED_EXTENSIONS = setOf("json", "png", "strings")

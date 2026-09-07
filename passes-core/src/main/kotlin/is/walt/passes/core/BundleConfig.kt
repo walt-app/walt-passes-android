@@ -1,0 +1,72 @@
+package `is`.walt.passes.core
+
+/**
+ * Caps applied by [PassBundleReader] at the OUTER layer of a bundle, before any inner
+ * archive reaches [PassParser]. Defaults are conservative for the kernel; a consumer with
+ * a larger legitimate wallet (documents alongside passes) raises them deliberately.
+ *
+ * [maxEntryBytes] defaults to [ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES]: an inner pass the
+ * parser would refuse anyway is not worth inflating. [maxCumulativeBytes] is the new guard
+ * this type exists for: the sum of every entry's decompressed bytes, accepted or skipped,
+ * which no single-archive limit bounds. [maxArchiveBytes] caps the outer file's compressed
+ * bytes; it defaults to the cumulative cap because a ZIP cannot usefully be larger than
+ * what it inflates to.
+ */
+public data class BundleConfig(
+    public val maxArchiveBytes: Long = DEFAULT_MAX_ARCHIVE_BYTES,
+    public val maxEntries: Int = DEFAULT_MAX_ENTRIES,
+    public val maxEntryBytes: Long = DEFAULT_MAX_ENTRY_BYTES,
+    public val maxCumulativeBytes: Long = DEFAULT_MAX_CUMULATIVE_BYTES,
+    public val allowlist: BundleEntryAllowlist = BundleEntryAllowlist.PkpassOnly,
+) {
+    public companion object {
+        public const val DEFAULT_MAX_ARCHIVE_BYTES: Long = 256L * 1024 * 1024
+        public const val DEFAULT_MAX_ENTRIES: Int = 200
+        public const val DEFAULT_MAX_ENTRY_BYTES: Long = ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES
+        public const val DEFAULT_MAX_CUMULATIVE_BYTES: Long = 256L * 1024 * 1024
+    }
+}
+
+/**
+ * Decides which outer entries are handed to the sink as [BundleEntry.Accepted]. Declined
+ * entries are still counted against every cap and reported as [BundleEntry.Skipped]. The
+ * allowlist sees the entry name only, never bytes: type is for the consumer's byte sniff
+ * and the kernel parsers to decide, not the extension.
+ */
+public fun interface BundleEntryAllowlist {
+    public fun accepts(name: String): Boolean
+
+    public companion object {
+        /**
+         * The kernel default and Apple's `.pkpasses` shape: root-level `*.pkpass` only,
+         * case-insensitive. A nested `passes/1.pkpass` is a consumer layout and needs a
+         * consumer allowlist.
+         */
+        public val PkpassOnly: BundleEntryAllowlist =
+            BundleEntryAllowlist { name ->
+                !name.contains('/') &&
+                    name.endsWith(".${PassBundleReader.PASS_ENTRY_EXTENSION}", ignoreCase = true)
+            }
+    }
+}
+
+/** Which [BundleConfig] guard tripped. Enum so telemetry can name the cap without a string. */
+public enum class BundleLimit {
+    ArchiveSize,
+    EntryCount,
+    EntrySize,
+    CumulativeSize,
+}
+
+/**
+ * The configured ceiling for this limit (bytes for sizes, count for entries). The exhaustive
+ * `when` is the drift detector: a [BundleLimit] arm without a [BundleConfig] field is a
+ * compile error here.
+ */
+public fun BundleLimit.limitFrom(config: BundleConfig): Long =
+    when (this) {
+        BundleLimit.ArchiveSize -> config.maxArchiveBytes
+        BundleLimit.EntryCount -> config.maxEntries.toLong()
+        BundleLimit.EntrySize -> config.maxEntryBytes
+        BundleLimit.CumulativeSize -> config.maxCumulativeBytes
+    }
