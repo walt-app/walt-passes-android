@@ -12,6 +12,7 @@ import `is`.walt.passes.core.ScannableCardId
 import `is`.walt.passes.core.ScannableCardInputValidator
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.storage.internal.ArchiveBytesOutcome
 import `is`.walt.passes.storage.internal.DeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentDeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentInsertOutcome
@@ -715,9 +716,11 @@ class ScannableCardRepositoryTest {
         override fun upsert(
             pass: Pass,
             signatureStatus: SignatureStatus,
+            archiveBytes: ByteArray?,
             nowEpochMs: Long,
         ): UpsertOutcome = error("unused in scannable-card tests")
         override fun delete(id: PassRecordId): DeleteOutcome? = null
+        override fun loadArchiveBytes(id: PassRecordId): ArchiveBytesOutcome? = null
         override fun updateUserLabel(
             id: PassRecordId,
             label: String?,

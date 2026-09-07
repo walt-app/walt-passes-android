@@ -80,8 +80,8 @@ public sealed interface StorageError {
     ) : StorageError
 
     /**
-     * A pass mutation (today: `updatePassUserLabel`) was refused by the storage-side
-     * defensive check (ADR 0007 D2). Mirrors [DocumentRejected]'s shape: rejection is
+     * A pass write (`updatePassUserLabel`, or `upsert` with an archive) was refused by the
+     * storage-side defensive check (ADR 0007 D2). Mirrors [DocumentRejected]'s shape: rejection is
      * not a generic storage failure, so [onStorageFailure] does NOT fire; the
      * `onPassRejected` event fires instead. The pass row never changes on rejection.
      */
@@ -127,13 +127,15 @@ public sealed interface ScannableCardRejectionReason {
 }
 
 /**
- * Why a [PassRepository.updatePassUserLabel] call was refused. One arm today; future
- * caps (illegal-character filters, locale-specific limits, etc.) would add arms here.
- * Mirrors [DocumentStorageRejectedKind] in shape but lives separately so a future
- * pass-side cap cannot silently collide with a document-side cap.
+ * Why a pass write was refused: [LabelTooLong] from [PassRepository.updatePassUserLabel],
+ * [ArchiveEmpty] / [ArchiveOversized] from [PassRepository.upsert]'s archive cap
+ * ([PassArchiveBounds.MAX_BYTES]). Mirrors [DocumentStorageRejectedKind] in shape but
+ * lives separately so a future pass-side cap cannot silently collide with a document-side cap.
  */
 public enum class PassUpdateRejectedKind {
     LabelTooLong,
+    ArchiveEmpty,
+    ArchiveOversized,
 }
 
 /**

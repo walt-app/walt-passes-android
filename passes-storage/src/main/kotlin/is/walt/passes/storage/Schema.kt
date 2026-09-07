@@ -14,13 +14,14 @@ package `is`.walt.passes.storage
 public object Schema {
     public const val DATABASE_NAME: String = "walt_passes.db"
 
-    public const val VERSION: Int = 7
+    public const val VERSION: Int = 8
 
     public object Tables {
         public const val SCHEMA_META: String = "schema_meta"
         public const val PASSES: String = "passes"
         public const val PASS_IMAGES: String = "pass_images"
         public const val PASS_LOCALES: String = "pass_locales"
+        public const val PASS_ARCHIVES: String = "pass_archives"
         public const val DOCUMENTS: String = "documents"
         public const val DOCUMENT_THUMBNAILS: String = "document_thumbnails"
         public const val SCANNABLE_CARDS: String = "scannable_cards"
@@ -184,6 +185,20 @@ public object Schema {
     )
 
     /**
+     * v7 -> v8: the retained original `.pkpass` bytes (wpass-59i.1). A sidecar, not a column,
+     * so `passes`-only queries cannot materialize it; legacy rows have no sidecar row.
+     */
+    private val V7_TO_V8_ADD_PASS_ARCHIVES: List<String> = listOf(
+        """
+        CREATE TABLE IF NOT EXISTS pass_archives (
+            pass_id INTEGER NOT NULL REFERENCES passes(id) ON DELETE CASCADE,
+            bytes   BLOB    NOT NULL,
+            PRIMARY KEY (pass_id)
+        )
+        """.trimIndent(),
+    )
+
+    /**
      * The DDL block that brings a fresh database to [VERSION]. Statements are listed in
      * dependency order (parent tables before child tables); they are executed in a single
      * transaction by the implementation.
@@ -240,7 +255,7 @@ public object Schema {
         )
         """.trimIndent(),
     ) + V2_DOCUMENT_TABLES + V4_SCANNABLE_CARD_TABLES + V5_TO_V6_ADD_DOCUMENT_FORMAT +
-        V6_TO_V7_ADD_BARCODE
+        V6_TO_V7_ADD_BARCODE + V7_TO_V8_ADD_PASS_ARCHIVES
 
     /**
      * Schema migrations, keyed by `fromVersion`. Forward-only per ADR 0002. Each entry's
@@ -270,6 +285,9 @@ public object Schema {
      * v6 -> v7 adds the composite-artifact columns `barcode_payload` / `barcode_format`
      * (wpass-8lu): a barcode extracted from an imported image, carried on the same row. Pure
      * additive; existing rows read back NULL (no barcode).
+     *
+     * v7 -> v8 adds the `pass_archives` sidecar table for the retained original `.pkpass`
+     * bytes (wpass-59i.1). Pure additive; pre-existing passes have no sidecar row.
      */
     public val MIGRATIONS: Map<Int, List<String>> = mapOf(
         1 to V2_DOCUMENT_TABLES,
@@ -278,5 +296,6 @@ public object Schema {
         4 to V4_TO_V5_ADD_USER_LABEL,
         5 to V5_TO_V6_ADD_DOCUMENT_FORMAT,
         6 to V6_TO_V7_ADD_BARCODE,
+        7 to V7_TO_V8_ADD_PASS_ARCHIVES,
     )
 }

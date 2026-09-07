@@ -54,7 +54,8 @@ import java.time.OffsetDateTime
  * (so consumers cannot accidentally render or transmit them). The "parsed and dropped"
  * shape is structural — there are simply no fields on [Pass] for them — rather than a
  * runtime stripping pass, which keeps the trust claim auditable from the data model
- * alone.
+ * alone. The raw archive (including these keys) is retained by `passes-storage` and
+ * readable only through `PassRepository.loadArchiveBytes`; see ADR 0002.
  *
  * **Unknown style key.** When `pass.json` is structurally valid but declares no top-
  * level pass style this parser implements (a hypothetical future `ssoPass` etc.), the

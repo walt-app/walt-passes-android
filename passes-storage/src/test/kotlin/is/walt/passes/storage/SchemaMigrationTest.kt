@@ -6,20 +6,8 @@ import java.sql.Connection
 import java.sql.DriverManager
 
 /**
- * JVM-side verification of the v1 -> v2 schema migration. Mirrors [SchemaDdlTest]'s
- * approach: stock `sqlite-jdbc` standing in for SQLCipher, since SQLCipher is
- * wire-compatible with SQLite for DDL.
- *
- * The properties locked here:
- *
- *  1. A v1 database (passes/pass_images/pass_locales tables only) can have the v1 -> v2
- *     migration statements applied without error.
- *  2. After the migration, the `documents` and `document_thumbnails` tables exist with
- *     the expected columns, the `idx_documents_imported_at` index is present, and the
- *     foreign-key cascade on the thumbnails table is wired up.
- *  3. Pre-existing v1 data (a `passes` row plus children) is preserved across the
- *     migration: forward-only does not mean forward-and-truncate.
- *  4. The migration list is exactly the v1 entry today; future versions add to this.
+ * JVM-side verification of the migration hops v1 through v7, each applied over
+ * [V1_SCHEMA_SNAPSHOT] via [openDbAtVersion]. The v7 -> v8 hop lives in [PassArchivesMigrationTest].
  */
 class SchemaMigrationTest {
 
@@ -29,67 +17,9 @@ class SchemaMigrationTest {
         return conn
     }
 
-    /**
-     * Applies the v1 schema (everything in [Schema.DDL] up to and including the v1
-     * tables, i.e. excluding the v2-only `documents` and `document_thumbnails` tables
-     * and the `idx_documents_imported_at` index). The migration test then runs only the
-     * v1 -> v2 hop on top of this and asserts the result equals the full v2 schema.
-     */
-    private fun applyV1Ddl(conn: Connection) {
-        // V1 was schema_meta + passes + 3 pass-side indexes + pass_images + pass_locales
-        // = 7 statements at the head of Schema.DDL.
-        conn.createStatement().use { stmt ->
-            for (sql in V1_DDL) stmt.execute(sql)
-        }
-    }
-
-    /**
-     * Applies the v2 schema (v1 + the v1 -> v2 hop).
-     */
-    private fun applyV2Ddl(conn: Connection) {
-        applyV1Ddl(conn)
-        conn.createStatement().use { stmt ->
-            for (sql in Schema.MIGRATIONS.getValue(1)) stmt.execute(sql)
-        }
-    }
-
-    /**
-     * Applies the v3 schema (v1 + v1 -> v2 + v2 -> v3). The v3 shape still carries the
-     * `color_argb` column on `scannable_cards`; the v3 -> v4 migration drops it.
-     */
-    private fun applyV3Ddl(conn: Connection) {
-        applyV2Ddl(conn)
-        conn.createStatement().use { stmt ->
-            for (sql in Schema.MIGRATIONS.getValue(2)) stmt.execute(sql)
-        }
-    }
-
-    /**
-     * Applies the v4 schema (v1 + v1 -> v2 + v2 -> v3 + v3 -> v4). The v4 -> v5
-     * migration adds the nullable `user_label` column to `passes`.
-     */
-    private fun applyV4Ddl(conn: Connection) {
-        applyV3Ddl(conn)
-        conn.createStatement().use { stmt ->
-            for (sql in Schema.MIGRATIONS.getValue(3)) stmt.execute(sql)
-        }
-    }
-
-    /**
-     * Applies the v5 schema (v1 + v1 -> v2 + v2 -> v3 + v3 -> v4 + v4 -> v5). The v5 -> v6
-     * migration generalizes `documents` from PDF-only to PDF + image.
-     */
-    private fun applyV5Ddl(conn: Connection) {
-        applyV4Ddl(conn)
-        conn.createStatement().use { stmt ->
-            for (sql in Schema.MIGRATIONS.getValue(4)) stmt.execute(sql)
-        }
-    }
-
     @Test
     fun migrationFromV5AddsDocumentFormatAndDimensionColumns() {
-        openMemoryDb().use { conn ->
-            applyV5Ddl(conn)
+        openDbAtVersion(5).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(5)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -115,8 +45,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV5DefaultsExistingDocumentsToPdfFormatWithNullDimensions() {
-        openMemoryDb().use { conn ->
-            applyV5Ddl(conn)
+        openDbAtVersion(5).use { conn ->
 
             // A pre-existing v5 document row (PDF-only era; no format/dimension columns yet).
             conn.prepareStatement(
@@ -147,8 +76,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV1IntroducesDocumentsAndDocumentThumbnailsTables() {
-        openMemoryDb().use { conn ->
-            applyV1Ddl(conn)
+        openDbAtVersion(1).use { conn ->
 
             val migration = Schema.MIGRATIONS.getValue(1)
             conn.createStatement().use { stmt ->
@@ -169,8 +97,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV1AddsTheImportedAtIndex() {
-        openMemoryDb().use { conn ->
-            applyV1Ddl(conn)
+        openDbAtVersion(1).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(1)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -188,8 +115,7 @@ class SchemaMigrationTest {
 
     @Test
     fun documentsTableHasTheExpectedColumns() {
-        openMemoryDb().use { conn ->
-            applyV1Ddl(conn)
+        openDbAtVersion(1).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(1)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -212,8 +138,7 @@ class SchemaMigrationTest {
 
     @Test
     fun documentThumbnailsTableCascadesOnDocumentDelete() {
-        openMemoryDb().use { conn ->
-            applyV1Ddl(conn)
+        openDbAtVersion(1).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(1)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -267,20 +192,10 @@ class SchemaMigrationTest {
             }
             schemaShape(conn)
         }
-        val migratedShape = openMemoryDb().use { conn ->
-            applyV1Ddl(conn)
-            applyFullMigrationChain(conn)
+        val migratedShape = openDbAtVersion(Schema.VERSION).use { conn ->
             schemaShape(conn)
         }
         assertThat(migratedShape).isEqualTo(freshShape)
-    }
-
-    private fun applyFullMigrationChain(conn: Connection) {
-        for (from in 1 until Schema.VERSION) {
-            for (sql in Schema.MIGRATIONS.getValue(from)) {
-                conn.createStatement().use { it.execute(sql) }
-            }
-        }
     }
 
     private fun schemaShape(conn: Connection): Set<String> {
@@ -324,8 +239,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV2IntroducesScannableCardsTable() {
-        openMemoryDb().use { conn ->
-            applyV2Ddl(conn)
+        openDbAtVersion(2).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(2)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -341,8 +255,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV2AddsTheScannableCardsCreatedAtIndex() {
-        openMemoryDb().use { conn ->
-            applyV2Ddl(conn)
+        openDbAtVersion(2).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(2)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -360,8 +273,7 @@ class SchemaMigrationTest {
 
     @Test
     fun scannableCardsTableAfterMigrationHasTheExpectedColumns() {
-        openMemoryDb().use { conn ->
-            applyV2Ddl(conn)
+        openDbAtVersion(2).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(2)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -384,8 +296,7 @@ class SchemaMigrationTest {
 
     @Test
     fun preexistingV2DataSurvivesMigrationToV3() {
-        openMemoryDb().use { conn ->
-            applyV2Ddl(conn)
+        openDbAtVersion(2).use { conn ->
 
             // Pre-migration: a v2 pass row and a v2 document row.
             conn.prepareStatement(
@@ -424,8 +335,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV3DropsColorArgbColumnFromScannableCards() {
-        openMemoryDb().use { conn ->
-            applyV3Ddl(conn)
+        openDbAtVersion(3).use { conn ->
 
             for (sql in Schema.MIGRATIONS.getValue(3)) {
                 conn.createStatement().use { it.execute(sql) }
@@ -448,8 +358,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV3PreservesScannableCardRowsAndIdentities() {
-        openMemoryDb().use { conn ->
-            applyV3Ddl(conn)
+        openDbAtVersion(3).use { conn ->
             // Two pre-migration v3 rows. Explicit ids assert row identity survives the
             // table rewrite: the migration must INSERT...SELECT each existing id rather
             // than letting AUTOINCREMENT reassign them.
@@ -553,8 +462,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV3KeepsTheScannableCardsCreatedAtIndex() {
-        openMemoryDb().use { conn ->
-            applyV3Ddl(conn)
+        openDbAtVersion(3).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(3)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -572,8 +480,7 @@ class SchemaMigrationTest {
 
     @Test
     fun preexistingV3PassesAndDocumentsSurviveMigrationToV4() {
-        openMemoryDb().use { conn ->
-            applyV3Ddl(conn)
+        openDbAtVersion(3).use { conn ->
 
             // Sibling tables that the v3 -> v4 migration must leave untouched.
             conn.prepareStatement(
@@ -608,8 +515,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV4AddsTheUserLabelColumnToPasses() {
-        openMemoryDb().use { conn ->
-            applyV4Ddl(conn)
+        openDbAtVersion(4).use { conn ->
 
             for (sql in Schema.MIGRATIONS.getValue(4)) {
                 conn.createStatement().use { it.execute(sql) }
@@ -626,8 +532,7 @@ class SchemaMigrationTest {
 
     @Test
     fun migrationFromV4UserLabelColumnIsNullable() {
-        openMemoryDb().use { conn ->
-            applyV4Ddl(conn)
+        openDbAtVersion(4).use { conn ->
             for (sql in Schema.MIGRATIONS.getValue(4)) {
                 conn.createStatement().use { it.execute(sql) }
             }
@@ -654,8 +559,7 @@ class SchemaMigrationTest {
 
     @Test
     fun preexistingV4PassRowSurvivesMigrationToV5WithNullUserLabel() {
-        openMemoryDb().use { conn ->
-            applyV4Ddl(conn)
+        openDbAtVersion(4).use { conn ->
 
             // A pre-existing v4 pass row that pre-dates the user_label column.
             conn.prepareStatement(
@@ -687,8 +591,7 @@ class SchemaMigrationTest {
 
     @Test
     fun preexistingV1DataSurvivesMigration() {
-        openMemoryDb().use { conn ->
-            applyV1Ddl(conn)
+        openDbAtVersion(1).use { conn ->
 
             // Pre-migration: a v1 pass row with image and locale children.
             conn.prepareStatement(
@@ -726,59 +629,5 @@ class SchemaMigrationTest {
                 ).isEqualTo(1)
             }
         }
-    }
-
-    private companion object {
-        /**
-         * Snapshot of the v1 schema. Hard-coded so the test sees the *historical* shape,
-         * not whatever the current Schema.DDL happens to declare. Any future v2 -> v3
-         * migration will get its own test that walks v1 -> v2 -> v3 against the same
-         * snapshot.
-         */
-        val V1_DDL: List<String> = listOf(
-            """
-            CREATE TABLE IF NOT EXISTS schema_meta (
-                key   TEXT PRIMARY KEY NOT NULL,
-                value BLOB NOT NULL
-            )
-            """.trimIndent(),
-            """
-            CREATE TABLE IF NOT EXISTS passes (
-                id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-                type                  TEXT    NOT NULL,
-                serial_number         TEXT    NOT NULL,
-                organization_name     TEXT    NOT NULL,
-                description           TEXT    NOT NULL,
-                expiration_epoch_ms   INTEGER,
-                voided                INTEGER NOT NULL DEFAULT 0,
-                signature_status_kind TEXT    NOT NULL,
-                pass_json             BLOB    NOT NULL,
-                created_at_epoch_ms   INTEGER NOT NULL,
-                updated_at_epoch_ms   INTEGER NOT NULL
-            )
-            """.trimIndent(),
-            "CREATE INDEX IF NOT EXISTS idx_passes_type ON passes(type)",
-            "CREATE INDEX IF NOT EXISTS idx_passes_expiration ON passes(expiration_epoch_ms)",
-            """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_passes_identity
-                ON passes(type, serial_number, organization_name)
-            """.trimIndent(),
-            """
-            CREATE TABLE IF NOT EXISTS pass_images (
-                pass_id INTEGER NOT NULL REFERENCES passes(id) ON DELETE CASCADE,
-                role    TEXT    NOT NULL,
-                bytes   BLOB    NOT NULL,
-                PRIMARY KEY (pass_id, role)
-            )
-            """.trimIndent(),
-            """
-            CREATE TABLE IF NOT EXISTS pass_locales (
-                pass_id      INTEGER NOT NULL REFERENCES passes(id) ON DELETE CASCADE,
-                locale_tag   TEXT    NOT NULL,
-                strings_json BLOB    NOT NULL,
-                PRIMARY KEY (pass_id, locale_tag)
-            )
-            """.trimIndent(),
-        )
     }
 }

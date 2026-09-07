@@ -78,9 +78,34 @@ public class SqlCipherPassRepository internal constructor(
     override suspend fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
+        archiveBytes: ByteArray,
     ): StorageResult<PassRecordId> = runIo {
+        // Cap before any write, like insertDocument: a caller bug cannot land an
+        // oversized (or empty) sidecar row.
+        when {
+            archiveBytes.isEmpty() -> return@runIo rejectPass(PassUpdateRejectedKind.ArchiveEmpty)
+            archiveBytes.size > PassArchiveBounds.MAX_BYTES ->
+                return@runIo rejectPass(PassUpdateRejectedKind.ArchiveOversized)
+        }
+        upsertRow(pass, signatureStatus, archiveBytes)
+    }
+
+    @Deprecated(
+        message = "Pass the original archive bytes: upsert(pass, signatureStatus, archiveBytes).",
+        replaceWith = ReplaceWith("upsert(pass, signatureStatus, archiveBytes)"),
+    )
+    override suspend fun upsert(
+        pass: Pass,
+        signatureStatus: SignatureStatus,
+    ): StorageResult<PassRecordId> = runIo { upsertRow(pass, signatureStatus, archiveBytes = null) }
+
+    private suspend fun upsertRow(
+        pass: Pass,
+        signatureStatus: SignatureStatus,
+        archiveBytes: ByteArray?,
+    ): StorageResult<PassRecordId> {
         val outcome = writeMutex.withLock {
-            val o = store.upsert(pass, signatureStatus, clock())
+            val o = store.upsert(pass, signatureStatus, archiveBytes, clock())
             _passes.value = store.listSummaries()
             o
         }
@@ -89,7 +114,7 @@ public class SqlCipherPassRepository internal constructor(
             signatureStatus = signatureStatus.toKind(),
             wasReplacement = outcome.wasReplacement,
         )
-        StorageResult.Success(outcome.recordId)
+        return StorageResult.Success(outcome.recordId)
     }
 
     override suspend fun load(id: PassRecordId): StorageResult<StoredPass> = runIo {
@@ -102,6 +127,13 @@ public class SqlCipherPassRepository internal constructor(
         val summary = store.summaryById(id)
             ?: return@runIo failure(StorageError.IntegrityViolation(id))
         StorageResult.Success(summary)
+    }
+
+    override suspend fun loadArchiveBytes(id: PassRecordId): StorageResult<ByteArray?> = runIo {
+        // A legacy row (no sidecar) is a Success(null), not a failure: the pass exists.
+        val outcome = store.loadArchiveBytes(id)
+            ?: return@runIo failure(StorageError.IntegrityViolation(id))
+        StorageResult.Success(outcome.bytes)
     }
 
     override suspend fun delete(id: PassRecordId): StorageResult<Unit> = runIo {
@@ -449,8 +481,8 @@ public class SqlCipherPassRepository internal constructor(
     }
 
     /**
-     * Single emission point for a pass-side defensive rejection (today: user_label
-     * cap). Same discipline as [rejectDocument]: skip [failure] so `onStorageFailure`
+     * Single emission point for a pass-side defensive rejection (user_label cap, archive
+     * caps). Same discipline as [rejectDocument]: skip [failure] so `onStorageFailure`
      * does not double-fire alongside `onPassRejected`.
      */
     private fun <T> rejectPass(kind: PassUpdateRejectedKind): StorageResult<T> {

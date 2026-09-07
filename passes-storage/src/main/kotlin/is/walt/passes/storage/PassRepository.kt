@@ -1,6 +1,7 @@
 package `is`.walt.passes.storage
 
 import `is`.walt.passes.core.Pass
+import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.ScannableCard
@@ -31,10 +32,36 @@ public interface PassRepository {
      * `(type, serial_number, organization_name)` identity matches. Returns the assigned
      * [PassRecordId] in [StorageResult.Success.value].
      *
-     * On replacement the existing image and locale rows are atomically replaced inside the
-     * same transaction. The decoded summary is recomputed from [pass]; callers do not pass
-     * a separate summary.
+     * [archiveBytes] is the ORIGINAL `.pkpass` archive [pass] was parsed from, retained
+     * verbatim in the `pass_archives` sidecar for [loadArchiveBytes]. Stored as a copy and
+     * never parsed, sniffed, or decoded here. On replacement the image, locale, and archive
+     * rows are all swapped atomically in one transaction. The archive carries
+     * `webServiceURL` / `authenticationToken` where present, under the same SQLCipher +
+     * Keystore envelope and Auto Backup exclusion (ADR 0002).
+     *
+     * Defense in depth, mirroring [insertDocument]: rejects an empty archive with
+     * [PassUpdateRejectedKind.ArchiveEmpty] and one larger than
+     * [PassArchiveBounds.MAX_BYTES] with [PassUpdateRejectedKind.ArchiveOversized], as
+     * [StorageError.PassRejected]; nothing is written on rejection.
      */
+    public suspend fun upsert(
+        pass: Pass,
+        signatureStatus: SignatureStatus,
+        archiveBytes: ByteArray,
+    ): StorageResult<PassRecordId>
+
+    /**
+     * Legacy form of [upsert] for a caller that genuinely lacks the archive bytes (a
+     * one-shot stream parse). Stores NO sidecar row, and on replacement drops any archive
+     * a prior import retained, since the model may have changed. Rows written this way
+     * return `Success(null)` from [loadArchiveBytes] and can only export as a regenerated,
+     * unsigned archive. Retained only until walt-android's call sites migrate (wlt-lasc);
+     * migrate every caller in one change, since a mixed fleet discards archives on re-import.
+     */
+    @Deprecated(
+        message = "Pass the original archive bytes: upsert(pass, signatureStatus, archiveBytes).",
+        replaceWith = ReplaceWith("upsert(pass, signatureStatus, archiveBytes)"),
+    )
     public suspend fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
@@ -42,7 +69,8 @@ public interface PassRepository {
 
     /**
      * Load a stored pass with all images and locales materialized. Use [summaryOf] for the
-     * list view; [load] is the detail-view path.
+     * list view; [load] is the detail-view path. The retained archive is NOT loaded here;
+     * see [loadArchiveBytes].
      */
     public suspend fun load(id: PassRecordId): StorageResult<StoredPass>
 
@@ -52,8 +80,21 @@ public interface PassRepository {
     public suspend fun summaryOf(id: PassRecordId): StorageResult<PassSummary>
 
     /**
-     * Irreversible delete (ADR 0002 D6). Deletes the `passes` row and its cascaded image
-     * and locale rows in one transaction, updates the [passes] StateFlow, then emits the
+     * Loads the original `.pkpass` archive bytes retained by [upsert] for the pass with
+     * [id], byte-exact. Returns `null` (inside [StorageResult.Success]) for a legacy row
+     * imported before archive retention landed (schema v8): the pass exists, its archive
+     * was never stored, and nothing can backfill it. Such a pass can only be exported as
+     * a regenerated, unsigned archive. Returns [StorageError.IntegrityViolation] if no row
+     * matches [id].
+     *
+     * This is the ONLY path that reads the `pass_archives` sidecar; [passes], [load], and
+     * [summaryOf] never touch it. Each call returns a fresh array.
+     */
+    public suspend fun loadArchiveBytes(id: PassRecordId): StorageResult<ByteArray?>
+
+    /**
+     * Irreversible delete (ADR 0002 D6). Deletes the `passes` row and its cascaded image,
+     * locale, and archive rows in one transaction, updates the [passes] StateFlow, then emits the
      * `onPassDeleted` telemetry event. No undo, no soft-delete, no VACUUM.
      *
      * Confirmation UI is the caller's responsibility; the repository trusts the call.
@@ -315,6 +356,14 @@ public data class StoredPass(
  */
 public object PassUserLabelBounds {
     public const val MAX_USER_LABEL_CHARS: Int = 100
+}
+
+/**
+ * Hard storage ceiling on the retained archive in [PassRepository.upsert], independent of a
+ * consumer's `ParserConfig.maxArchiveBytes`; same figure as the parser default.
+ */
+public object PassArchiveBounds {
+    public const val MAX_BYTES: Long = ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES
 }
 
 /**
