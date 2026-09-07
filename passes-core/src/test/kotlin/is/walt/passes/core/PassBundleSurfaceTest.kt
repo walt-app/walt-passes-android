@@ -66,10 +66,20 @@ class PassBundleSurfaceTest {
     }
 
     @Test
+    fun limitFromReadsTheMatchingConfigField() {
+        val cfg = BundleConfig(maxArchiveBytes = 1, maxEntries = 2, maxEntryBytes = 3, maxCumulativeBytes = 4)
+        assertThat(BundleLimit.ArchiveSize.limitFrom(cfg)).isEqualTo(1L)
+        assertThat(BundleLimit.EntryCount.limitFrom(cfg)).isEqualTo(2L)
+        assertThat(BundleLimit.EntrySize.limitFrom(cfg)).isEqualTo(3L)
+        assertThat(BundleLimit.CumulativeSize.limitFrom(cfg)).isEqualTo(4L)
+    }
+
+    @Test
     fun bundleRejectionFlattensToADistinctFailureReasonPerArm() {
         val all: List<BundleRejection> =
             listOf(
                 BundleRejection.NotAZipArchive,
+                BundleRejection.SourceUnreadable,
                 BundleRejection.UnsafeEntryName,
                 BundleRejection.DuplicateEntryName,
             ) + BundleLimit.entries.map { BundleRejection.LimitExceeded(it) }

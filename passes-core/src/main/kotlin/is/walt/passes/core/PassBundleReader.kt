@@ -1,6 +1,7 @@
 package `is`.walt.passes.core
 
 import `is`.walt.passes.core.internal.DefaultPassBundleReader
+import `is`.walt.passes.core.internal.LOCAL_HEADER_FIXED_LENGTH
 import `is`.walt.passes.core.internal.sniffFirstLocalHeaderName
 
 /**
@@ -40,9 +41,13 @@ public fun interface PassBundleReader {
     /**
      * Streams [source] once and delivers each file entry to [sink] in archive order.
      * Synchronous and CPU-bound on the calling thread. Does not close a
-     * [PassSource.Stream]; the caller owns its lifecycle. The never-throws promise covers
-     * archive input: a `RuntimeException` from a caller-supplied stream (e.g. a
-     * `SecurityException` from a revoked content URI) propagates.
+     * [PassSource.Stream]; the caller owns its lifecycle.
+     *
+     * Failure contract: anything the archive input can cause is a typed rejection,
+     * including the `IllegalArgumentException` the JDK raises on an invalid UTF-8 entry
+     * name; an `IOException` from the caller's stream is [BundleRejection.SourceUnreadable];
+     * any other `RuntimeException` from a caller stream (e.g. a `SecurityException` from a
+     * revoked content URI), the allowlist, or the sink propagates.
      */
     public fun read(
         source: PassSource,
@@ -100,9 +105,9 @@ public sealed interface BundleEntry {
     /**
      * An entry the allowlist declined. Its bytes were inflated only to count them against
      * the caps and were never handed out. Reported, not dropped, so a consumer can say
-     * "N entries ignored".
+     * "N entries ignored". Not a data class: its `toString` must not print the name.
      */
-    public data class Skipped(
+    public class Skipped(
         override val name: String,
         override val ordinal: Int,
     ) : BundleEntry
@@ -131,7 +136,7 @@ public enum class PassBundleSniff {
 
     public companion object {
         /** Enough header to decide for any first-entry name up to 255 bytes. */
-        public const val RECOMMENDED_HEADER_BYTES: Int = 30 + 255
+        public const val RECOMMENDED_HEADER_BYTES: Int = LOCAL_HEADER_FIXED_LENGTH + 255
     }
 }
 

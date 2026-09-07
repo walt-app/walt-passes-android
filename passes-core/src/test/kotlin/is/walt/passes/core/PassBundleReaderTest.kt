@@ -1,6 +1,7 @@
 package `is`.walt.passes.core
 
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.internal.LOCAL_HEADER_FIXED_LENGTH
 import `is`.walt.passes.core.internal.OpenTrackingInputStream
 import `is`.walt.passes.core.internal.ThrowingInputStream
 import `is`.walt.passes.core.internal.buildArchive
@@ -159,6 +160,31 @@ class PassBundleReaderTest {
                 ),
             )
         assertThat(sink.names).containsExactly("a.pkpass", "ignored.txt").inOrder()
+    }
+
+    @Test
+    fun storedEntryOverThePerEntryCapIsRejected() {
+        val zip = buildArchive { storedEntry("big.pkpass", ByteArray(8_192)) }
+        val sink = RecordingSink()
+        val result = PassBundleReader.create(BundleConfig(maxEntryBytes = 4_096)).read(PassSource.Bytes(zip), sink)
+        assertThat(result)
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.EntrySize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
+        assertThat(sink.names).isEmpty()
+    }
+
+    @Test
+    fun entryToStringNeverPrintsTheName() {
+        val name = "secret-\u00e9.pkpass"
+        val accepted: BundleEntry = BundleEntry.Accepted(name, 0, byteArrayOf(1))
+        val skipped: BundleEntry = BundleEntry.Skipped(name, 1)
+        assertThat(accepted.toString()).doesNotContain("secret")
+        assertThat(skipped.toString()).doesNotContain("secret")
     }
 
     @Test
@@ -377,7 +403,8 @@ class PassBundleReaderTest {
                 entry("b.pkpass", ByteArray(4_096) { (it * 31).toByte() })
             }
         // Cut a few bytes into the second entry's deflate stream, past its local header.
-        val truncated = zip.copyOf(findNthLocalHeaderOffset(zip, 2) + 30 + "b.pkpass".length + 16)
+        val secondHeader = findNthLocalHeaderOffset(zip, 2)
+        val truncated = zip.copyOf(secondHeader + LOCAL_HEADER_FIXED_LENGTH + "b.pkpass".length + 16)
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Bytes(truncated), sink)
         assertThat(result).isEqualTo(
@@ -399,7 +426,7 @@ class PassBundleReaderTest {
                 entry("a.pkpass", "A".toByteArray())
                 entry("b.pkpass", "B".toByteArray())
             }
-        val truncated = zip.copyOf(findNthLocalHeaderOffset(zip, 2) + 10)
+        val truncated = zip.copyOf(findNthLocalHeaderOffset(zip, 2) + PARTIAL_HEADER_BYTES)
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Bytes(truncated), sink)
         assertThat(result).isEqualTo(BundleReadResult.Completed(accepted = 1, skipped = 0))
@@ -412,7 +439,7 @@ class PassBundleReaderTest {
         val result = PassBundleReader.create().read(PassSource.Stream(ThrowingInputStream()), sink)
         assertThat(result).isEqualTo(
             BundleReadResult.Rejected(
-                BundleRejection.NotAZipArchive,
+                BundleRejection.SourceUnreadable,
                 accepted = 0,
                 skipped = 0,
             ),
@@ -643,6 +670,9 @@ class PassBundleReaderTest {
         assertThat(again.acceptedBytes.getValue("a.pkpass")).isEqualTo("AAA".toByteArray())
     }
 }
+
+/** A cut this far into a local header leaves it short of its fixed 30 bytes. */
+private const val PARTIAL_HEADER_BYTES = 10
 
 /** Records every entry the reader hands over; optionally stops after [stopAfter] entries. */
 private class RecordingSink(private val stopAfter: Int = Int.MAX_VALUE) : BundleEntrySink {

@@ -34,16 +34,9 @@ internal fun PassSource.openStream(): InputStream =
  * or an end-of-central-directory signature (`PK\x05\x06`, legal only for an empty
  * archive; anything else behind it is rejected by [ZipInputStream] on the next read).
  * Leaves the stream re-positioned at byte 0 so [ZipInputStream] reads the same bytes the
- * sniff observed. An [IOException] from the stream is `false`: no readable magic.
+ * sniff observed. Throws whatever the stream throws; each reader maps that itself.
  */
-internal fun hasZipMagic(stream: BufferedInputStream): Boolean =
-    try {
-        readsZipMagic(stream)
-    } catch (_: IOException) {
-        false
-    }
-
-private fun readsZipMagic(stream: BufferedInputStream): Boolean {
+internal fun hasZipMagic(stream: BufferedInputStream): Boolean {
     stream.mark(MAGIC_PREFIX_LENGTH)
     val head = ByteArray(MAGIC_PREFIX_LENGTH)
     var read = 0
@@ -169,10 +162,29 @@ internal class BoundedInputStream(
  * [PassSource.Stream.stream] open; [ZipInputStream.use] would otherwise close it.
  */
 internal class NonClosingInputStream(delegate: InputStream) : FilterInputStream(delegate) {
+    override fun read(): Int = sourceRead { `in`.read() }
+
+    override fun read(
+        b: ByteArray,
+        off: Int,
+        len: Int,
+    ): Int = sourceRead { `in`.read(b, off, len) }
+
     override fun close() {
         // No-op. Caller owns the underlying stream's lifecycle.
     }
+
+    /** Re-tags the caller stream's I/O failure so readers can tell it from a corrupt archive. */
+    private inline fun sourceRead(read: () -> Int): Int =
+        try {
+            read()
+        } catch (e: IOException) {
+            throw SourceReadException(e)
+        }
 }
+
+/** An [IOException] raised by the CALLER's stream, as opposed to one raised by ZIP decoding. */
+internal class SourceReadException(cause: IOException) : IOException(cause)
 
 internal class ArchiveSizeExceededException : IOException()
 

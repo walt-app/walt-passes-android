@@ -74,7 +74,7 @@ class SafeArchiveExtractorTest {
     fun streamSourceFailurePathLeavesUnderlyingStreamOpen() {
         // Mid-archive failure path: a path-traversal entry trips well after ZipInputStream
         // is already pulling bytes through the wrapper chain. The NonClosingInputStream
-        // contract must hold here too — caller still owns the stream's lifecycle even when
+        // contract must hold here too: caller still owns the stream's lifecycle even when
         // extraction aborts.
         val zip = buildArchive { entry("../etc/passwd.json", "pwned".toByteArray()) }
         val tracker = OpenTrackingInputStream(ByteArrayInputStream(zip))
@@ -85,7 +85,7 @@ class SafeArchiveExtractorTest {
 
     @Test
     fun declaredSizeOverArchiveCapFailsFast() {
-        // sizeHint > maxArchiveBytes — the underlying stream must not even be touched.
+        // sizeHint > maxArchiveBytes, so the underlying stream must not even be touched.
         val tracker = OpenTrackingInputStream(ByteArrayInputStream(ByteArray(0)))
         val config = ParserConfig().copy(maxArchiveBytes = 1024)
         val result =
@@ -133,7 +133,7 @@ class SafeArchiveExtractorTest {
     @Test
     fun zipBombStyleHighlyCompressibleEntryHitsEntrySizeLimit() {
         // 1 MB of zeros compresses to ~1 KB. With maxEntryBytes = 4 KB the decompressed
-        // ceiling trips before the buffer materializes — the canonical zip-bomb guard.
+        // ceiling trips before the buffer materializes, the canonical zip-bomb guard.
         val zip = buildArchive { entry("icon.png", ByteArray(1_024 * 1_024)) }
         val config = ParserConfig().copy(maxArchiveBytes = 64 * 1_024, maxEntryBytes = 4_096)
         val result = extractSafely(PassSource.Bytes(zip), config)
@@ -250,7 +250,7 @@ class SafeArchiveExtractorTest {
         // cannot smuggle in arbitrary content under a nested "signature" path.
         val zip = buildArchive { entry("nested/signature", byteArrayOf(0x00)) }
         val result = extractSafely(PassSource.Bytes(zip), ParserConfig())
-        // Path is legal, but the file has no allowed extension — extension allowlist trips.
+        // Path is legal, but the file has no allowed extension, so the extension allowlist trips.
         assertMalformed(result, MalformedReason.NotAZipArchive)
     }
 

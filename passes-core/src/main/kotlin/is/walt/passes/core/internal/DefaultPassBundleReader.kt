@@ -32,8 +32,9 @@ internal class DefaultPassBundleReader(private val config: BundleConfig) : PassB
         // Same wrapper order as extractSafely: the bound must sit outside the buffer so the
         // sniffed bytes still count when ZipInputStream reads them back.
         val sniffer = BufferedInputStream(source.openStream())
-        return if (!hasZipMagic(sniffer)) {
-            BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 0, 0)
+        val rejection = guarded({ it }) { if (hasZipMagic(sniffer)) null else BundleRejection.NotAZipArchive }
+        return if (rejection != null) {
+            BundleReadResult.Rejected(rejection, 0, 0)
         } else {
             val bounded = BoundedInputStream(sniffer, config.maxArchiveBytes)
             ZipInputStream(bounded).use { zis -> BundleWalk(config, sink).run(zis) }
@@ -144,9 +145,7 @@ private class BundleWalk(
         return if (sink.onEntry(entry) == BundleVisit.Stop) BundleReadResult.Stopped(accepted, skipped) else null
     }
 
-    private fun rejected(reason: BundleRejection): BundleReadResult {
-        return BundleReadResult.Rejected(reason, accepted, skipped)
-    }
+    private fun rejected(reason: BundleRejection) = BundleReadResult.Rejected(reason, accepted, skipped)
 }
 
 /** Runs one ZIP read, mapping input-driven exceptions onto a rejection via [onRejected]. */
@@ -156,6 +155,8 @@ private inline fun <T> guarded(
 ): T =
     try {
         block()
+    } catch (_: SourceReadException) {
+        onRejected(BundleRejection.SourceUnreadable)
     } catch (_: ArchiveSizeExceededException) {
         onRejected(BundleRejection.LimitExceeded(BundleLimit.ArchiveSize))
     } catch (_: IOException) {

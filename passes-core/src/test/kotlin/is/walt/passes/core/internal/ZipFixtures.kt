@@ -3,6 +3,7 @@ package `is`.walt.passes.core.internal
 import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
+import java.util.zip.CRC32
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -24,6 +25,21 @@ internal class ArchiveBuilder(private val zos: ZipOutputStream) {
         content: ByteArray,
     ) {
         zos.putNextEntry(ZipEntry(name))
+        zos.write(content)
+        zos.closeEntry()
+    }
+
+    /** A STORED (uncompressed) entry; the format requires size and CRC up front. */
+    fun storedEntry(
+        name: String,
+        content: ByteArray,
+    ) {
+        val entry = ZipEntry(name)
+        entry.method = ZipEntry.STORED
+        entry.size = content.size.toLong()
+        entry.compressedSize = content.size.toLong()
+        entry.crc = CRC32().also { it.update(content) }.value
+        zos.putNextEntry(entry)
         zos.write(content)
         zos.closeEntry()
     }

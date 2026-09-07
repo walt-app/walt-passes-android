@@ -38,6 +38,9 @@ public sealed interface BundleRejection {
     /** The bytes are not a ZIP (bad magic, truncated, or corrupt local headers). */
     public data object NotAZipArchive : BundleRejection
 
+    /** The caller's [PassSource.Stream] raised an I/O error; nothing is known about the bytes. */
+    public data object SourceUnreadable : BundleRejection
+
     /** An entry name is a zip-slip shape: `..`/`.` segments, absolute, backslash, drive letter, or empty. */
     public data object UnsafeEntryName : BundleRejection
 
@@ -53,6 +56,7 @@ public sealed interface BundleRejection {
  */
 public enum class BundleFailureReason {
     NotAZipArchive,
+    SourceUnreadable,
     UnsafeEntryName,
     DuplicateEntryName,
     ArchiveSizeLimit,
@@ -65,6 +69,7 @@ public enum class BundleFailureReason {
 public fun BundleRejection.toFailureReason(): BundleFailureReason =
     when (this) {
         BundleRejection.NotAZipArchive -> BundleFailureReason.NotAZipArchive
+        BundleRejection.SourceUnreadable -> BundleFailureReason.SourceUnreadable
         BundleRejection.UnsafeEntryName -> BundleFailureReason.UnsafeEntryName
         BundleRejection.DuplicateEntryName -> BundleFailureReason.DuplicateEntryName
         is BundleRejection.LimitExceeded ->
