@@ -50,10 +50,11 @@ private fun zipWithinCaps(
     members: Map<String, ByteArray>,
     config: ParserConfig,
 ): PassEncodeResult {
-    val ordered = LinkedHashMap<String, ByteArray>()
-    ordered[PASS_JSON_FILE_NAME] = members.getValue(PASS_JSON_FILE_NAME)
-    ordered[MANIFEST_FILE_NAME] = encodeManifest(members)
-    for ((name, bytes) in members) ordered.putIfAbsent(name, bytes)
+    val ordered =
+        linkedMapOf(
+            PASS_JSON_FILE_NAME to members.getValue(PASS_JSON_FILE_NAME),
+            MANIFEST_FILE_NAME to encodeManifest(members),
+        ) + (members - PASS_JSON_FILE_NAME)
     val limit = entryLimit(ordered, config)
     if (limit != null) return PassEncodeResult.LimitExceeded(limit)
     val bytes = zip(ordered)
@@ -113,10 +114,14 @@ private fun entryLimit(
         else -> null
     }
 
-/** Mirrors the extractor's path rules for the single `<tag>.lproj` segment. */
+/**
+ * Mirrors the extractor's path rules for the single `<tag>.lproj` segment. The UTF-16
+ * check keeps `ZipEntry(name)` from throwing on an unpaired surrogate in a hand-built tag.
+ */
 private fun isSafeLocaleTag(tag: String): Boolean {
     val driveLetter = tag.length >= 2 && tag[1] == ':'
-    return tag.isNotEmpty() && '/' !in tag && '\\' !in tag && !driveLetter
+    val wellFormed = Charsets.UTF_8.newEncoder().canEncode(tag)
+    return tag.isNotEmpty() && '/' !in tag && '\\' !in tag && !driveLetter && wellFormed
 }
 
 private fun encodeManifest(members: Map<String, ByteArray>): ByteArray {
@@ -148,18 +153,18 @@ private fun zip(members: Map<String, ByteArray>): ByteArray {
 }
 
 /**
- * The DOS epoch expressed in the device's local calendar. `ZipEntry.time` is converted
- * to DOS fields through the default zone, so this keeps the bytes identical across zones.
+ * Local-calendar 1980-01-02 gives zone-independent DOS fields and avoids the
+ * `DOSTIME_BEFORE_1980` sentinel that older `ZipEntry.setTime` turns into a zone-dependent extra field.
  */
 private fun fixedEntryTimeMillis(): Long =
-    LocalDateTime.of(DOS_EPOCH_YEAR, 1, 1, 0, 0)
+    LocalDateTime.of(DOS_EPOCH_YEAR, 1, FIXED_ENTRY_DAY, 0, 0)
         .atZone(ZoneId.systemDefault())
         .toInstant()
         .toEpochMilli()
 
-private val BASENAME_BY_ROLE = ROLE_BY_BASENAME.entries.associate { it.value to it.key }
+internal val BASENAME_BY_ROLE = ROLE_BY_BASENAME.entries.associate { it.value to it.key }
 
-private const val SHA1_ALGORITHM = "SHA-1"
 private const val HEX_DIGITS = "0123456789abcdef"
 private const val NIBBLE_MASK = 0x0F
 private const val DOS_EPOCH_YEAR = 1980
+private const val FIXED_ENTRY_DAY = 2

@@ -354,8 +354,6 @@ private val HEX_REGEX = Regex("""#([0-9a-fA-F]{6})""")
 internal const val PASS_JSON_FILE_NAME = "pass.json"
 internal const val PKPASS_FORMAT_VERSION = 1
 private const val MAX_COLOR_COMPONENT = 255
-private const val RED_SHIFT = 16
-private const val GREEN_SHIFT = 8
 private const val HEX_RADIX = 16
 
 internal const val FIELD_FORMAT_VERSION = "formatVersion"

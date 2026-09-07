@@ -1,6 +1,10 @@
 package `is`.walt.passes.core
 
 import com.google.common.truth.Truth.assertThat
+import `is`.walt.passes.core.internal.ALIGNMENT_NAME_BY_VALUE
+import `is`.walt.passes.core.internal.BASENAME_BY_ROLE
+import `is`.walt.passes.core.internal.FORMAT_NAME_BY_VALUE
+import `is`.walt.passes.core.internal.STYLE_KEY_BY_TYPE
 import `is`.walt.passes.core.internal.SyntheticPkpass
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -31,10 +35,37 @@ class PassEncoderTest {
 
     @Test
     fun roundTripHoldsForEveryPassStyle() {
-        for (style in listOf("boardingPass", "eventTicket", "coupon", "storeCard", "generic")) {
+        for (type in PassType.entries) {
+            val style = STYLE_KEY_BY_TYPE.getValue(type)
             val original = parse(SyntheticPkpass.unsigned(SyntheticPkpass.minimalPassJson(style))).pass
+            assertThat(original.type).isEqualTo(type)
             assertThat(parse(encode(original)).pass).isEqualTo(original)
         }
+    }
+
+    /** Drift detector: every enum value the writer may meet has a name in the inverted reader table. */
+    @Test
+    fun invertedNameTablesCoverEveryEnumValue() {
+        assertThat(BASENAME_BY_ROLE.keys).containsExactlyElementsIn(ImageRole.entries)
+        assertThat(STYLE_KEY_BY_TYPE.keys).containsExactlyElementsIn(PassType.entries)
+        assertThat(FORMAT_NAME_BY_VALUE.keys).containsExactlyElementsIn(BarcodeFormat.entries)
+        assertThat(ALIGNMENT_NAME_BY_VALUE.keys).containsExactlyElementsIn(TextAlignment.entries)
+    }
+
+    /**
+     * The first local file header must carry no extra field: an extended timestamp
+     * (0x5455) would embed UTC seconds and make the bytes zone-dependent on API 28-33.
+     */
+    @Test
+    fun localHeadersCarryNoExtraFieldAndAFixedDosTimestamp() {
+        val bytes = encode(parse(richArchive()).pass)
+        assertThat(bytes.copyOfRange(0, 4)).isEqualTo(byteArrayOf(0x50, 0x4B, 0x03, 0x04))
+        val dosTime = bytes.u16(LOCAL_HEADER_TIME_OFFSET)
+        val dosDate = bytes.u16(LOCAL_HEADER_DATE_OFFSET)
+        val extraLength = bytes.u16(LOCAL_HEADER_EXTRA_LENGTH_OFFSET)
+        assertThat(dosTime).isEqualTo(0)
+        assertThat(dosDate).isEqualTo(DOS_DATE_1980_01_02)
+        assertThat(extraLength).isEqualTo(0)
     }
 
     @Test
@@ -113,7 +144,7 @@ class PassEncoderTest {
     @Test
     fun invalidLocaleTagIsRefusedNotWritten() {
         val pass = parse(richArchive()).pass
-        for (tag in listOf("", "en/US", "en\\US", "C:")) {
+        for (tag in listOf("", "en/US", "en\\US", "C:", "en\uD83D")) {
             val result = PassEncoder.encode(pass.copy(locales = mapOf(PassLocale(tag) to LocalizedStrings.Empty)))
             assertThat(result).isEqualTo(PassEncodeResult.InvalidLocaleTag(tag))
         }
@@ -167,6 +198,12 @@ class PassEncoderTest {
         val result = PassParser.create().parse(PassSource.Bytes(bytes))
         assertThat(result).isInstanceOf(ParseResult.Success::class.java)
         return result as ParseResult.Success
+    }
+
+    private fun ByteArray.u16(offset: Int): Int {
+        val low = this[offset].toInt() and 0xFF
+        val high = this[offset + 1].toInt() and 0xFF
+        return low or (high shl 8)
     }
 
     private fun entryNames(zip: ByteArray): List<String> =
@@ -229,3 +266,10 @@ class PassEncoderTest {
         return SyntheticPkpass.unsigned(passJson, extras)
     }
 }
+
+private const val LOCAL_HEADER_TIME_OFFSET = 10
+private const val LOCAL_HEADER_DATE_OFFSET = 12
+private const val LOCAL_HEADER_EXTRA_LENGTH_OFFSET = 28
+
+/** DOS date bits: (year - 1980) shl 9, month shl 5, day. */
+private const val DOS_DATE_1980_01_02 = 1 shl 5 or 2

@@ -31,15 +31,5 @@ private fun escapeStrings(text: String): String =
         }
     }
 
-/** Same per-Char overcount as the strings lexer, so the check trips exactly where the parser does. */
-internal fun conservativeUtf8Bytes(text: String): Long =
-    text.sumOf { c ->
-        when {
-            c.code < UTF8_TWO_BYTE_THRESHOLD -> 1L
-            c.code < UTF8_THREE_BYTE_THRESHOLD -> 2L
-            else -> 3L
-        }
-    }
-
-private const val UTF8_TWO_BYTE_THRESHOLD = 0x80
-private const val UTF8_THREE_BYTE_THRESHOLD = 0x800
+/** The strings lexer's own per-Char overcount, so the check trips exactly where the parser does. */
+internal fun conservativeUtf8Bytes(text: String): Long = text.sumOf { it.utf8Bytes().toLong() }

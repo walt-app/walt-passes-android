@@ -83,10 +83,8 @@ private fun ColorValue.toRgbFunction(): String {
     return "rgb($r,$g,$b)"
 }
 
-private val STYLE_KEY_BY_TYPE = STYLE_KEY_TO_TYPE.entries.associate { it.value to it.key }
-private val FORMAT_NAME_BY_VALUE = BARCODE_FORMAT_MAP.entries.associate { it.value to it.key }
-private val ALIGNMENT_NAME_BY_VALUE = TEXT_ALIGNMENT_MAP.entries.associate { it.value to it.key }
+internal val STYLE_KEY_BY_TYPE = STYLE_KEY_TO_TYPE.entries.associate { it.value to it.key }
+internal val FORMAT_NAME_BY_VALUE = BARCODE_FORMAT_MAP.entries.associate { it.value to it.key }
+internal val ALIGNMENT_NAME_BY_VALUE = TEXT_ALIGNMENT_MAP.entries.associate { it.value to it.key }
 
 private const val COLOR_MASK = 0xFF
-private const val RED_SHIFT = 16
-private const val GREEN_SHIFT = 8
