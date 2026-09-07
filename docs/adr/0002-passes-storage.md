@@ -81,6 +81,14 @@ CREATE TABLE pass_locales (
     strings_json BLOB    NOT NULL,                           -- kotlinx-serialized LocalizedStrings
     PRIMARY KEY (pass_id, locale_tag)
 );
+
+-- v8 (wpass-59i.1). The original .pkpass archive, verbatim. Read only by
+-- PassRepository.loadArchiveBytes; see D9.
+CREATE TABLE pass_archives (
+    pass_id INTEGER NOT NULL REFERENCES passes(id) ON DELETE CASCADE,
+    bytes   BLOB    NOT NULL,
+    PRIMARY KEY (pass_id)
+);
 ```
 
 Why split: the wallet list view needs the query columns (type, organization, expiration, voided) for tens to low hundreds of passes. Pulling tens of MB of image bytes and locale tables for that view is wasteful. Separating images and locales lets the list query touch only the `passes` row, and the detail view fetches images/locales lazily by `pass_id`.
@@ -115,7 +123,7 @@ Two consumer postures are valid and the assertion accepts both:
 1. **Inherit.** The consumer lets the library's manifest contributions reach the merged manifest unchanged. `ApplicationInfo.fullBackupContent` and `ApplicationInfo.dataExtractionRulesRes` then reference `walt_passes_backup_rules` and `walt_passes_data_extraction_rules` directly.
 2. **Mirror.** The consumer overrides the library contributions with `tools:replace="android:fullBackupContent,android:dataExtractionRules"` and points the manifest at a consumer-owned XML resource that mirrors the library's required `<exclude>` entries (and optionally adds its own). Walt-android takes this posture so it can manage backup posture for the whole app from a single resource.
 
-The assertion validates by content, not resource identity. It opens whichever XML resource the merged manifest points at and checks that every entry in `BackupRulesAssertion.REQUIRED_EXCLUDES` is present in every backup-relevant section of that resource (`<full-backup-content>` for the API 23 - 30 path; both `<cloud-backup>` and `<device-transfer>` for the API 31+ path). Consumers may add additional excludes; only the pass-related entries are required for the trust claim. Setting `android:allowBackup="false"` app-wide trivially satisfies the claim and short-circuits the assertion.
+The assertion validates by content, not resource identity. It opens whichever XML resource the merged manifest points at and checks that every entry in `BackupRulesContract.REQUIRED_EXCLUDES` is present in every backup-relevant section of that resource (`<full-backup-content>` for the API 23 - 30 path; both `<cloud-backup>` and `<device-transfer>` for the API 31+ path). Consumers may add additional excludes; only the pass-related entries are required for the trust claim. Setting `android:allowBackup="false"` app-wide trivially satisfies the claim and short-circuits the assertion.
 
 ### D6. Deletion is items 1+3+4+5+6 from `decision-wlt-0tn-q3-4`
 
@@ -203,3 +211,78 @@ The raw DB key bytes are zeroed in the `PassKeyProvider` after they are handed t
 - Migration tooling: schema version 2 candidates (event ticket subtype indexing, barcode message search) are deferred until the wallet feature surfaces them.
 - StrongBox availability matrix: which devices in the walt-android target population actually have StrongBox is a deployment-data question for walt-android, not for this module.
 - Multi-user / work-profile behavior: the library assumes per-user Android profiles isolate Keystore aliases (they do); no extra logic is required, but the implementation bead's instrumentation tests should cover work-profile install once.
+
+## Addendum 2026-09-08: original archive bytes retained at rest
+
+Tracks: `wpass-59i.1` (retention, PR #236) and `wpass-59i.3` (this addendum)
+under parent epic `wpass-59i`; consumer epic walt-android `wlt-lasc`. D3's
+table count and D6's cascade list were updated when the code landed, and the D3 DDL
+is added here; the at-rest
+decision itself is recorded here. The rest of the ADR stands as written.
+
+### D9. The original `.pkpass` is retained verbatim, readable only by the export path
+
+`PassRepository.upsert(pass, signatureStatus, archiveBytes)` stores the archive
+the pass was parsed from, byte-exact, in the `pass_archives` sidecar (schema
+v7 -> v8, an additive `CREATE TABLE`; DDL in D3). `PassRepository.loadArchiveBytes(id)`
+reads it back. Purpose: a consumer can export a pass as the issuer signed it,
+and re-import runs the real signature check, instead of carrying trust state in
+a backup file.
+
+**What this adds at rest.** `StoredPass` is a lossy parse. The sidecar is not:
+it holds the entire archive, images included, and with it the whole `pass.json`,
+including every key the parser reads and discards (`webServiceURL`,
+`authenticationToken`, `nfc`, `personalization`, and keys it never models),
+plus `manifest.json` and the PKCS#7 `signature`.
+`authenticationToken` is a per-pass bearer credential for the issuer's update
+service; before v8 the database never held it.
+
+**What protects it.** Nothing new, by construction. The sidecar is a table in
+`walt_passes.db`, so D1's page-level SQLCipher encryption, D2's Keystore-wrapped
+envelope, and D5's backup exclusion cover it unchanged.
+`BackupRulesContract.REQUIRED_EXCLUDES` names the database file, not tables,
+so both the Inherit and the Mirror posture exclude the sidecar with no rules
+change on either side. `PassArchiveBounds.MAX_BYTES` (10 MiB,
+`ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES`) is a storage-side hard ceiling
+independent of whatever `ParserConfig.maxArchiveBytes` the consumer parsed with;
+an empty or oversized archive is refused before any write as
+`StorageError.PassRejected(PassUpdateRejectedKind.ArchiveEmpty | ArchiveOversized)`,
+mirroring `DocumentBounds` on the document path.
+
+**What reads it.** Only `loadArchiveBytes`. The `passes` StateFlow, `load`, and
+`summaryOf` never reference the sidecar, so the list and detail paths pay
+nothing for it. It is a sidecar table rather than a column on `passes` so that
+"never materialized by the hot path" is a property of the SQL, pinned by a
+query-shape test, rather than of column-selection discipline.
+
+**Legacy rows.** A row imported before v8 has no sidecar row; `loadArchiveBytes`
+returns `Success(null)`: the pass exists, its archive was never stored, and
+nothing can backfill it. The deprecated two-arg `upsert(pass, signatureStatus)`
+writes the same shape and, when it replaces a retained row, deletes that row's
+archive. A consumer must therefore migrate every `upsert` call site in one
+change: a mixed fleet silently downgrades passes to regenerated, unsigned export
+on re-import. The overload exists only for the `wlt-lasc` migration window.
+
+**Consumer obligation.** `loadArchiveBytes` returns a credential-bearing blob.
+The export path must not log it, hash-and-report it, or hand it to telemetry,
+and the consumer must tell the user that a shared `.pkpass` carries the issuer's
+update token. `StorageTelemetryGuard` cannot enforce this on the consumer's side
+of the boundary; it is recorded here so the export feature's review gate has it.
+
+### Backup and sidecar formats stay out of the kernel
+
+The kernel deliberately defines no wallet backup container, sidecar schema, or
+file encryption. Those are consumer concerns (walt-android `wlt-lasc`), and the
+kernel keeps the posture it has for every other import: it sees bytes, not
+provenance. `PassBundleReader` (ADR 0001 D7) reads the outer layer of any such
+container and `upsert` stores what `PassParser` accepted; where the bytes came
+from, and whether the file around them was encrypted, is invisible to both.
+
+### Tests pinning this addendum
+
+| Decision | Test |
+|----------|------|
+| D9 (round trip) | `PassRepositoryContractTest.upsertRetainsTheArchiveAndLoadArchiveBytesRoundTripsItByteExact`, `upsertReplaceSwapsTheRetainedArchiveForTheNewOne`, `deleteDropsTheRetainedArchiveWithThePass`; `CipherCompatReopenTest.archiveAtTheStorageCapSurvivesReopenByteExact` (real SQLCipher, instrumentation) |
+| D9 (hot path never reads it) | `SqlCipherPassStoreQueryShapeTest.listDetailAndSummaryStatementsNeverReferenceTheArchiveSidecar` (the list, detail, and summary SQL constants name no `pass_archives` and no `JOIN`); `PassRepositoryContractTest.listDetailAndSummaryPathsNeverReadTheArchive` |
+| D9 (cap) | `PassRepositoryContractTest.upsertRejectsAnEmptyArchiveBeforeWritingAnything`, `upsertRejectsAnOversizedArchiveBeforeWritingAnything`, `upsertAcceptsAnArchiveExactlyAtTheCap` |
+| D9 (legacy null) | `PassRepositoryContractTest.loadArchiveBytesReturnsNullForALegacyRowImportedBeforeRetention`, `legacyTwoArgUpsertStoresNoArchiveAndReadsBackNull`, `legacyTwoArgUpsertReplacingARetainedRowDropsTheOldArchive`; `PassArchivesMigrationTest.preexistingV7PassSurvivesMigrationToV8WithNoArchive`, `passArchivesAfterMigrationCascadesOnPassDelete` |
