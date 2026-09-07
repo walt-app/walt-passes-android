@@ -301,7 +301,7 @@ private val PASS_JSON: Json =
         ignoreUnknownKeys = true
     }
 
-private val STYLE_KEY_TO_TYPE: Map<String, PassType> =
+internal val STYLE_KEY_TO_TYPE: Map<String, PassType> =
     linkedMapOf(
         "boardingPass" to PassType.BoardingPass,
         "eventTicket" to PassType.EventTicket,
@@ -332,7 +332,7 @@ private val KNOWN_NON_STYLE_OBJECT_KEYS: Set<String> =
         "barcode",
     )
 
-private val BARCODE_FORMAT_MAP: Map<String, BarcodeFormat> =
+internal val BARCODE_FORMAT_MAP: Map<String, BarcodeFormat> =
     mapOf(
         "PKBarcodeFormatQR" to BarcodeFormat.QR,
         "PKBarcodeFormatPDF417" to BarcodeFormat.PDF417,
@@ -340,7 +340,7 @@ private val BARCODE_FORMAT_MAP: Map<String, BarcodeFormat> =
         "PKBarcodeFormatCode128" to BarcodeFormat.Code128,
     )
 
-private val TEXT_ALIGNMENT_MAP: Map<String, TextAlignment> =
+internal val TEXT_ALIGNMENT_MAP: Map<String, TextAlignment> =
     mapOf(
         "PKTextAlignmentLeft" to TextAlignment.Left,
         "PKTextAlignmentCenter" to TextAlignment.Center,
@@ -351,34 +351,32 @@ private val TEXT_ALIGNMENT_MAP: Map<String, TextAlignment> =
 private val RGB_REGEX = Regex("""rgb\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*\)""")
 private val HEX_REGEX = Regex("""#([0-9a-fA-F]{6})""")
 
-private const val PASS_JSON_FILE_NAME = "pass.json"
-private const val PKPASS_FORMAT_VERSION = 1
+internal const val PASS_JSON_FILE_NAME = "pass.json"
+internal const val PKPASS_FORMAT_VERSION = 1
 private const val MAX_COLOR_COMPONENT = 255
-private const val RED_SHIFT = 16
-private const val GREEN_SHIFT = 8
 private const val HEX_RADIX = 16
 
-private const val FIELD_FORMAT_VERSION = "formatVersion"
-private const val FIELD_SERIAL_NUMBER = "serialNumber"
-private const val FIELD_DESCRIPTION = "description"
-private const val FIELD_ORGANIZATION_NAME = "organizationName"
-private const val FIELD_EXPIRATION_DATE = "expirationDate"
-private const val FIELD_VOIDED = "voided"
-private const val FIELD_FOREGROUND_COLOR = "foregroundColor"
-private const val FIELD_BACKGROUND_COLOR = "backgroundColor"
-private const val FIELD_LABEL_COLOR = "labelColor"
-private const val FIELD_HEADER_FIELDS = "headerFields"
-private const val FIELD_PRIMARY_FIELDS = "primaryFields"
-private const val FIELD_SECONDARY_FIELDS = "secondaryFields"
-private const val FIELD_AUXILIARY_FIELDS = "auxiliaryFields"
-private const val FIELD_BACK_FIELDS = "backFields"
-private const val FIELD_KEY = "key"
-private const val FIELD_VALUE = "value"
-private const val FIELD_LABEL = "label"
-private const val FIELD_TEXT_ALIGNMENT = "textAlignment"
-private const val FIELD_BARCODE = "barcode"
-private const val FIELD_BARCODES = "barcodes"
-private const val FIELD_FORMAT = "format"
-private const val FIELD_MESSAGE = "message"
-private const val FIELD_MESSAGE_ENCODING = "messageEncoding"
-private const val FIELD_ALT_TEXT = "altText"
+internal const val FIELD_FORMAT_VERSION = "formatVersion"
+internal const val FIELD_SERIAL_NUMBER = "serialNumber"
+internal const val FIELD_DESCRIPTION = "description"
+internal const val FIELD_ORGANIZATION_NAME = "organizationName"
+internal const val FIELD_EXPIRATION_DATE = "expirationDate"
+internal const val FIELD_VOIDED = "voided"
+internal const val FIELD_FOREGROUND_COLOR = "foregroundColor"
+internal const val FIELD_BACKGROUND_COLOR = "backgroundColor"
+internal const val FIELD_LABEL_COLOR = "labelColor"
+internal const val FIELD_HEADER_FIELDS = "headerFields"
+internal const val FIELD_PRIMARY_FIELDS = "primaryFields"
+internal const val FIELD_SECONDARY_FIELDS = "secondaryFields"
+internal const val FIELD_AUXILIARY_FIELDS = "auxiliaryFields"
+internal const val FIELD_BACK_FIELDS = "backFields"
+internal const val FIELD_KEY = "key"
+internal const val FIELD_VALUE = "value"
+internal const val FIELD_LABEL = "label"
+internal const val FIELD_TEXT_ALIGNMENT = "textAlignment"
+internal const val FIELD_BARCODE = "barcode"
+internal const val FIELD_BARCODES = "barcodes"
+internal const val FIELD_FORMAT = "format"
+internal const val FIELD_MESSAGE = "message"
+internal const val FIELD_MESSAGE_ENCODING = "messageEncoding"
+internal const val FIELD_ALT_TEXT = "altText"

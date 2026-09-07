@@ -106,7 +106,7 @@ private fun hasPrefix(
  * conservative upper bound never lets an over-budget string through. Not suitable
  * for serialization sizing.
  */
-private fun Char.utf8Bytes(): Int =
+internal fun Char.utf8Bytes(): Int =
     when {
         code < UTF8_TWO_BYTE_THRESHOLD -> 1
         code < UTF8_THREE_BYTE_THRESHOLD -> 2

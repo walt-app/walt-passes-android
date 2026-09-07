@@ -36,11 +36,13 @@ Rationale: this is the load-bearing implementation of the README trust claim. Do
 
 The flattened `SignatureStatusKind` and `ParseFailureKind` enums exist so this telemetry contract can travel through metric backends that prefer string dimensions, without expanding the interface to take arbitrary strings.
 
-### D4. No Android, no `java.time`, no `java.util.Locale`
+### D4. No Android, no `java.util.Locale`, no `java.time` on the public surface
 
 `passes-core` depends only on the Kotlin stdlib and `kotlinx.serialization`. Time is `PassInstant(epochMillis: Long)`; locales are `PassLocale(tag: String)` carrying a BCP-47 tag verbatim. Color is `ColorValue(rgb: Int)`.
 
 Rationale: lets the same module compile against minSdk-21 Android (without core library desugaring of `java.time`), against a JVM CI fuzzer, and against future KMP targets without per-target shims. Consumers that already depend on Android or kotlinx-datetime do the conversion at the module boundary.
+
+Amendment (2026-09-08): `java.time` is in use on the JVM path (`OffsetDateTime` in the pass.json decoder, `Instant` / `LocalDateTime` / `ZoneId` in the encoder); the repo-wide minSdk is 28, where it is available without desugaring. The public surface still carries `PassInstant`, not `java.time` types; a non-JVM target would need `expect`/`actual` for the two `java.time` call sites.
 
 ### D5. `ParserConfig` defaults are lenient on trust, restrictive on resources
 
@@ -157,6 +159,12 @@ entry names without a new `TelemetryGuard` method. No bundle event is added to
 a name, path, or bytes field to `BundleReadResult` or `BundleRejection` is a
 security-policy change, not an API addition.
 
+### D8. `PassEncoder` writes an unsigned archive; it never writes a `signature`
+
+`PassEncoder.encode(pass, config)` (added 2026-09-08, bead `wpass-59i.4`) turns a parsed `Pass` back into a `.pkpass` containing `pass.json`, `manifest.json`, the top-level role images, and one `<tag>.lproj/pass.strings` per locale. It returns `PassEncodeResult`, a sealed interface: `Success(bytes)`, `LimitExceeded(ResourceLimit)`, `InvalidLocaleTag` (payload-free, so no pass-derived text reaches `toString`; only a hand-built `Pass` can trip it). It exists for rows stored before ADR 0002 D3 retained archive bytes (`pass_archives`, schema v8, `wpass-59i.1`; at-rest consequences in ADR 0002 D9); a pass whose original bytes exist is exported byte-exact and never re-encoded.
+
+Rationale: Walt's export container requires every pass entry to be a `.pkpass`, and a JSON projection of the model would be a second, Walt-only pass shape with its own parser, which the parallel-implementation rule forbids. The encoder is lossy by construction (it emits only what `Pass` keeps; `passTypeIdentifier`, `teamIdentifier`, `webServiceURL`, `authenticationToken`, `nfc`, extra barcodes and localized images are absent; lone surrogates in any string field become `?` on encode) and Walt's parser requires none of the dropped keys. `manifest.json` is written because the parser rejects an archive without one and rejects entries it does not list; it is the SHA-1 integrity index, not provenance (D2). No `signature` is ever written, so re-import is `SignatureStatus.Unsigned` under the default policy and `Tampered(SignatureCryptoFailure)` under `Strict`: nothing the kernel produces can be mistaken for issuer-signed. Output is checked against the same `ParserConfig` the parser enforces before it is returned, and is byte-deterministic for an equal `Pass` on the same device (fixed entry order, sorted keys, fixed local-calendar timestamp; deflate output can differ across zlib versions) so a consumer can hash it.
+
 ### Tests pinning this addendum
 
 | Decision | Test |
@@ -168,3 +176,8 @@ security-policy change, not an API addition.
 | D5 (typed failures) | `PassBundleReaderTest.invalidUtf8EntryNameIsATypedRejectionNotAThrow`; `PassBundleReaderSourceTest.callerStreamThatThrowsOnFirstReadIsATypedRejection`, `callerStreamThatDiesMidStreamIsSourceUnreadableAfterEarlierEntriesWereDelivered` |
 | D5 (extractor hardenings) | `SafeArchiveExtractorTest.directoryEntryPayloadIsChargedAgainstTheEntrySizeLimit`, `streamThatThrowsOnFirstReadIsMalformedNotAThrow` |
 | D7 (drift) | `PassBundleSurfaceTest.bundleConfigDefaultsAreConservative`, `limitFromReadsTheMatchingConfigField`, `bundleRejectionFlattensToADistinctFailureReasonPerArm`, `mimeAndExtensionConstantsAreApples` |
+| D8 (no signature) | `PassEncoderTest.outputCarriesNoSignatureAndStrictModeRefusesIt` |
+| D8 (round trip) | `PassEncoderTest.roundTripPreservesEveryModelFieldTheKernelKeeps`, `roundTripHoldsForEveryPassStyle`, `outputOmitsIssuerIdentifiersAndTheParserDoesNotRequireThem` |
+| D8 (limits) | `PassEncoderTest.everyParserLimitIsHonouredBeforeBytesAreReturned`, `outputAtTheDefaultConfigIsAcceptedAtTheSameConfig` |
+| D8 (determinism) | `PassEncoderTest.encodeIsByteIdenticalForEqualPassesRegardlessOfMapOrderOrTimeZone`, `localHeadersCarryNoExtraFieldAndAFixedDosTimestamp`, `entryOrderIsFixed` |
+| D8 (drift) | `PassEncoderTest.invertedNameTablesCoverEveryEnumValue` |

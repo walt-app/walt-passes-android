@@ -357,7 +357,7 @@ private fun lprojStringsLocaleOrNull(name: String): String? {
     return locale.takeUnless { it.isEmpty() || '/' in it }
 }
 
-private val ROLE_BY_BASENAME: Map<String, ImageRole> =
+internal val ROLE_BY_BASENAME: Map<String, ImageRole> =
     mapOf(
         "logo.png" to ImageRole.Logo,
         "logo@2x.png" to ImageRole.LogoRetina,
@@ -388,5 +388,5 @@ private val ROLE_BY_BASENAME: Map<String, ImageRole> =
 private typealias LocaleMap = Map<`is`.walt.passes.core.PassLocale, `is`.walt.passes.core.LocalizedStrings>
 
 private const val PNG_EXTENSION = ".png"
-private const val LPROJ_STRINGS_SUFFIX = ".lproj/pass.strings"
+internal const val LPROJ_STRINGS_SUFFIX = ".lproj/pass.strings"
 private const val NANOS_PER_MILLI = 1_000_000L

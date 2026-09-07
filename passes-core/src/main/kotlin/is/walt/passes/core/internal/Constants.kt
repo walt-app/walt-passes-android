@@ -11,3 +11,10 @@ internal const val SIGNATURE_FILE_NAME: String = "signature"
 
 /** See [SIGNATURE_FILE_NAME] — same rationale, applied to `manifest.json`. */
 internal const val MANIFEST_FILE_NAME: String = "manifest.json"
+
+/** The manifest digest the verifier checks and the writer emits. */
+internal const val SHA1_ALGORITHM: String = "SHA-1"
+
+/** Bit positions of the packed 24-bit [`is`.walt.passes.core.ColorValue], shared by reader and writer. */
+internal const val RED_SHIFT: Int = 16
+internal const val GREEN_SHIFT: Int = 8

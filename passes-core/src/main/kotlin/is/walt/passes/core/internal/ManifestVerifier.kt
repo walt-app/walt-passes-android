@@ -160,5 +160,4 @@ private sealed interface ManifestParse {
     data class Failed(val failure: ManifestFailure) : ManifestParse
 }
 
-private const val SHA1_ALGORITHM = "SHA-1"
 private const val SHA1_HEX_LENGTH = 40
