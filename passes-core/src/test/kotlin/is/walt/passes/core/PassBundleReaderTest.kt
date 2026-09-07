@@ -3,7 +3,6 @@ package `is`.walt.passes.core
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.internal.LOCAL_HEADER_FIXED_LENGTH
 import `is`.walt.passes.core.internal.OpenTrackingInputStream
-import `is`.walt.passes.core.internal.ThrowingInputStream
 import `is`.walt.passes.core.internal.buildArchive
 import `is`.walt.passes.core.internal.buildArchiveWithDuplicateEntry
 import `is`.walt.passes.core.internal.corruptFirstNameByte
@@ -434,20 +433,6 @@ class PassBundleReaderTest {
     }
 
     @Test
-    fun callerStreamThatThrowsOnFirstReadIsATypedRejection() {
-        val sink = RecordingSink()
-        val result = PassBundleReader.create().read(PassSource.Stream(ThrowingInputStream()), sink)
-        assertThat(result).isEqualTo(
-            BundleReadResult.Rejected(
-                BundleRejection.SourceUnreadable,
-                accepted = 0,
-                skipped = 0,
-            ),
-        )
-        assertThat(sink.names).isEmpty()
-    }
-
-    @Test
     fun nonAsciiEntryNameSniffsAsBundleAndIsDeliveredVerbatim() {
         val zip = buildArchive { entry("billet-\u00e9.pkpass", "x".toByteArray()) }
         assertThat(sniffPassBundle(zip)).isEqualTo(PassBundleSniff.Bundle)
@@ -675,7 +660,7 @@ class PassBundleReaderTest {
 private const val PARTIAL_HEADER_BYTES = 10
 
 /** Records every entry the reader hands over; optionally stops after [stopAfter] entries. */
-private class RecordingSink(private val stopAfter: Int = Int.MAX_VALUE) : BundleEntrySink {
+internal class RecordingSink(private val stopAfter: Int = Int.MAX_VALUE) : BundleEntrySink {
     val names = mutableListOf<String>()
     val ordinals = mutableListOf<Int>()
     val acceptedBytes = LinkedHashMap<String, ByteArray>()

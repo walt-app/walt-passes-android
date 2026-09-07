@@ -138,3 +138,13 @@ internal class OpenTrackingInputStream(private val delegate: InputStream) : Inpu
 internal class ThrowingInputStream : InputStream() {
     override fun read(): Int = throw IOException("stream unavailable")
 }
+
+/** A caller stream that serves [limit] bytes of [bytes] and then fails, e.g. a provider dying mid-read. */
+internal class DyingInputStream(private val bytes: ByteArray, private val limit: Int) : InputStream() {
+    private var position = 0
+
+    override fun read(): Int {
+        if (position >= limit) throw IOException("stream died")
+        return bytes[position++].toInt() and 0xFF
+    }
+}

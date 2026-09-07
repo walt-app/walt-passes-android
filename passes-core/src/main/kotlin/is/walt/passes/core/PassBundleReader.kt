@@ -86,7 +86,8 @@ public enum class BundleVisit {
  * One file entry of the outer ZIP. [ordinal] is the 0-based position among file entries
  * (accepted and skipped alike; directory entries take no ordinal), so a consumer can bind
  * `(ordinal, name)` across two reads of the same file. [name] is attacker-controlled text
- * from the archive: never log it or send it to telemetry.
+ * from the archive: never log it, send it to telemetry, or use it as a path or display
+ * string without sanitizing.
  */
 public sealed interface BundleEntry {
     public val name: String
