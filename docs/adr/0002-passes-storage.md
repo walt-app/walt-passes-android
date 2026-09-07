@@ -123,7 +123,7 @@ Two consumer postures are valid and the assertion accepts both:
 1. **Inherit.** The consumer lets the library's manifest contributions reach the merged manifest unchanged. `ApplicationInfo.fullBackupContent` and `ApplicationInfo.dataExtractionRulesRes` then reference `walt_passes_backup_rules` and `walt_passes_data_extraction_rules` directly.
 2. **Mirror.** The consumer overrides the library contributions with `tools:replace="android:fullBackupContent,android:dataExtractionRules"` and points the manifest at a consumer-owned XML resource that mirrors the library's required `<exclude>` entries (and optionally adds its own). Walt-android takes this posture so it can manage backup posture for the whole app from a single resource.
 
-The assertion validates by content, not resource identity. It opens whichever XML resource the merged manifest points at and checks that every entry in `BackupRulesAssertion.REQUIRED_EXCLUDES` is present in every backup-relevant section of that resource (`<full-backup-content>` for the API 23 - 30 path; both `<cloud-backup>` and `<device-transfer>` for the API 31+ path). Consumers may add additional excludes; only the pass-related entries are required for the trust claim. Setting `android:allowBackup="false"` app-wide trivially satisfies the claim and short-circuits the assertion.
+The assertion validates by content, not resource identity. It opens whichever XML resource the merged manifest points at and checks that every entry in `BackupRulesContract.REQUIRED_EXCLUDES` is present in every backup-relevant section of that resource (`<full-backup-content>` for the API 23 - 30 path; both `<cloud-backup>` and `<device-transfer>` for the API 31+ path). Consumers may add additional excludes; only the pass-related entries are required for the trust claim. Setting `android:allowBackup="false"` app-wide trivially satisfies the claim and short-circuits the assertion.
 
 ### D6. Deletion is items 1+3+4+5+6 from `decision-wlt-0tn-q3-4`
 
@@ -216,7 +216,8 @@ The raw DB key bytes are zeroed in the `PassKeyProvider` after they are handed t
 
 Tracks: `wpass-59i.1` (retention, PR #236) and `wpass-59i.3` (this addendum)
 under parent epic `wpass-59i`; consumer epic walt-android `wlt-lasc`. D3's
-table count and D6's cascade list were updated when the code landed; the at-rest
+table count and D6's cascade list were updated when the code landed, and the D3 DDL
+is added here; the at-rest
 decision itself is recorded here. The rest of the ADR stands as written.
 
 ### D9. The original `.pkpass` is retained verbatim, readable only by the export path
@@ -229,9 +230,10 @@ and re-import runs the real signature check, instead of carrying trust state in
 a backup file.
 
 **What this adds at rest.** `StoredPass` is a lossy parse. The sidecar is not:
-it holds the whole `pass.json`, including every key the parser reads and
-discards (`webServiceURL`, `authenticationToken`, `nfc`, `personalization`,
-and keys it never models), plus `manifest.json` and the PKCS#7 `signature`.
+it holds the entire archive, images included, and with it the whole `pass.json`,
+including every key the parser reads and discards (`webServiceURL`,
+`authenticationToken`, `nfc`, `personalization`, and keys it never models),
+plus `manifest.json` and the PKCS#7 `signature`.
 `authenticationToken` is a per-pass bearer credential for the issuer's update
 service; before v8 the database never held it.
 

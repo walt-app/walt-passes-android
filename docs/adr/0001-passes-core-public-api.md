@@ -63,7 +63,7 @@ Rationale: walt-android imports this module directly. A removed `public` modifie
 
 ## Open follow-ups
 
-- `wpass-epb` does not implement parsing; the `PassParser.create()` factory currently throws `NotImplementedError`. The implementation bead picks up here.
+- Resolved: `wpass-epb` left `PassParser.create()` throwing `NotImplementedError`; the implementation bead landed the parser this ADR now describes.
 - Whether `BarcodeFormat` should include `Code128` is settled here as "yes" (consumer support is trivial and walt-android already renders it for non-pass barcodes); revisit if it complicates renderer surface area.
 - Cert-chain trust anchors (which Apple WWDR roots ship in the parser, how they rotate) are deferred to the implementation bead's design notes.
 
