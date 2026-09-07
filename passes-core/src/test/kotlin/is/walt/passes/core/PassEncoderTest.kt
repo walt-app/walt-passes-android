@@ -63,7 +63,7 @@ class PassEncoderTest {
         val dosTime = bytes.u16(LOCAL_HEADER_TIME_OFFSET)
         val dosDate = bytes.u16(LOCAL_HEADER_DATE_OFFSET)
         val extraLength = bytes.u16(LOCAL_HEADER_EXTRA_LENGTH_OFFSET)
-        assertThat(dosTime).isEqualTo(0)
+        assertThat(dosTime).isEqualTo(DOS_TIME_NOON)
         assertThat(dosDate).isEqualTo(DOS_DATE_1980_01_02)
         assertThat(extraLength).isEqualTo(0)
     }
@@ -146,12 +146,12 @@ class PassEncoderTest {
         val pass = parse(richArchive()).pass
         for (tag in listOf("", "en/US", "en\\US", "C:", "en\uD83D")) {
             val result = PassEncoder.encode(pass.copy(locales = mapOf(PassLocale(tag) to LocalizedStrings.Empty)))
-            assertThat(result).isEqualTo(PassEncodeResult.InvalidLocaleTag(tag))
+            assertThat(result).isEqualTo(PassEncodeResult.InvalidLocaleTag)
         }
     }
 
     @Test
-    fun everyParserLimitIsHonouredBeforeBytesAreProduced() {
+    fun everyParserLimitIsHonouredBeforeBytesAreReturned() {
         val pass = parse(richArchive()).pass
         val giant = SyntheticPkpass.fakePng(widthDeclared = 4_097, heightDeclared = 4_096)
         val shortStrings = ParserConfig(maxJsonStringBytes = 32)
@@ -270,6 +270,9 @@ class PassEncoderTest {
 private const val LOCAL_HEADER_TIME_OFFSET = 10
 private const val LOCAL_HEADER_DATE_OFFSET = 12
 private const val LOCAL_HEADER_EXTRA_LENGTH_OFFSET = 28
+
+/** DOS time bits: hour shl 11, minute shl 5, second / 2. */
+private const val DOS_TIME_NOON = 12 shl 11
 
 /** DOS date bits: (year - 1980) shl 9, month shl 5, day. */
 private const val DOS_DATE_1980_01_02 = 1 shl 5 or 2

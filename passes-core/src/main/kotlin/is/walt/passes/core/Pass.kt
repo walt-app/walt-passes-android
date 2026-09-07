@@ -55,7 +55,8 @@ public enum class PassType {
 /**
  * RGB color triplet sourced from the pass.json `foregroundColor` / `backgroundColor` /
  * `labelColor` fields. The parser normalizes both `rgb(R,G,B)` and `#RRGGBB` forms into a
- * single 24-bit packed integer before producing this value.
+ * single 24-bit packed integer before producing this value. The upper byte is ignored by
+ * the encoder, which masks to 24 bits.
  */
 @JvmInline
 public value class ColorValue(public val rgb: Int)

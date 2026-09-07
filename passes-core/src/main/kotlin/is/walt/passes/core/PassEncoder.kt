@@ -9,8 +9,8 @@ import `is`.walt.passes.core.internal.writePassArchive
  * policy and as `Tampered(SignatureCryptoFailure)` under [ParserConfig.Strict].
  *
  * Only the fields [Pass] keeps are emitted. The output is checked against [config]
- * before it is returned ([PassEncodeResult.LimitExceeded] names the limit the parser
- * would have tripped) and is byte-identical for an equal [Pass] on the same device.
+ * before it is returned ([PassEncodeResult.LimitExceeded] names a limit the parser
+ * would trip) and is byte-identical for an equal [Pass] on the same device.
  * Rationale and scope: ADR 0001 D8.
  */
 public object PassEncoder {
@@ -31,6 +31,8 @@ public sealed interface PassEncodeResult {
     /**
      * A [PassLocale.tag] cannot name a `<tag>.lproj/` directory the parser's path rules
      * accept (empty, contains a separator, looks like a drive letter, or is not valid UTF-16).
+     * Payload-free so no pass-derived text reaches `toString`; only a hand-built [Pass] can
+     * trip it, since the parser derives every tag from an entry name it already accepted.
      */
-    public data class InvalidLocaleTag(public val tag: String) : PassEncodeResult
+    public data object InvalidLocaleTag : PassEncodeResult
 }

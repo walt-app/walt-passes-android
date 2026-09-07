@@ -29,7 +29,7 @@ internal fun writePassArchive(
     config: ParserConfig,
 ): PassEncodeResult {
     val badTag = pass.locales.keys.firstOrNull { !isSafeLocaleTag(it.tag) }
-    if (badTag != null) return PassEncodeResult.InvalidLocaleTag(badTag.tag)
+    if (badTag != null) return PassEncodeResult.InvalidLocaleTag
     val members = LinkedHashMap<String, ByteArray>()
     members[PASS_JSON_FILE_NAME] = encodePassJson(pass)
     for ((role, image) in pass.images.entries.sortedBy { it.key.ordinal }) {
@@ -38,25 +38,26 @@ internal fun writePassArchive(
     for ((locale, strings) in pass.locales.entries.sortedBy { it.key.tag }) {
         members["${locale.tag}$LPROJ_STRINGS_SUFFIX"] = encodeStrings(strings)
     }
-    val limit =
-        jsonLimit(members.getValue(PASS_JSON_FILE_NAME), config)
-            ?: imageLimit(pass, config)
-            ?: stringsLimit(pass, config)
-    return limit?.let { PassEncodeResult.LimitExceeded(it) } ?: zipWithinCaps(members, config)
-}
-
-/** Fixed order: pass.json, manifest.json, images by role, strings by tag. */
-private fun zipWithinCaps(
-    members: Map<String, ByteArray>,
-    config: ParserConfig,
-): PassEncodeResult {
+    // Fixed order: pass.json, manifest.json, images by role, strings by tag.
     val ordered =
         linkedMapOf(
             PASS_JSON_FILE_NAME to members.getValue(PASS_JSON_FILE_NAME),
             MANIFEST_FILE_NAME to encodeManifest(members),
         ) + (members - PASS_JSON_FILE_NAME)
-    val limit = entryLimit(ordered, config)
-    if (limit != null) return PassEncodeResult.LimitExceeded(limit)
+    // Parser order, so the first limit named here is the first the parser would trip.
+    val limit =
+        entryLimit(ordered, config)
+            ?: jsonLimit(members.getValue(PASS_JSON_FILE_NAME), config)
+            ?: stringsLimit(pass, config)
+            ?: imageLimit(pass, config)
+    return limit?.let { PassEncodeResult.LimitExceeded(it) } ?: zipWithinArchiveCap(ordered, config)
+}
+
+/** ArchiveSize is the one limit only known after the zip exists, so it is checked last. */
+private fun zipWithinArchiveCap(
+    ordered: Map<String, ByteArray>,
+    config: ParserConfig,
+): PassEncodeResult {
     val bytes = zip(ordered)
     return if (bytes.size > config.maxArchiveBytes) {
         PassEncodeResult.LimitExceeded(ResourceLimit.ArchiveSize)
@@ -130,7 +131,7 @@ private fun encodeManifest(members: Map<String, ByteArray>): ByteArray {
     return Json.encodeToString(JsonObject.serializer(), root).toByteArray(Charsets.UTF_8)
 }
 
-/** Manual loop: `java.util.HexFormat` is API 34 on Android and is not desugared (wpass-g00). */
+/** Manual loop: `java.util.HexFormat` is API 34 on Android and is not desugared. */
 private fun toHex(bytes: ByteArray): String =
     buildString(bytes.size * 2) {
         for (b in bytes) {
@@ -153,11 +154,11 @@ private fun zip(members: Map<String, ByteArray>): ByteArray {
 }
 
 /**
- * Local-calendar 1980-01-02 gives zone-independent DOS fields and avoids the
- * `DOSTIME_BEFORE_1980` sentinel that older `ZipEntry.setTime` turns into a zone-dependent extra field.
+ * Local-calendar 1980-01-02 12:00 gives zone-independent DOS fields clear of DST transitions and
+ * avoids the `DOSTIME_BEFORE_1980` sentinel that older `ZipEntry.setTime` turns into a zone-dependent extra field.
  */
 private fun fixedEntryTimeMillis(): Long =
-    LocalDateTime.of(DOS_EPOCH_YEAR, 1, FIXED_ENTRY_DAY, 0, 0)
+    LocalDateTime.of(DOS_EPOCH_YEAR, 1, FIXED_ENTRY_DAY, FIXED_ENTRY_HOUR, 0)
         .atZone(ZoneId.systemDefault())
         .toInstant()
         .toEpochMilli()
@@ -168,3 +169,4 @@ private const val HEX_DIGITS = "0123456789abcdef"
 private const val NIBBLE_MASK = 0x0F
 private const val DOS_EPOCH_YEAR = 1980
 private const val FIXED_ENTRY_DAY = 2
+private const val FIXED_ENTRY_HOUR = 12
