@@ -1,6 +1,7 @@
 package `is`.walt.passes.storage
 
 import `is`.walt.passes.core.Pass
+import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.PassInstant
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.ScannableCard
@@ -32,26 +33,37 @@ public interface PassRepository {
      * [PassRecordId] in [StorageResult.Success.value].
      *
      * [archiveBytes] is the ORIGINAL `.pkpass` archive [pass] was parsed from, retained
-     * verbatim in the `pass_archives` sidecar so [loadArchiveBytes] can hand it back
-     * byte-exact (export, re-import with a real signature check). The repository stores
-     * a copy: mutating the array after the call does not reach the stored bytes. It is
-     * never parsed, sniffed, or decoded here, and no other kernel path reads it. The caller
-     * already holds these bytes (it just parsed them); a stream-parsed import must be
-     * buffered first, bounded by `ParserConfig.maxArchiveBytes` the same way the parser
-     * bounds it.
+     * verbatim in the `pass_archives` sidecar for [loadArchiveBytes]. Stored as a copy and
+     * never parsed, sniffed, or decoded here. On replacement the image, locale, and archive
+     * rows are all swapped atomically in one transaction. At rest this now includes
+     * `webServiceURL` / `authenticationToken` where present, under the same SQLCipher +
+     * Keystore envelope and Auto Backup exclusion (ADR 0002; amendment tracked separately).
      *
-     * At-rest consequence: the archive carries everything the parser drops, including
-     * `webServiceURL` and `authenticationToken` where present. Same SQLCipher file, same
-     * Keystore-wrapped key, same Auto Backup exclusion (ADR 0002, amended for wpass-59i).
-     *
-     * On replacement the existing image, locale, and archive rows are atomically replaced
-     * inside the same transaction. The decoded summary is recomputed from [pass]; callers
-     * do not pass a separate summary.
+     * Defense in depth, mirroring [insertDocument]: rejects an empty archive with
+     * [PassUpdateRejectedKind.ArchiveEmpty] and one larger than
+     * [PassArchiveBounds.MAX_BYTES] with [PassUpdateRejectedKind.ArchiveOversized], as
+     * [StorageError.PassRejected]; nothing is written on rejection.
      */
     public suspend fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
         archiveBytes: ByteArray,
+    ): StorageResult<PassRecordId>
+
+    /**
+     * Legacy form of [upsert] for a caller that genuinely lacks the archive bytes (a
+     * one-shot stream parse). Stores NO sidecar row, and on replacement drops any archive
+     * a prior import retained, since the model may have changed. Rows written this way
+     * return `Success(null)` from [loadArchiveBytes] and can only export as a regenerated,
+     * unsigned archive. Retained only until walt-android's call sites migrate (wlt-lasc).
+     */
+    @Deprecated(
+        message = "Pass the original archive bytes: upsert(pass, signatureStatus, archiveBytes).",
+        replaceWith = ReplaceWith("upsert(pass, signatureStatus, archiveBytes)"),
+    )
+    public suspend fun upsert(
+        pass: Pass,
+        signatureStatus: SignatureStatus,
     ): StorageResult<PassRecordId>
 
     /**
@@ -343,6 +355,15 @@ public data class StoredPass(
  */
 public object PassUserLabelBounds {
     public const val MAX_USER_LABEL_CHARS: Int = 100
+}
+
+/**
+ * Defensive cap `passes-storage` enforces on the retained archive in [PassRepository.upsert].
+ * Same figure the parser applies (`ParserConfig.maxArchiveBytes` default), carried again
+ * here so a future caller bug cannot land an oversized sidecar row.
+ */
+public object PassArchiveBounds {
+    public const val MAX_BYTES: Long = ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES
 }
 
 /**

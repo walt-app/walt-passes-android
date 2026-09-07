@@ -19,10 +19,14 @@ internal interface PassStore {
     fun listSummaries(): List<PassSummary>
     fun loadById(id: PassRecordId): StoredPass?
     fun summaryById(id: PassRecordId): PassSummary?
+    /**
+     * [archiveBytes] `null` (deprecated two-arg repository overload) writes no sidecar row;
+     * a replace still drops any archive a prior import retained.
+     */
     fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
-        archiveBytes: ByteArray,
+        archiveBytes: ByteArray?,
         nowEpochMs: Long,
     ): UpsertOutcome
     fun delete(id: PassRecordId): DeleteOutcome?
@@ -59,7 +63,10 @@ internal data class UpdateUserLabelOutcome(
     val hadPriorLabel: Boolean,
 )
 
-/** [bytes] is `null` for a legacy pass row that has no `pass_archives` sidecar row. */
+/**
+ * [bytes] is `null` for a legacy pass row that has no `pass_archives` sidecar row.
+ * A plain class, not a data class, to avoid detekt's `ArrayInDataClass`.
+ */
 internal class ArchiveBytesOutcome(
     val bytes: ByteArray?,
 )

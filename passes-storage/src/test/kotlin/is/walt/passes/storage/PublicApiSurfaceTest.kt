@@ -2,6 +2,7 @@ package `is`.walt.passes.storage
 
 import `is`.walt.passes.core.EncoderFailureReason
 import `is`.walt.passes.core.LabelRejection
+import `is`.walt.passes.core.ParserConfig
 import `is`.walt.passes.core.PassType
 import `is`.walt.passes.core.PayloadRejection
 import `is`.walt.passes.core.ScannableFormat
@@ -194,12 +195,20 @@ class PublicApiSurfaceTest {
 
     @Test
     fun passUpdateRejectedKindCoversTheDocumentedArms() {
-        // ADR 0007 D2: today there is one arm (LabelTooLong). Adding new caps (e.g.
-        // illegal-character filters) requires a new arm here, which forces a deliberate
-        // edit and a matching change in StorageError.PassRejected handling.
+        // LabelTooLong: ADR 0007 D2 rename cap. ArchiveEmpty / ArchiveOversized: the
+        // upsert archive cap (wpass-59i.1). Adding a cap requires a new arm here, which
+        // forces a deliberate edit and a matching change in PassRejected handling.
         assertThat(PassUpdateRejectedKind.entries.map { it.name }).containsExactly(
             "LabelTooLong",
+            "ArchiveEmpty",
+            "ArchiveOversized",
         ).inOrder()
+    }
+
+    @Test
+    fun passArchiveBoundsMirrorTheParserArchiveCap() {
+        assertThat(PassArchiveBounds.MAX_BYTES).isEqualTo(ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES)
+        assertThat(PassArchiveBounds.MAX_BYTES).isEqualTo(10L * 1024 * 1024)
     }
 
     @Test

@@ -464,6 +464,98 @@ class PassRepositoryContractTest {
         assertThat(store.archiveReads).isEqualTo(1)
     }
 
+    @Suppress("DEPRECATION")
+    @Test
+    fun legacyTwoArgUpsertStoresNoArchiveAndReadsBackNull() = runTest {
+        val store = FakePassStore()
+        val telemetry = RecordingGuard()
+        val repo = newRepo(store, telemetry)
+
+        val id = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified)
+            as StorageResult.Success).value
+
+        assertThat(store.archiveCount).isEqualTo(0)
+        val loaded = repo.loadArchiveBytes(id)
+        check(loaded is StorageResult.Success)
+        assertThat(loaded.value).isNull()
+        assertThat(telemetry.events).containsExactly(
+            "init:StrongBox",
+            "upsert:BoardingPass:AppleVerified:false",
+        ).inOrder()
+    }
+
+    @Suppress("DEPRECATION")
+    @Test
+    fun legacyTwoArgUpsertReplacingARetainedRowDropsTheOldArchive() = runTest {
+        // The model may have changed under the same identity: a stale archive must not
+        // outlive the import that replaced it.
+        val store = FakePassStore()
+        val repo = newRepo(store)
+        val id = (repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, sampleArchive())
+            as StorageResult.Success).value
+
+        val replaced = repo.upsert(samplePass(serial = "S1"), SignatureStatus.SelfSigned)
+        check(replaced is StorageResult.Success)
+        assertThat(replaced.value).isEqualTo(id)
+
+        assertThat(store.archiveCount).isEqualTo(0)
+        val loaded = repo.loadArchiveBytes(id)
+        check(loaded is StorageResult.Success)
+        assertThat(loaded.value).isNull()
+    }
+
+    @Test
+    fun upsertRejectsAnEmptyArchiveBeforeWritingAnything() = runTest {
+        val store = FakePassStore()
+        val telemetry = RecordingGuard()
+        val repo = newRepo(store, telemetry)
+
+        val result = repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, ByteArray(0))
+
+        check(result is StorageResult.Failure)
+        assertThat(result.error).isEqualTo(StorageError.PassRejected(PassUpdateRejectedKind.ArchiveEmpty))
+        assertThat(repo.passes.value).isEmpty()
+        assertThat(store.listSummaries()).isEmpty()
+        assertThat(store.archiveCount).isEqualTo(0)
+        // onPassRejected fires; neither onPassUpserted nor onStorageFailure does.
+        assertThat(telemetry.events).containsExactly(
+            "init:StrongBox",
+            "pass-rejected:ArchiveEmpty",
+        ).inOrder()
+    }
+
+    @Test
+    fun upsertRejectsAnOversizedArchiveBeforeWritingAnything() = runTest {
+        val store = FakePassStore()
+        val telemetry = RecordingGuard()
+        val repo = newRepo(store, telemetry)
+
+        val oversized = ByteArray(PassArchiveBounds.MAX_BYTES.toInt() + 1)
+        val result = repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, oversized)
+
+        check(result is StorageResult.Failure)
+        assertThat(result.error).isEqualTo(StorageError.PassRejected(PassUpdateRejectedKind.ArchiveOversized))
+        assertThat(repo.passes.value).isEmpty()
+        assertThat(store.listSummaries()).isEmpty()
+        assertThat(store.archiveCount).isEqualTo(0)
+        assertThat(telemetry.events).containsExactly(
+            "init:StrongBox",
+            "pass-rejected:ArchiveOversized",
+        ).inOrder()
+    }
+
+    @Test
+    fun upsertAcceptsAnArchiveExactlyAtTheCap() = runTest {
+        val store = FakePassStore()
+        val repo = newRepo(store)
+
+        val atCap = ByteArray(PassArchiveBounds.MAX_BYTES.toInt())
+        val result = repo.upsert(samplePass(serial = "S1"), SignatureStatus.AppleVerified, atCap)
+
+        check(result is StorageResult.Success)
+        assertThat(store.archiveCount).isEqualTo(1)
+    }
+
     @Test
     fun deleteDropsTheRetainedArchiveWithThePass() = runTest {
         val store = FakePassStore()
@@ -527,7 +619,7 @@ class PassRepositoryContractTest {
         override fun upsert(
             pass: Pass,
             signatureStatus: SignatureStatus,
-            archiveBytes: ByteArray,
+            archiveBytes: ByteArray?,
             nowEpochMs: Long,
         ): UpsertOutcome {
             val existing = summaries.values.firstOrNull {
@@ -557,8 +649,9 @@ class PassRepositoryContractTest {
                 createdAt = createdAt,
                 updatedAt = PassInstant(nowEpochMs),
             )
-            // Value semantics, like a BLOB column: the caller's array is never aliased.
-            archives[id.value] = archiveBytes.copyOf()
+            // Value semantics, like a BLOB column: the caller's array is never aliased. A
+            // null archive (deprecated overload) drops any prior sidecar row and writes none.
+            if (archiveBytes == null) archives.remove(id.value) else archives[id.value] = archiveBytes.copyOf()
             return UpsertOutcome(
                 recordId = id,
                 summary = summary,

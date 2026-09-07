@@ -3,7 +3,6 @@ package `is`.walt.passes.storage
 import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 import java.sql.Connection
-import java.sql.DriverManager
 
 /**
  * JVM-side verification of the v7 -> v8 hop (wpass-59i.1): the `pass_archives` sidecar
@@ -21,18 +20,6 @@ import java.sql.DriverManager
  *  4. The sidecar cascades with the parent pass.
  */
 class PassArchivesMigrationTest {
-
-    private fun openV7Db(): Connection {
-        val conn = DriverManager.getConnection("jdbc:sqlite::memory:")
-        conn.createStatement().use { stmt ->
-            stmt.execute("PRAGMA foreign_keys = ON")
-            for (sql in V1_SCHEMA_SNAPSHOT) stmt.execute(sql)
-            for (from in 1 until 7) {
-                for (sql in Schema.MIGRATIONS.getValue(from)) stmt.execute(sql)
-            }
-        }
-        return conn
-    }
 
     private fun applyV7ToV8(conn: Connection) {
         conn.createStatement().use { stmt ->
@@ -68,7 +55,7 @@ class PassArchivesMigrationTest {
 
     @Test
     fun migrationFromV7IntroducesThePassArchivesSidecarTable() {
-        openV7Db().use { conn ->
+        openDbAtVersion(7).use { conn ->
             applyV7ToV8(conn)
 
             val columns = mutableSetOf<String>()
@@ -82,7 +69,7 @@ class PassArchivesMigrationTest {
 
     @Test
     fun migrationFromV7LeavesThePassesTableShapeUntouched() {
-        openV7Db().use { conn ->
+        openDbAtVersion(7).use { conn ->
             val before = passesColumns(conn)
             applyV7ToV8(conn)
             assertThat(passesColumns(conn)).isEqualTo(before)
@@ -91,7 +78,7 @@ class PassArchivesMigrationTest {
 
     @Test
     fun preexistingV7PassSurvivesMigrationToV8WithNoArchive() {
-        openV7Db().use { conn ->
+        openDbAtVersion(7).use { conn ->
             insertV7Pass(conn, id = 42L)
             conn.prepareStatement(
                 "INSERT INTO ${Schema.Tables.PASS_IMAGES} (pass_id, role, bytes) VALUES (42, 'Logo', x'00')",
@@ -124,7 +111,7 @@ class PassArchivesMigrationTest {
 
     @Test
     fun passArchivesAfterMigrationCascadesOnPassDelete() {
-        openV7Db().use { conn ->
+        openDbAtVersion(7).use { conn ->
             applyV7ToV8(conn)
             insertV7Pass(conn, id = 1L)
             conn.prepareStatement(

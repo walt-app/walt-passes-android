@@ -185,15 +185,8 @@ public object Schema {
     )
 
     /**
-     * v7 -> v8 migration. Introduces the `pass_archives` sidecar table (wpass-59i.1): the
-     * ORIGINAL `.pkpass` archive bytes retained verbatim at import, keyed 1:1 by pass id and
-     * cascade-deleted with the pass row.
-     *
-     * A sidecar rather than a column on `passes` so the list / detail / summary queries,
-     * which select from `passes` only, cannot materialize the archive by accident. Rows
-     * imported before this version have no sidecar row and no backfill is possible; they
-     * read back as `null` from `PassRepository.loadArchiveBytes`. Pure additive; no row can
-     * fail. Lives in the same SQLCipher file, so the existing Auto Backup exclusion covers it.
+     * v7 -> v8: the retained original `.pkpass` bytes (wpass-59i.1). A sidecar, not a column,
+     * so `passes`-only queries cannot materialize it; legacy rows have no sidecar row.
      */
     private val V7_TO_V8_ADD_PASS_ARCHIVES: List<String> = listOf(
         """

@@ -81,7 +81,7 @@ internal class SqlCipherPassStore(
     override fun upsert(
         pass: Pass,
         signatureStatus: SignatureStatus,
-        archiveBytes: ByteArray,
+        archiveBytes: ByteArray?,
         nowEpochMs: Long,
     ): UpsertOutcome {
         db.beginTransaction()
@@ -179,7 +179,7 @@ internal class SqlCipherPassStore(
     }
 
     /** Image, locale, and archive rows for [rowId]. Runs inside the caller's transaction. */
-    private fun insertChildren(rowId: Long, pass: Pass, archiveBytes: ByteArray) {
+    private fun insertChildren(rowId: Long, pass: Pass, archiveBytes: ByteArray?) {
         for ((role, bytes) in pass.images) {
             val cv = ContentValues().apply {
                 put("pass_id", rowId)
@@ -196,6 +196,7 @@ internal class SqlCipherPassStore(
             }
             db.insertOrThrow(Schema.Tables.PASS_LOCALES, null, cv)
         }
+        if (archiveBytes == null) return
         val archiveCv = ContentValues().apply {
             put("pass_id", rowId)
             put("bytes", archiveBytes)

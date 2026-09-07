@@ -1,5 +1,8 @@
 package `is`.walt.passes.storage
 
+import java.sql.Connection
+import java.sql.DriverManager
+
 /**
  * Snapshot of the v1 schema. Hard-coded so migration tests see the *historical* shape,
  * not whatever the current [Schema.DDL] happens to declare. Shared by every migration
@@ -50,3 +53,19 @@ internal val V1_SCHEMA_SNAPSHOT: List<String> = listOf(
     )
     """.trimIndent(),
 )
+
+/**
+ * Opens an in-memory SQLite database (foreign keys ON) at historical schema [version]:
+ * [V1_SCHEMA_SNAPSHOT] plus every migration hop below [version], in order.
+ */
+internal fun openDbAtVersion(version: Int): Connection {
+    val conn = DriverManager.getConnection("jdbc:sqlite::memory:")
+    conn.createStatement().use { stmt ->
+        stmt.execute("PRAGMA foreign_keys = ON")
+        for (sql in V1_SCHEMA_SNAPSHOT) stmt.execute(sql)
+        for (from in 1 until version) {
+            for (sql in Schema.MIGRATIONS.getValue(from)) stmt.execute(sql)
+        }
+    }
+    return conn
+}

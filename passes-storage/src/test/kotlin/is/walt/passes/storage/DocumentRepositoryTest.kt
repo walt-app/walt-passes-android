@@ -6,6 +6,7 @@ import `is`.walt.passes.core.Pass
 import `is`.walt.passes.core.ScannableCard
 import `is`.walt.passes.core.ScannableFormat
 import `is`.walt.passes.core.SignatureStatus
+import `is`.walt.passes.storage.internal.ArchiveBytesOutcome
 import `is`.walt.passes.storage.internal.DeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentDeleteOutcome
 import `is`.walt.passes.storage.internal.DocumentInsertOutcome
@@ -707,13 +708,11 @@ class DocumentRepositoryTest {
         override fun upsert(
             pass: Pass,
             signatureStatus: SignatureStatus,
-            archiveBytes: ByteArray,
+            archiveBytes: ByteArray?,
             nowEpochMs: Long,
         ): UpsertOutcome = error("unused in document tests")
         override fun delete(id: PassRecordId): DeleteOutcome? = null
-        override fun loadArchiveBytes(
-            id: PassRecordId,
-        ): `is`.walt.passes.storage.internal.ArchiveBytesOutcome? = null
+        override fun loadArchiveBytes(id: PassRecordId): ArchiveBytesOutcome? = null
         override fun updateUserLabel(
             id: PassRecordId,
             label: String?,
