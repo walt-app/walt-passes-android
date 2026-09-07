@@ -126,4 +126,28 @@ internal class ArchiveSizeExceededException : IOException()
 internal const val READ_BUFFER_SIZE: Int = 8 * 1024
 private const val MAGIC_PREFIX_LENGTH = 4
 internal val LOCAL_FILE_HEADER_MAGIC: ByteArray = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+private const val LOCAL_HEADER_FIXED_LENGTH = 30
+private const val LOCAL_HEADER_NAME_LENGTH_OFFSET = 26
 private val END_OF_CENTRAL_DIR_MAGIC = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
+
+/**
+ * Name of the first local file header in [header], or null when the bytes do not start
+ * with `PK\x03\x04`, declare an empty name, or are too short to hold the whole name.
+ * Decoded as ISO-8859-1: the caller only inspects an ASCII suffix, and a byte-preserving
+ * decode cannot throw on a hostile name.
+ */
+internal fun sniffFirstLocalHeaderName(header: ByteArray): String? {
+    if (header.size < LOCAL_HEADER_FIXED_LENGTH || !hasLocalFileHeaderMagic(header)) return null
+    val low = header[LOCAL_HEADER_NAME_LENGTH_OFFSET].toInt() and 0xFF
+    val high = header[LOCAL_HEADER_NAME_LENGTH_OFFSET + 1].toInt() and 0xFF
+    val nameLength = low or (high shl 8)
+    val end = LOCAL_HEADER_FIXED_LENGTH + nameLength
+    return if (nameLength == 0 || header.size < end) {
+        null
+    } else {
+        String(header, LOCAL_HEADER_FIXED_LENGTH, nameLength, Charsets.ISO_8859_1)
+    }
+}
+
+private fun hasLocalFileHeaderMagic(header: ByteArray): Boolean =
+    LOCAL_FILE_HEADER_MAGIC.indices.all { header[it] == LOCAL_FILE_HEADER_MAGIC[it] }

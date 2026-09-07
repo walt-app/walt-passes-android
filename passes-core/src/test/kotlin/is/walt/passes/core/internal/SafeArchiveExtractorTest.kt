@@ -285,6 +285,16 @@ class SafeArchiveExtractorTest {
     }
 
     @Test
+    fun invalidUtf8EntryNameIsMalformedNotAThrow() {
+        // EFS-flagged names decode as strict UTF-8 inside ZipInputStream, which throws
+        // IllegalArgumentException (not an IOException) on a bad byte.
+        val zip = buildArchive { entry("pass.json", "{}".toByteArray()) }
+        zip[findLocalHeaderOffset(zip) + 30] = 0xFF.toByte()
+        val result = extractSafely(PassSource.Bytes(zip), ParserConfig())
+        assertMalformed(result, MalformedReason.NotAZipArchive)
+    }
+
+    @Test
     fun emptyEntryNameIsRejected() {
         // Some zip toolchains emit a stray "" header for buggy uploaders. Reject.
         val zip = buildArchive { entry("", byteArrayOf(0)) }
@@ -376,6 +386,14 @@ private fun buildArchiveWithDuplicateEntry(
     out.write(archiveB, 0, cdBOffset)
     out.write(archiveA, cdAOffset, archiveA.size - cdAOffset)
     return out.toByteArray()
+}
+
+private fun findLocalHeaderOffset(bytes: ByteArray): Int {
+    val sig = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+    for (i in 0..bytes.size - sig.size) {
+        if (matchesAt(bytes, i, sig)) return i
+    }
+    error("no local file header found in synthetic archive")
 }
 
 private fun findCentralDirectoryOffset(bytes: ByteArray): Int {

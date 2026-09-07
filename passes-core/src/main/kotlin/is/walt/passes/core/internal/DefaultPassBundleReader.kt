@@ -12,12 +12,11 @@ import `is`.walt.passes.core.PassSource
 import java.io.BufferedInputStream
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.util.zip.ZipException
 import java.util.zip.ZipInputStream
 
 /**
- * The single [PassBundleReader] implementation. Reuses the hardened extractor's stream
- * chain verbatim (declared-size pre-check, magic sniff, [BoundedInputStream] outside the
+ * The single [PassBundleReader] implementation. Shares the extractor's stream chain (see
+ * [extractSafely]: declared-size pre-check, magic sniff, [BoundedInputStream] outside the
  * buffer, [NonClosingInputStream] for caller-owned streams) and adds the cumulative cap.
  * Stateless beyond the immutable [config]; each [read] owns one [BundleWalk].
  */
@@ -87,9 +86,10 @@ private class BundleWalk(
             nextStep(zis)
         } catch (_: ArchiveSizeExceededException) {
             Step.Rejected(BundleRejection.LimitExceeded(BundleLimit.ArchiveSize))
-        } catch (_: ZipException) {
-            Step.Rejected(BundleRejection.NotAZipArchive)
         } catch (_: IOException) {
+            Step.Rejected(BundleRejection.NotAZipArchive)
+        } catch (_: IllegalArgumentException) {
+            // ZipInputStream decodes EFS-flagged names as strict UTF-8 and throws this on a bad byte.
             Step.Rejected(BundleRejection.NotAZipArchive)
         }
 
@@ -176,28 +176,3 @@ private class BundleWalk(
         return tripped
     }
 }
-
-/**
- * Name of the first local file header in [header], or null when the bytes do not start
- * with `PK\x03\x04`, declare an empty name, or are too short to hold the whole name.
- * Decoded as ISO-8859-1: the caller only inspects an ASCII suffix, and a byte-preserving
- * decode cannot throw on a hostile name.
- */
-internal fun sniffFirstLocalHeaderName(header: ByteArray): String? {
-    if (header.size < LOCAL_HEADER_FIXED_LENGTH || !hasLocalFileHeaderMagic(header)) return null
-    val low = header[LOCAL_HEADER_NAME_LENGTH_OFFSET].toInt() and 0xFF
-    val high = header[LOCAL_HEADER_NAME_LENGTH_OFFSET + 1].toInt() and 0xFF
-    val nameLength = low or (high shl 8)
-    val end = LOCAL_HEADER_FIXED_LENGTH + nameLength
-    return if (nameLength == 0 || header.size < end) {
-        null
-    } else {
-        String(header, LOCAL_HEADER_FIXED_LENGTH, nameLength, Charsets.ISO_8859_1)
-    }
-}
-
-private fun hasLocalFileHeaderMagic(header: ByteArray): Boolean =
-    LOCAL_FILE_HEADER_MAGIC.indices.all { header[it] == LOCAL_FILE_HEADER_MAGIC[it] }
-
-private const val LOCAL_HEADER_FIXED_LENGTH = 30
-private const val LOCAL_HEADER_NAME_LENGTH_OFFSET = 26

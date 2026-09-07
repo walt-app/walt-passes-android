@@ -243,6 +243,48 @@ class PassBundleReaderTest {
     }
 
     @Test
+    fun invalidUtf8EntryNameIsATypedRejectionNotAThrow() {
+        // ZipOutputStream sets the EFS flag, so ZipInputStream decodes the name as strict
+        // UTF-8 and throws IllegalArgumentException on a bad byte instead of an IOException.
+        val zip = corruptFirstNameByte(buildArchive { entry("a.pkpass", "A".toByteArray()) })
+        val sink = RecordingSink()
+        val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 0, 0))
+        assertThat(sink.names).isEmpty()
+    }
+
+    @Test
+    fun truncationInsideALaterEntryRejectsAfterEarlierEntriesWereDelivered() {
+        val zip =
+            buildArchive {
+                entry("a.pkpass", "A".toByteArray())
+                entry("b.pkpass", ByteArray(4_096) { (it * 31).toByte() })
+            }
+        // Cut a few bytes into the second entry's deflate stream, past its local header.
+        val truncated = zip.copyOf(findNthLocalHeaderOffset(zip, 2) + 30 + "b.pkpass".length + 16)
+        val sink = RecordingSink()
+        val result = PassBundleReader.create().read(PassSource.Bytes(truncated), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 1, 0))
+        assertThat(sink.names).containsExactly("a.pkpass")
+    }
+
+    @Test
+    fun truncationInsideALaterHeaderReadsAsEndOfStream() {
+        // ZipInputStream treats a short local header as end-of-stream, so this shape
+        // completes with what came before it. Pinned so the behaviour is a known one.
+        val zip =
+            buildArchive {
+                entry("a.pkpass", "A".toByteArray())
+                entry("b.pkpass", "B".toByteArray())
+            }
+        val truncated = zip.copyOf(findNthLocalHeaderOffset(zip, 2) + 10)
+        val sink = RecordingSink()
+        val result = PassBundleReader.create().read(PassSource.Bytes(truncated), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Completed(accepted = 1, skipped = 0))
+        assertThat(sink.names).containsExactly("a.pkpass")
+    }
+
+    @Test
     fun declaredSizeOverOuterArchiveCapFailsFastWithoutReading() {
         val tracker = OpenTrackingInputStream(ByteArrayInputStream(ByteArray(0)))
         val config = BundleConfig(maxArchiveBytes = 1_024)
@@ -344,8 +386,6 @@ class PassBundleReaderTest {
         val bundle = buildArchive { entry("first.pkpass", "x".toByteArray()) }
         assertThat(sniffPassBundle(bundle.copyOf(PassBundleSniff.RECOMMENDED_HEADER_BYTES)))
             .isEqualTo(PassBundleSniff.Bundle)
-        assertThat(sniffPassBundle(buildArchive { entry("passes/1.pkpass", "x".toByteArray()) }))
-            .isEqualTo(PassBundleSniff.Bundle)
         assertThat(sniffPassBundle(buildArchive { entry("MIXED.PkPass", "x".toByteArray()) }))
             .isEqualTo(PassBundleSniff.Bundle)
     }
@@ -354,6 +394,16 @@ class PassBundleReaderTest {
     fun sniffReportsASinglePassAsNotABundle() {
         val single = buildArchive { entry("pass.json", "{}".toByteArray()) }
         assertThat(sniffPassBundle(single)).isEqualTo(PassBundleSniff.NotBundle)
+    }
+
+    @Test
+    fun sniffAppliesTheSameRootOnlyRuleAsTheDefaultAllowlist() {
+        assertThat(sniffPassBundle(buildArchive { entry("passes/1.pkpass", "x".toByteArray()) }))
+            .isEqualTo(PassBundleSniff.NotBundle)
+        assertThat(sniffPassBundle(buildArchive { entry("__MACOSX/._a.pkpass", "x".toByteArray()) }))
+            .isEqualTo(PassBundleSniff.NotBundle)
+        assertThat(sniffPassBundle(buildArchive { entry(".DS_Store", "x".toByteArray()) }))
+            .isEqualTo(PassBundleSniff.NotBundle)
     }
 
     @Test
@@ -475,6 +525,25 @@ private fun markFirstEntryAsUnixSymlink(zip: ByteArray): ByteArray {
         patched[cd + 38 + i] = (mode ushr 8 * i).toByte()
     }
     return patched
+}
+
+/** Overwrites the first byte of the first local header's name with 0xFF (never valid UTF-8). */
+private fun corruptFirstNameByte(zip: ByteArray): ByteArray {
+    val patched = zip.copyOf()
+    patched[findNthLocalHeaderOffset(zip, 1) + 30] = 0xFF.toByte()
+    return patched
+}
+
+private fun findNthLocalHeaderOffset(
+    bytes: ByteArray,
+    n: Int,
+): Int {
+    val sig = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
+    var remaining = n
+    for (i in 0..bytes.size - sig.size) {
+        if (sig.indices.all { k -> bytes[i + k] == sig[k] } && --remaining == 0) return i
+    }
+    error("fewer than $n local headers in synthetic archive")
 }
 
 private fun findCentralDirectoryOffset(bytes: ByteArray): Int {

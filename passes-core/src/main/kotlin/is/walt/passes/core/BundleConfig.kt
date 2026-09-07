@@ -6,11 +6,11 @@ package `is`.walt.passes.core
  * a larger legitimate wallet (documents alongside passes) raises them deliberately.
  *
  * [maxEntryBytes] defaults to [ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES]: an inner pass the
- * parser would refuse anyway is not worth inflating. [maxCumulativeBytes] is the new guard
- * this type exists for: the sum of every entry's decompressed bytes, accepted or skipped,
- * which no single-archive limit bounds. [maxArchiveBytes] caps the outer file's compressed
- * bytes; it defaults to the cumulative cap because a ZIP cannot usefully be larger than
- * what it inflates to.
+ * parser would refuse anyway is not worth inflating, so a consumer that raises
+ * [ParserConfig.maxArchiveBytes] must raise this too. [maxCumulativeBytes] is the new
+ * guard this type exists for: the sum of every entry's decompressed bytes, accepted or
+ * skipped, which no single-archive limit bounds. [maxArchiveBytes] caps the outer file's
+ * compressed bytes and defaults to the cumulative cap.
  */
 public data class BundleConfig(
     public val maxArchiveBytes: Long = DEFAULT_MAX_ARCHIVE_BYTES,

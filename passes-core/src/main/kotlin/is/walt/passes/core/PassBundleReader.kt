@@ -115,10 +115,10 @@ public sealed interface BundleEntry {
  * name instead. It is a dispatch hint, never a trust decision.
  */
 public enum class PassBundleSniff {
-    /** The first entry name ends in `.pkpass`: only a bundle contains pass archives. */
+    /** The first entry is a root-level `.pkpass`: only a bundle contains pass archives. */
     Bundle,
 
-    /** The first entry is a file whose name does not end in `.pkpass`: a single pass or some other ZIP. */
+    /** The first entry is a file that is not a root-level `.pkpass`: a single pass or some other ZIP. */
     NotBundle,
 
     /**
@@ -139,15 +139,18 @@ public enum class PassBundleSniff {
 /**
  * Cheap dispatch helper over the first bytes of a file. Pass at least
  * [PassBundleSniff.RECOMMENDED_HEADER_BYTES]; fewer bytes make [PassBundleSniff.Undetermined]
- * more likely, never a wrong answer. A leading junk entry (`__MACOSX/`, `.DS_Store`) can
- * make a real bundle read as [PassBundleSniff.NotBundle]; consumers that must be sure
- * fall back to a full read.
+ * more likely, never a wrong answer. The first name is judged by
+ * [BundleEntryAllowlist.PkpassOnly], the same rule the default reader applies, so a
+ * nested `passes/1.pkpass` or `__MACOSX/._a.pkpass` first reads as
+ * [PassBundleSniff.NotBundle]; so does a leading `.DS_Store`. A consumer whose own layout
+ * nests passes dispatches on its own container marker, not on this sniff, and one that
+ * must be sure falls back to a full read.
  */
 public fun sniffPassBundle(header: ByteArray): PassBundleSniff {
     val name = sniffFirstLocalHeaderName(header)
     return when {
         name == null || name.endsWith('/') -> PassBundleSniff.Undetermined
-        name.endsWith(".${PassBundleReader.PASS_ENTRY_EXTENSION}", ignoreCase = true) -> PassBundleSniff.Bundle
+        BundleEntryAllowlist.PkpassOnly.accepts(name) -> PassBundleSniff.Bundle
         else -> PassBundleSniff.NotBundle
     }
 }

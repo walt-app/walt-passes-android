@@ -9,7 +9,6 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.io.InputStream
 import java.util.zip.ZipEntry
-import java.util.zip.ZipException
 import java.util.zip.ZipInputStream
 
 /**
@@ -33,7 +32,7 @@ import java.util.zip.ZipInputStream
  *  - **Per-entry decompressed size.** [readEntryBytes] caps each entry at
  *    [ParserConfig.maxEntryBytes]. This is the zip-bomb guard: a 10 KB compressed entry
  *    that decompresses to 10 GB hits the cap and aborts before the buffer materializes.
- *  - **Path traversal (zip-slip).** [pathTraversalReason] rejects entry names containing
+ *  - **Path traversal (zip-slip).** [isUnsafeEntryName] rejects entry names containing
  *    `..` or `.` segments, leading `/` (absolute path), backslashes (Windows-flavored
  *    separator), Windows drive-letter prefixes, or empty segments. Structural — no
  *    file-system canonicalization, because we never touch the file system.
@@ -104,9 +103,10 @@ private fun runZipPipeline(
         }
     } catch (_: ArchiveSizeExceededException) {
         ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.ArchiveSize))
-    } catch (_: ZipException) {
-        ExtractResult.Failure(MalformedReason.NotAZipArchive)
     } catch (_: IOException) {
+        ExtractResult.Failure(MalformedReason.NotAZipArchive)
+    } catch (_: IllegalArgumentException) {
+        // ZipInputStream decodes EFS-flagged names as strict UTF-8 and throws this on a bad byte.
         ExtractResult.Failure(MalformedReason.NotAZipArchive)
     }
 }
@@ -136,9 +136,8 @@ private fun processEntry(
     // skip. A `../foo/` directory is harmless today (nothing acts on directory
     // entries), but checking up-front means a future change that does act on them
     // can't accidentally bypass the path-traversal guard.
-    val pathRejection = pathTraversalReason(entry.name)
     return when {
-        pathRejection != null -> ExtractResult.Failure(pathRejection)
+        isUnsafeEntryName(entry.name) -> ExtractResult.Failure(MalformedReason.NotAZipArchive)
         entry.isDirectory -> {
             zis.closeEntry()
             null
@@ -153,7 +152,7 @@ private fun validateAndRead(
     entries: MutableMap<String, ByteArray>,
     config: ParserConfig,
 ): ExtractResult.Failure? {
-    // pathTraversalReason already ran in processEntry; the chain picks up here.
+    // isUnsafeEntryName already ran in processEntry; the chain picks up here.
     val rejection =
         extensionReason(name)
             ?: duplicateEntryReason(entries, name)
@@ -182,10 +181,6 @@ private fun entryCountReason(
     } else {
         null
     }
-}
-
-private fun pathTraversalReason(name: String): MalformedReason? {
-    return if (isUnsafeEntryName(name)) MalformedReason.NotAZipArchive else null
 }
 
 private fun hasAllowedName(name: String): Boolean {
