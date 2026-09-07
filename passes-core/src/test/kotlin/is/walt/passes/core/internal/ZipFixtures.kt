@@ -61,7 +61,9 @@ internal fun buildArchiveWithDuplicateEntry(
 internal fun findNthLocalHeaderOffset(
     bytes: ByteArray,
     n: Int,
-): Int = findNthSignature(bytes, LOCAL_HEADER_SIGNATURE, n) ?: error("fewer than $n local headers in synthetic archive")
+): Int =
+    findNthSignature(bytes, LOCAL_FILE_HEADER_MAGIC, n)
+        ?: error("fewer than $n local headers in synthetic archive")
 
 internal fun findCentralDirectoryOffset(bytes: ByteArray): Int =
     findNthSignature(bytes, CENTRAL_DIRECTORY_SIGNATURE, 1) ?: error("no central directory in synthetic archive")
@@ -78,8 +80,14 @@ private fun findNthSignature(
     return null
 }
 
-private val LOCAL_HEADER_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
 private val CENTRAL_DIRECTORY_SIGNATURE = byteArrayOf(0x50, 0x4B, 0x01, 0x02)
+
+/** Overwrites the first byte of the first local header's name with 0xFF (never valid UTF-8). */
+internal fun corruptFirstNameByte(zip: ByteArray): ByteArray {
+    val patched = zip.copyOf()
+    patched[findNthLocalHeaderOffset(zip, 1) + LOCAL_HEADER_FIXED_LENGTH] = 0xFF.toByte()
+    return patched
+}
 
 /** Tracks bytes pulled and whether [close] was called, to verify "caller owns the stream". */
 internal class OpenTrackingInputStream(private val delegate: InputStream) : InputStream() {

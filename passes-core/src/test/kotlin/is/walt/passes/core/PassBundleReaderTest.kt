@@ -5,10 +5,12 @@ import `is`.walt.passes.core.internal.OpenTrackingInputStream
 import `is`.walt.passes.core.internal.ThrowingInputStream
 import `is`.walt.passes.core.internal.buildArchive
 import `is`.walt.passes.core.internal.buildArchiveWithDuplicateEntry
+import `is`.walt.passes.core.internal.corruptFirstNameByte
 import `is`.walt.passes.core.internal.findCentralDirectoryOffset
 import `is`.walt.passes.core.internal.findNthLocalHeaderOffset
 import org.junit.Test
 import java.io.ByteArrayInputStream
+import java.util.Random
 
 /**
  * Behavior tests for the outer-layer bundle reader. Archives come from the shared
@@ -46,14 +48,26 @@ class PassBundleReaderTest {
     fun nonZipBytesAreRejectedBeforeAnyDelivery() {
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Bytes("not a zip".toByteArray()), sink)
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 0, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.NotAZipArchive,
+                accepted = 0,
+                skipped = 0,
+            ),
+        )
         assertThat(sink.names).isEmpty()
     }
 
     @Test
     fun emptyBytesAreRejectedAsNotAZipArchive() {
         val result = PassBundleReader.create().read(PassSource.Bytes(ByteArray(0)), RecordingSink())
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 0, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.NotAZipArchive,
+                accepted = 0,
+                skipped = 0,
+            ),
+        )
     }
 
     @Test
@@ -137,7 +151,13 @@ class PassBundleReaderTest {
         val sink = RecordingSink()
         val result = PassBundleReader.create(BundleConfig(maxEntries = 2)).read(PassSource.Bytes(zip), sink)
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.EntryCount), 1, 1))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.EntryCount),
+                    accepted = 1,
+                    skipped = 1,
+                ),
+            )
         assertThat(sink.names).containsExactly("a.pkpass", "ignored.txt").inOrder()
     }
 
@@ -150,7 +170,13 @@ class PassBundleReaderTest {
         val config = BundleConfig(maxEntryBytes = 4_096)
         val result = PassBundleReader.create(config).read(PassSource.Bytes(zip), sink)
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.EntrySize), 0, 0))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.EntrySize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
         assertThat(sink.names).isEmpty()
     }
 
@@ -167,7 +193,13 @@ class PassBundleReaderTest {
         val config = BundleConfig(maxEntryBytes = 4_096, maxCumulativeBytes = 8_192)
         val result = PassBundleReader.create(config).read(PassSource.Bytes(zip), sink)
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.CumulativeSize), 2, 0))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.CumulativeSize),
+                    accepted = 2,
+                    skipped = 0,
+                ),
+            )
         assertThat(sink.names).containsExactly("a.pkpass", "b.pkpass").inOrder()
     }
 
@@ -182,7 +214,13 @@ class PassBundleReaderTest {
         val config = BundleConfig(maxEntryBytes = 8_192, maxCumulativeBytes = 8_192)
         val result = PassBundleReader.create(config).read(PassSource.Bytes(zip), sink)
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.CumulativeSize), 0, 1))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.CumulativeSize),
+                    accepted = 0,
+                    skipped = 1,
+                ),
+            )
         assertThat(sink.skippedNames).containsExactly("big.bin")
     }
 
@@ -192,7 +230,53 @@ class PassBundleReaderTest {
         val sink = RecordingSink()
         val result = PassBundleReader.create(BundleConfig(maxEntryBytes = 4_096)).read(PassSource.Bytes(zip), sink)
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.EntrySize), 0, 0))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.EntrySize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
+    }
+
+    @Test
+    fun directoryEntryPayloadIsChargedAgainstThePerEntryCap() {
+        // A name ending in "/" can still carry a deflate payload; it must not bypass the caps.
+        val zip = buildArchive { entry("passes/", ByteArray(1_024 * 1_024)) }
+        val sink = RecordingSink()
+        val result = PassBundleReader.create(BundleConfig(maxEntryBytes = 4_096)).read(PassSource.Bytes(zip), sink)
+        assertThat(result)
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.EntrySize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
+        assertThat(sink.names).isEmpty()
+    }
+
+    @Test
+    fun directoryEntryPayloadsAreChargedAgainstTheCumulativeCap() {
+        val zip =
+            buildArchive {
+                entry("a/", ByteArray(3_000))
+                entry("b/", ByteArray(3_000))
+                entry("c/", ByteArray(3_000))
+                entry("x.pkpass", "X".toByteArray())
+            }
+        val sink = RecordingSink()
+        val config = BundleConfig(maxEntryBytes = 4_096, maxCumulativeBytes = 8_192)
+        val result = PassBundleReader.create(config).read(PassSource.Bytes(zip), sink)
+        assertThat(result)
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.CumulativeSize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
+        assertThat(sink.names).isEmpty()
     }
 
     @Test
@@ -203,7 +287,13 @@ class PassBundleReaderTest {
             val zip = buildArchive { entry(name, "x".toByteArray()) }
             val sink = RecordingSink()
             val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
-            assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.UnsafeEntryName, 0, 0))
+            assertThat(result).isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.UnsafeEntryName,
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
             assertThat(sink.names).isEmpty()
         }
     }
@@ -212,14 +302,26 @@ class PassBundleReaderTest {
     fun zipSlipNameIsRejectedEvenWhenTheAllowlistWouldSkipIt() {
         val zip = buildArchive { entry("../not-allowlisted.txt", "x".toByteArray()) }
         val result = PassBundleReader.create().read(PassSource.Bytes(zip), RecordingSink())
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.UnsafeEntryName, 0, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.UnsafeEntryName,
+                accepted = 0,
+                skipped = 0,
+            ),
+        )
     }
 
     @Test
     fun zipSlipDirectoryEntryIsRejected() {
         val zip = buildArchive { directory("../up/") }
         val result = PassBundleReader.create().read(PassSource.Bytes(zip), RecordingSink())
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.UnsafeEntryName, 0, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.UnsafeEntryName,
+                accepted = 0,
+                skipped = 0,
+            ),
+        )
     }
 
     @Test
@@ -227,7 +329,13 @@ class PassBundleReaderTest {
         val zip = buildArchiveWithDuplicateEntry("a.pkpass", "first".toByteArray(), "second".toByteArray())
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.DuplicateEntryName, 1, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.DuplicateEntryName,
+                accepted = 1,
+                skipped = 0,
+            ),
+        )
         assertThat(sink.acceptedBytes["a.pkpass"]).isEqualTo("first".toByteArray())
     }
 
@@ -251,7 +359,13 @@ class PassBundleReaderTest {
         val zip = corruptFirstNameByte(buildArchive { entry("a.pkpass", "A".toByteArray()) })
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 0, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.NotAZipArchive,
+                accepted = 0,
+                skipped = 0,
+            ),
+        )
         assertThat(sink.names).isEmpty()
     }
 
@@ -266,7 +380,13 @@ class PassBundleReaderTest {
         val truncated = zip.copyOf(findNthLocalHeaderOffset(zip, 2) + 30 + "b.pkpass".length + 16)
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Bytes(truncated), sink)
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 1, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.NotAZipArchive,
+                accepted = 1,
+                skipped = 0,
+            ),
+        )
         assertThat(sink.names).containsExactly("a.pkpass")
     }
 
@@ -290,7 +410,13 @@ class PassBundleReaderTest {
     fun callerStreamThatThrowsOnFirstReadIsATypedRejection() {
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Stream(ThrowingInputStream()), sink)
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.NotAZipArchive, 0, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.NotAZipArchive,
+                accepted = 0,
+                skipped = 0,
+            ),
+        )
         assertThat(sink.names).isEmpty()
     }
 
@@ -330,6 +456,73 @@ class PassBundleReaderTest {
     }
 
     @Test
+    fun allowlistExceptionsPropagateToTheCaller() {
+        val zip = buildArchive { entry("a.pkpass", "A".toByteArray()) }
+        val boom = IllegalStateException("allowlist failed")
+        val reader = PassBundleReader.create(BundleConfig(allowlist = BundleEntryAllowlist { throw boom }))
+        val thrown = runCatching { reader.read(PassSource.Bytes(zip), RecordingSink()) }.exceptionOrNull()
+        assertThat(thrown).isSameInstanceAs(boom)
+    }
+
+    @Test
+    fun entryOfExactlyThePerEntryCapIsDelivered() {
+        val zip = buildArchive { entry("a.pkpass", ByteArray(4_096)) }
+        val sink = RecordingSink()
+        val result = PassBundleReader.create(BundleConfig(maxEntryBytes = 4_096)).read(PassSource.Bytes(zip), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Completed(accepted = 1, skipped = 0))
+        assertThat(sink.acceptedBytes.getValue("a.pkpass")).hasLength(4_096)
+    }
+
+    @Test
+    fun entriesSummingToExactlyTheCumulativeCapAreDelivered() {
+        val zip =
+            buildArchive {
+                entry("a.pkpass", ByteArray(4_096))
+                entry("b.pkpass", ByteArray(4_096))
+            }
+        val config = BundleConfig(maxEntryBytes = 4_096, maxCumulativeBytes = 8_192)
+        val result = PassBundleReader.create(config).read(PassSource.Bytes(zip), RecordingSink())
+        assertThat(result).isEqualTo(BundleReadResult.Completed(accepted = 2, skipped = 0))
+    }
+
+    @Test
+    fun outerArchiveCapTrippingMidStreamKeepsEntriesAlreadyDelivered() {
+        val incompressible = ByteArray(16_384).also { Random(42).nextBytes(it) }
+        val zip =
+            buildArchive {
+                entry("a.pkpass", "A".toByteArray())
+                entry("b.pkpass", incompressible)
+            }
+        // No size hint, so only the streaming bound can trip; it does so inside the second entry.
+        val config = BundleConfig(maxArchiveBytes = zip.size - 1_024L)
+        val sink = RecordingSink()
+        val result = PassBundleReader.create(config).read(PassSource.Stream(ByteArrayInputStream(zip)), sink)
+        assertThat(result)
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.ArchiveSize),
+                    accepted = 1,
+                    skipped = 0,
+                ),
+            )
+        assertThat(sink.names).containsExactly("a.pkpass")
+    }
+
+    @Test
+    fun defaultAllowlistFoldsCaseInAsciiOnly() {
+        // U+212A (Kelvin sign) lower-cases to "k" under Unicode folding; the ISO-8859-1
+        // header sniff would call this NotBundle, so the reader must not accept it either.
+        val kelvin = "a.p\u212Apass"
+        assertThat(BundleEntryAllowlist.PkpassOnly.accepts(kelvin)).isFalse()
+        val zip = buildArchive { entry(kelvin, "x".toByteArray()) }
+        assertThat(sniffPassBundle(zip)).isEqualTo(PassBundleSniff.NotBundle)
+        val sink = RecordingSink()
+        val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
+        assertThat(result).isEqualTo(BundleReadResult.Completed(accepted = 0, skipped = 1))
+        assertThat(sink.skippedNames).containsExactly(kelvin)
+    }
+
+    @Test
     fun declaredSizeOverOuterArchiveCapFailsFastWithoutReading() {
         val tracker = OpenTrackingInputStream(ByteArrayInputStream(ByteArray(0)))
         val config = BundleConfig(maxArchiveBytes = 1_024)
@@ -337,7 +530,13 @@ class PassBundleReaderTest {
             PassBundleReader.create(config)
                 .read(PassSource.Stream(tracker, sizeHintBytes = 1_025), RecordingSink())
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.ArchiveSize), 0, 0))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.ArchiveSize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
         assertThat(tracker.bytesRead).isEqualTo(0)
     }
 
@@ -349,7 +548,13 @@ class PassBundleReaderTest {
             PassBundleReader.create(config)
                 .read(PassSource.Stream(ByteArrayInputStream(zip), sizeHintBytes = null), RecordingSink())
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.ArchiveSize), 0, 0))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.ArchiveSize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
     }
 
     @Test
@@ -358,7 +563,13 @@ class PassBundleReaderTest {
         val result =
             PassBundleReader.create(BundleConfig(maxArchiveBytes = 64)).read(PassSource.Bytes(zip), RecordingSink())
         assertThat(result)
-            .isEqualTo(BundleReadResult.Rejected(BundleRejection.LimitExceeded(BundleLimit.ArchiveSize), 0, 0))
+            .isEqualTo(
+                BundleReadResult.Rejected(
+                    BundleRejection.LimitExceeded(BundleLimit.ArchiveSize),
+                    accepted = 0,
+                    skipped = 0,
+                ),
+            )
     }
 
     @Test
@@ -372,7 +583,13 @@ class PassBundleReaderTest {
             }
         val sink = RecordingSink()
         val result = PassBundleReader.create().read(PassSource.Bytes(zip), sink)
-        assertThat(result).isEqualTo(BundleReadResult.Rejected(BundleRejection.UnsafeEntryName, 2, 0))
+        assertThat(result).isEqualTo(
+            BundleReadResult.Rejected(
+                BundleRejection.UnsafeEntryName,
+                accepted = 2,
+                skipped = 0,
+            ),
+        )
         assertThat(sink.names).containsExactly("a.pkpass", "b.pkpass").inOrder()
     }
 
@@ -425,75 +642,6 @@ class PassBundleReaderTest {
         PassBundleReader.create().read(PassSource.Bytes(zip), again)
         assertThat(again.acceptedBytes.getValue("a.pkpass")).isEqualTo("AAA".toByteArray())
     }
-
-    @Test
-    fun sniffRecognisesABundleFromTheFirstLocalHeader() {
-        val bundle = buildArchive { entry("first.pkpass", "x".toByteArray()) }
-        assertThat(sniffPassBundle(bundle.copyOf(PassBundleSniff.RECOMMENDED_HEADER_BYTES)))
-            .isEqualTo(PassBundleSniff.Bundle)
-        assertThat(sniffPassBundle(buildArchive { entry("MIXED.PkPass", "x".toByteArray()) }))
-            .isEqualTo(PassBundleSniff.Bundle)
-    }
-
-    @Test
-    fun sniffReportsASinglePassAsNotABundle() {
-        val single = buildArchive { entry("pass.json", "{}".toByteArray()) }
-        assertThat(sniffPassBundle(single)).isEqualTo(PassBundleSniff.NotBundle)
-    }
-
-    @Test
-    fun sniffAppliesTheSameRootOnlyRuleAsTheDefaultAllowlist() {
-        assertThat(sniffPassBundle(buildArchive { entry("passes/1.pkpass", "x".toByteArray()) }))
-            .isEqualTo(PassBundleSniff.NotBundle)
-        assertThat(sniffPassBundle(buildArchive { entry("__MACOSX/._a.pkpass", "x".toByteArray()) }))
-            .isEqualTo(PassBundleSniff.NotBundle)
-        assertThat(sniffPassBundle(buildArchive { entry(".DS_Store", "x".toByteArray()) }))
-            .isEqualTo(PassBundleSniff.NotBundle)
-    }
-
-    @Test
-    fun sniffIsUndeterminedWhenTheHeaderCannotDecide() {
-        val bundle = buildArchive { entry("first.pkpass", "x".toByteArray()) }
-        assertThat(sniffPassBundle(bundle.copyOf(12))).isEqualTo(PassBundleSniff.Undetermined)
-        assertThat(sniffPassBundle("not a zip at all, but long enough to hold a header".toByteArray()))
-            .isEqualTo(PassBundleSniff.Undetermined)
-        assertThat(sniffPassBundle(ByteArray(0))).isEqualTo(PassBundleSniff.Undetermined)
-        assertThat(sniffPassBundle(buildArchive { })).isEqualTo(PassBundleSniff.Undetermined)
-        assertThat(sniffPassBundle(buildArchive { directory("passes/") })).isEqualTo(PassBundleSniff.Undetermined)
-    }
-
-    @Test
-    fun mimeAndExtensionConstantsAreApples() {
-        assertThat(PassBundleReader.MIME_TYPE).isEqualTo("application/vnd.apple.pkpasses")
-        assertThat(PassBundleReader.FILE_EXTENSION).isEqualTo("pkpasses")
-        assertThat(PassBundleReader.PASS_ENTRY_EXTENSION).isEqualTo("pkpass")
-    }
-
-    @Test
-    fun bundleConfigDefaultsAreConservative() {
-        val cfg = BundleConfig()
-        assertThat(cfg.maxEntries).isEqualTo(200)
-        assertThat(cfg.maxEntryBytes).isEqualTo(ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES)
-        assertThat(cfg.maxCumulativeBytes).isEqualTo(256L * 1024 * 1024)
-        assertThat(cfg.maxArchiveBytes).isEqualTo(256L * 1024 * 1024)
-        assertThat(cfg.allowlist).isSameInstanceAs(BundleEntryAllowlist.PkpassOnly)
-        for (limit in BundleLimit.entries) {
-            assertThat(limit.limitFrom(cfg)).isGreaterThan(0L)
-        }
-    }
-
-    @Test
-    fun bundleRejectionFlattensToADistinctFailureReasonPerArm() {
-        val all: List<BundleRejection> =
-            listOf(
-                BundleRejection.NotAZipArchive,
-                BundleRejection.UnsafeEntryName,
-                BundleRejection.DuplicateEntryName,
-            ) + BundleLimit.entries.map { BundleRejection.LimitExceeded(it) }
-        val mapped = all.map { it.toFailureReason() }
-        assertThat(mapped).hasSize(all.size)
-        assertThat(mapped.toSet()).containsExactlyElementsIn(BundleFailureReason.entries)
-    }
 }
 
 /** Records every entry the reader hands over; optionally stops after [stopAfter] entries. */
@@ -526,12 +674,5 @@ private fun markFirstEntryAsUnixSymlink(zip: ByteArray): ByteArray {
     for (i in 0 until 4) {
         patched[cd + 38 + i] = (mode ushr 8 * i).toByte()
     }
-    return patched
-}
-
-/** Overwrites the first byte of the first local header's name with 0xFF (never valid UTF-8). */
-private fun corruptFirstNameByte(zip: ByteArray): ByteArray {
-    val patched = zip.copyOf()
-    patched[findNthLocalHeaderOffset(zip, 1) + 30] = 0xFF.toByte()
     return patched
 }

@@ -10,13 +10,12 @@ import `is`.walt.passes.core.internal.sniffFirstLocalHeaderName
  * only ONE archive; a thousand inner entries each just under the per-archive cap is
  * gigabytes. This reader bounds the sum before any inner archive is opened.
  *
- * What it enforces, per [BundleConfig]: outer compressed size (declared-size pre-check plus
- * a streaming bound, since a size hint can lie), file-entry count, per-entry decompressed
- * size (stopped WHILE inflating, before the buffer materializes), cumulative decompressed
- * size across every file entry (accepted and skipped alike), zip-slip names, and duplicate
+ * What it enforces: the caps in [BundleConfig] (per-entry and cumulative inflation are
+ * stopped WHILE inflating, before a buffer materializes), zip-slip names, and duplicate
  * entry names. A caller-supplied [BundleEntryAllowlist] decides which entries are handed
  * over; everything else is reported as [BundleEntry.Skipped] so a consumer can count it,
- * never silently dropped. Directory entries are skipped silently and take no ordinal.
+ * never silently dropped. Directory entries are skipped silently and take no ordinal, but
+ * any payload behind a `/` name is still drained through the caps.
  *
  * What it deliberately does NOT do: open, parse, or validate an inner `.pkpass`. Each
  * accepted entry is delivered as bytes and the caller runs [PassParser] on it, so the
@@ -35,13 +34,15 @@ import `is`.walt.passes.core.internal.sniffFirstLocalHeaderName
  * A consumer that needs all-or-nothing must stage on its side.
  *
  * Never throws for input-driven failures; every such path is a [BundleReadResult] arm.
- * Exceptions thrown by the sink propagate to the caller unchanged.
+ * Exceptions thrown by the sink or the allowlist propagate to the caller unchanged.
  */
 public fun interface PassBundleReader {
     /**
      * Streams [source] once and delivers each file entry to [sink] in archive order.
      * Synchronous and CPU-bound on the calling thread. Does not close a
-     * [PassSource.Stream]; the caller owns its lifecycle.
+     * [PassSource.Stream]; the caller owns its lifecycle. The never-throws promise covers
+     * archive input: a `RuntimeException` from a caller-supplied stream (e.g. a
+     * `SecurityException` from a revoked content URI) propagates.
      */
     public fun read(
         source: PassSource,

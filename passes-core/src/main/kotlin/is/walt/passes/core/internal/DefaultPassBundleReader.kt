@@ -41,138 +41,126 @@ internal class DefaultPassBundleReader(private val config: BundleConfig) : PassB
     }
 }
 
-/** One outcome of advancing the walk by a single file entry. */
-private sealed interface Step {
-    data object End : Step
+/** Outcome of advancing the archive to its next file entry. */
+private sealed interface Pull {
+    data object End : Pull
 
-    data class Deliver(val entry: BundleEntry) : Step
+    data class File(val name: String, val ordinal: Int) : Pull
 
-    data class Rejected(val reason: BundleRejection) : Step
+    data class Rejected(val reason: BundleRejection) : Pull
 }
 
 /**
- * Per-read mutable state: what has been seen, counted, and delivered. Input-driven
- * exceptions are caught per step so that a sink exception, raised outside [safeStep],
- * propagates to the caller instead of being folded into [BundleRejection.NotAZipArchive].
+ * Per-read mutable state: what has been seen, counted, and delivered. Only ZIP reads run
+ * inside [guarded]; the allowlist and the sink are called outside it, so their exceptions
+ * propagate instead of being folded into [BundleRejection.NotAZipArchive].
  */
 private class BundleWalk(
     private val config: BundleConfig,
     private val sink: BundleEntrySink,
 ) {
     private val seenNames = HashSet<String>()
+    private val budget = InflateBudget(config.maxCumulativeBytes)
     private var fileEntries = 0
     private var accepted = 0
     private var skipped = 0
-    private var cumulativeBytes = 0L
 
     fun run(zis: ZipInputStream): BundleReadResult {
-        var outcome: BundleReadResult? = null
-        while (outcome == null) {
-            outcome =
-                when (val step = safeStep(zis)) {
-                    Step.End -> BundleReadResult.Completed(accepted, skipped)
-                    is Step.Rejected -> BundleReadResult.Rejected(step.reason, accepted, skipped)
-                    is Step.Deliver -> deliver(step.entry)
+        while (true) {
+            val outcome =
+                when (val pull = guarded(Pull::Rejected) { pullNext(zis) }) {
+                    Pull.End -> BundleReadResult.Completed(accepted, skipped)
+                    is Pull.Rejected -> rejected(pull.reason)
+                    is Pull.File -> readAndDeliver(zis, pull)
                 }
+            if (outcome != null) return outcome
         }
-        return outcome
     }
 
-    private fun deliver(entry: BundleEntry): BundleReadResult? =
-        if (sink.onEntry(entry) == BundleVisit.Stop) BundleReadResult.Stopped(accepted, skipped) else null
-
-    private fun safeStep(zis: ZipInputStream): Step =
-        try {
-            nextStep(zis)
-        } catch (_: ArchiveSizeExceededException) {
-            Step.Rejected(BundleRejection.LimitExceeded(BundleLimit.ArchiveSize))
-        } catch (_: IOException) {
-            Step.Rejected(BundleRejection.NotAZipArchive)
-        } catch (_: IllegalArgumentException) {
-            // ZipInputStream decodes EFS-flagged names as strict UTF-8 and throws this on a bad byte.
-            Step.Rejected(BundleRejection.NotAZipArchive)
-        }
-
-    /** Advances past directory entries to the next file entry, validating every name on the way. */
-    private fun nextStep(zis: ZipInputStream): Step {
-        var step: Step? = null
-        while (step == null) {
-            val entry = zis.nextEntry ?: return Step.End
-            step =
+    /** Advances to the next file entry, validating every name and draining directory payloads. */
+    private fun pullNext(zis: ZipInputStream): Pull {
+        while (true) {
+            val entry = zis.nextEntry ?: return Pull.End
+            val pull =
                 when {
-                    isUnsafeEntryName(entry.name) -> Step.Rejected(BundleRejection.UnsafeEntryName)
-                    entry.isDirectory -> {
-                        zis.closeEntry()
-                        null
-                    }
-                    else -> fileEntryStep(zis, entry.name)
+                    isUnsafeEntryName(entry.name) -> Pull.Rejected(BundleRejection.UnsafeEntryName)
+                    entry.isDirectory -> inflate(zis, null)?.let { Pull.Rejected(it) }
+                    else -> registerFile(entry.name)
                 }
+            if (pull != null) return pull
         }
-        return step
     }
 
-    private fun fileEntryStep(
-        zis: ZipInputStream,
-        name: String,
-    ): Step {
+    private fun registerFile(name: String): Pull {
         val ordinal = fileEntries
         return when {
-            !seenNames.add(name) -> Step.Rejected(BundleRejection.DuplicateEntryName)
-            ordinal >= config.maxEntries -> Step.Rejected(BundleRejection.LimitExceeded(BundleLimit.EntryCount))
+            !seenNames.add(name) -> Pull.Rejected(BundleRejection.DuplicateEntryName)
+            ordinal >= config.maxEntries -> Pull.Rejected(BundleRejection.LimitExceeded(BundleLimit.EntryCount))
             else -> {
                 fileEntries += 1
-                readFileEntry(zis, name, ordinal)
+                Pull.File(name, ordinal)
             }
         }
     }
 
-    private fun readFileEntry(
+    private fun readAndDeliver(
         zis: ZipInputStream,
-        name: String,
-        ordinal: Int,
-    ): Step {
-        val buffer = if (config.allowlist.accepts(name)) ByteArrayOutputStream() else null
-        val tripped = inflateBounded(zis, buffer)
-        return when {
-            tripped != null -> Step.Rejected(BundleRejection.LimitExceeded(tripped))
-            buffer != null -> {
-                accepted += 1
-                Step.Deliver(BundleEntry.Accepted(name, ordinal, buffer.toByteArray()))
-            }
-            else -> {
-                skipped += 1
-                Step.Deliver(BundleEntry.Skipped(name, ordinal))
-            }
+        file: Pull.File,
+    ): BundleReadResult? {
+        val buffer = if (config.allowlist.accepts(file.name)) ByteArrayOutputStream() else null
+        val rejection = guarded({ it }) { inflate(zis, buffer) }
+        return if (rejection != null) {
+            rejected(rejection)
+        } else {
+            deliver(toEntry(file, buffer))
         }
     }
 
-    /**
-     * Inflates the current entry chunk by chunk, checking the per-entry cap and then the
-     * cumulative cap after every read so a bomb is stopped mid-inflate. A null [buffer]
-     * drains without retaining: skipped entries still pay into both caps.
-     */
-    private fun inflateBounded(
+    private fun inflate(
         zis: ZipInputStream,
         buffer: ByteArrayOutputStream?,
-    ): BundleLimit? {
-        val chunk = ByteArray(READ_BUFFER_SIZE)
-        var entryBytes = 0L
-        var tripped: BundleLimit? = null
-        var n = zis.read(chunk)
-        while (n != -1 && tripped == null) {
-            entryBytes += n
-            cumulativeBytes += n
-            tripped =
-                when {
-                    entryBytes > config.maxEntryBytes -> BundleLimit.EntrySize
-                    cumulativeBytes > config.maxCumulativeBytes -> BundleLimit.CumulativeSize
-                    else -> null
-                }
-            if (tripped == null) {
-                buffer?.write(chunk, 0, n)
-                n = zis.read(chunk)
-            }
+    ): BundleRejection? =
+        when (inflateBounded(zis, buffer, config.maxEntryBytes, budget)) {
+            null -> null
+            InflateLimit.EntrySize -> BundleRejection.LimitExceeded(BundleLimit.EntrySize)
+            InflateLimit.CumulativeSize -> BundleRejection.LimitExceeded(BundleLimit.CumulativeSize)
         }
-        return tripped
+
+    private fun toEntry(
+        file: Pull.File,
+        buffer: ByteArrayOutputStream?,
+    ): BundleEntry =
+        if (buffer != null) {
+            BundleEntry.Accepted(file.name, file.ordinal, buffer.toByteArray())
+        } else {
+            BundleEntry.Skipped(file.name, file.ordinal)
+        }
+
+    private fun deliver(entry: BundleEntry): BundleReadResult? {
+        when (entry) {
+            is BundleEntry.Accepted -> accepted += 1
+            is BundleEntry.Skipped -> skipped += 1
+        }
+        return if (sink.onEntry(entry) == BundleVisit.Stop) BundleReadResult.Stopped(accepted, skipped) else null
+    }
+
+    private fun rejected(reason: BundleRejection): BundleReadResult {
+        return BundleReadResult.Rejected(reason, accepted, skipped)
     }
 }
+
+/** Runs one ZIP read, mapping input-driven exceptions onto a rejection via [onRejected]. */
+private inline fun <T> guarded(
+    onRejected: (BundleRejection) -> T,
+    block: () -> T,
+): T =
+    try {
+        block()
+    } catch (_: ArchiveSizeExceededException) {
+        onRejected(BundleRejection.LimitExceeded(BundleLimit.ArchiveSize))
+    } catch (_: IOException) {
+        onRejected(BundleRejection.NotAZipArchive)
+    } catch (_: IllegalArgumentException) {
+        // ZipInputStream decodes EFS-flagged names as strict UTF-8 and throws this on a bad byte.
+        onRejected(BundleRejection.NotAZipArchive)
+    }

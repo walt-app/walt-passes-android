@@ -44,8 +44,7 @@ public fun interface BundleEntryAllowlist {
          */
         public val PkpassOnly: BundleEntryAllowlist =
             BundleEntryAllowlist { name ->
-                val suffix = ".${PassBundleReader.PASS_ENTRY_EXTENSION}"
-                !name.contains('/') && name.length > suffix.length && name.endsWith(suffix, ignoreCase = true)
+                !name.contains('/') && name.length > PKPASS_SUFFIX.length && name.endsWithAsciiIgnoreCase(PKPASS_SUFFIX)
             }
     }
 }
@@ -70,3 +69,17 @@ public fun BundleLimit.limitFrom(config: BundleConfig): Long =
         BundleLimit.EntrySize -> config.maxEntryBytes
         BundleLimit.CumulativeSize -> config.maxCumulativeBytes
     }
+
+private const val PKPASS_SUFFIX: String = ".${PassBundleReader.PASS_ENTRY_EXTENSION}"
+
+/**
+ * ASCII-only case folding. Unicode folding would let U+212A (Kelvin sign) match `k`, so
+ * the reader would accept a name the ISO-8859-1 header sniff calls `NotBundle`.
+ */
+private fun String.endsWithAsciiIgnoreCase(suffix: String): Boolean {
+    if (length < suffix.length) return false
+    val offset = length - suffix.length
+    return suffix.indices.all { i -> asciiLower(this[offset + i]) == asciiLower(suffix[i]) }
+}
+
+private fun asciiLower(c: Char): Char = if (c in 'A'..'Z') c + ('a' - 'A') else c

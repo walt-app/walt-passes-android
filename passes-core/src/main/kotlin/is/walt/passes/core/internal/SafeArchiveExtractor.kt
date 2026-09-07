@@ -19,7 +19,7 @@ import java.util.zip.ZipInputStream
  *    as "no entries", which would let raw garbage and 0-byte input round-trip as
  *    [ExtractResult.Success] with an empty map. The first 4 bytes are sniffed and
  *    anything that isn't a local-file-header (`PK\x03\x04`) or end-of-central-directory
- *    (`PK\x05\x06` — a legitimate empty archive) signature is rejected up front.
+ *    (`PK\x05\x06`, a legitimate empty archive) signature is rejected up front.
  *  - **Archive size** (compressed). Checked twice. Once up-front against the declared size
  *    ([PassSource.Bytes.bytes].size or [PassSource.Stream.sizeHintBytes]). Then again at
  *    streaming time via [BoundedInputStream], which throws as soon as a read pushes the
@@ -29,18 +29,17 @@ import java.util.zip.ZipInputStream
  *  - **Entry count.** [ParserConfig.maxEntries] caps the number of file entries surfaced
  *    to the caller. Directory entries are skipped before the count, so a bag of nested
  *    `.lproj/` directories cannot push a real archive past the cap.
- *  - **Per-entry decompressed size.** [readEntryBytes] caps each entry at
+ *  - **Per-entry decompressed size.** [inflateBounded] caps each entry at
  *    [ParserConfig.maxEntryBytes]. This is the zip-bomb guard: a 10 KB compressed entry
  *    that decompresses to 10 GB hits the cap and aborts before the buffer materializes.
- *  - **Path traversal (zip-slip).** [isUnsafeEntryName] rejects entry names containing
- *    `..` or `.` segments, leading `/` (absolute path), backslashes (Windows-flavored
- *    separator), Windows drive-letter prefixes, or empty segments. Structural — no
- *    file-system canonicalization, because we never touch the file system.
+ *    Directory entries are drained through the same cap, so a payload behind a `/` name
+ *    cannot bypass it.
+ *  - **Path traversal (zip-slip).** Structural name check, see [isUnsafeEntryName].
  *  - **Symlink-shaped entries.** With JDK-only zip APIs (no Apache Commons Compress in
  *    this module's deps; see `gradle/libs.versions.toml`) the file-mode bits used to
  *    detect Info-ZIP symlink entries live in the central directory's external file
  *    attributes, which [ZipInputStream] does not expose. Mitigation: extraction is
- *    in-memory only; [readEntryBytes] writes into a [ByteArrayOutputStream] and we never
+ *    in-memory only; [inflateBounded] writes into a [ByteArrayOutputStream] and we never
  *    invoke any file system operation that could resolve a symlink. Combined with the
  *    path-traversal check and extension allowlist, this is sufficient for the trust
  *    claim. A follow-up bead may swap in a parser that exposes external attributes if
@@ -138,10 +137,7 @@ private fun processEntry(
     // can't accidentally bypass the path-traversal guard.
     return when {
         isUnsafeEntryName(entry.name) -> ExtractResult.Failure(MalformedReason.NotAZipArchive)
-        entry.isDirectory -> {
-            zis.closeEntry()
-            null
-        }
+        entry.isDirectory -> readEntryBytes(zis, config.maxEntryBytes, retain = false)?.failure
         else -> validateAndRead(zis, entry.name, entries, config)
     }
 }
@@ -199,26 +195,30 @@ private fun readEntryAndStore(
     entries: MutableMap<String, ByteArray>,
     maxEntryBytes: Long,
 ): ExtractResult.Failure? {
-    val bytes =
-        readEntryBytes(zis, maxEntryBytes)
-            ?: return ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.EntrySize))
-    entries[name] = bytes
-    return null
+    val read = readEntryBytes(zis, maxEntryBytes, retain = true) ?: return null
+    if (read.bytes != null) entries[name] = read.bytes
+    return read.failure
 }
 
+/** One inflated entry: either its [bytes] (when retained and within cap) or the [failure] that stopped it. */
+private class EntryRead(val bytes: ByteArray?, val failure: ExtractResult.Failure?)
+
+/**
+ * Inflates the current entry under [maxEntryBytes]. With [retain] false the bytes are
+ * drained and discarded (directory entries), and null means "nothing to report".
+ */
 private fun readEntryBytes(
     zis: ZipInputStream,
     maxEntryBytes: Long,
-): ByteArray? {
-    val output = ByteArrayOutputStream()
-    val buffer = ByteArray(READ_BUFFER_SIZE)
-    var totalRead = 0L
-    while (true) {
-        val n = zis.read(buffer)
-        if (n == -1) return output.toByteArray()
-        totalRead += n
-        if (totalRead > maxEntryBytes) return null
-        output.write(buffer, 0, n)
+    retain: Boolean,
+): EntryRead? {
+    val buffer = if (retain) ByteArrayOutputStream() else null
+    return when (inflateBounded(zis, buffer, maxEntryBytes)) {
+        null -> buffer?.let { EntryRead(it.toByteArray(), failure = null) }
+        InflateLimit.EntrySize, InflateLimit.CumulativeSize -> {
+            val reason = MalformedReason.ResourceLimitExceeded(ResourceLimit.EntrySize)
+            EntryRead(bytes = null, ExtractResult.Failure(reason))
+        }
     }
 }
 

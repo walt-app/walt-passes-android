@@ -141,6 +141,15 @@ class SafeArchiveExtractorTest {
     }
 
     @Test
+    fun directoryEntryPayloadIsChargedAgainstTheEntrySizeLimit() {
+        // A name ending in "/" can still carry a deflate payload; it must not bypass the cap.
+        val zip = buildArchive { entry("en.lproj/", ByteArray(1_024 * 1_024)) }
+        val config = ParserConfig().copy(maxEntryBytes = 4_096)
+        val result = extractSafely(PassSource.Bytes(zip), config)
+        assertExceeded(result, ResourceLimit.EntrySize)
+    }
+
+    @Test
     fun tooManyEntriesHitsEntryCountLimit() {
         val zip =
             buildArchive {
@@ -284,8 +293,7 @@ class SafeArchiveExtractorTest {
     fun invalidUtf8EntryNameIsMalformedNotAThrow() {
         // EFS-flagged names decode as strict UTF-8 inside ZipInputStream, which throws
         // IllegalArgumentException (not an IOException) on a bad byte.
-        val zip = buildArchive { entry("pass.json", "{}".toByteArray()) }
-        zip[findNthLocalHeaderOffset(zip, 1) + 30] = 0xFF.toByte()
+        val zip = corruptFirstNameByte(buildArchive { entry("pass.json", "{}".toByteArray()) })
         val result = extractSafely(PassSource.Bytes(zip), ParserConfig())
         assertMalformed(result, MalformedReason.NotAZipArchive)
     }

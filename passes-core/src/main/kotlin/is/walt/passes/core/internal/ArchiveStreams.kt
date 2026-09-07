@@ -3,6 +3,7 @@ package `is`.walt.passes.core.internal
 import `is`.walt.passes.core.PassSource
 import java.io.BufferedInputStream
 import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -30,13 +31,10 @@ internal fun PassSource.openStream(): InputStream =
 
 /**
  * True if the next 4 bytes of [stream] are a local-file-header signature (`PK\x03\x04`)
- * or an end-of-central-directory signature (`PK\x05\x06`). The EOCD prefix is legal only
- * for a structurally valid empty archive (no local file headers, just the EOCD record); a
- * non-empty zip starts with a local file header. Anything else with `PK\x05\x06` at the
- * front is rejected by [ZipInputStream] on the next read. Leaves the stream re-positioned
- * at byte 0 so the subsequent [ZipInputStream] reads the same bytes the sniff observed.
- * A stream that cannot be read has no ZIP magic: an [IOException] here is `false`, so
- * neither reader lets a caller stream's failure escape its never-throws contract.
+ * or an end-of-central-directory signature (`PK\x05\x06`, legal only for an empty
+ * archive; anything else behind it is rejected by [ZipInputStream] on the next read).
+ * Leaves the stream re-positioned at byte 0 so [ZipInputStream] reads the same bytes the
+ * sniff observed. An [IOException] from the stream is `false`: no readable magic.
  */
 internal fun hasZipMagic(stream: BufferedInputStream): Boolean =
     try {
@@ -57,6 +55,52 @@ private fun readsZipMagic(stream: BufferedInputStream): Boolean {
     stream.reset()
     return read == MAGIC_PREFIX_LENGTH &&
         (head.contentEquals(LOCAL_FILE_HEADER_MAGIC) || head.contentEquals(END_OF_CENTRAL_DIR_MAGIC))
+}
+
+/** Which inflate cap [inflateBounded] tripped. */
+internal enum class InflateLimit {
+    EntrySize,
+    CumulativeSize,
+}
+
+/** Running total of inflated bytes across one archive, checked against [max] on every charge. */
+internal class InflateBudget(private val max: Long) {
+    private var used = 0L
+
+    /** Adds [n] and reports whether the total is still within budget. */
+    fun charge(n: Int): Boolean {
+        used += n
+        return used <= max
+    }
+}
+
+/**
+ * Inflates the current entry chunk by chunk, checking [maxEntryBytes] and then [budget]
+ * after every read so a bomb is stopped mid-inflate, before a buffer materializes. A null
+ * [buffer] drains without retaining; directory entries and skipped entries go through
+ * here too, so a payload behind a `/` name still pays into the caps.
+ */
+internal fun inflateBounded(
+    zis: ZipInputStream,
+    buffer: ByteArrayOutputStream?,
+    maxEntryBytes: Long,
+    budget: InflateBudget? = null,
+): InflateLimit? {
+    val chunk = ByteArray(READ_BUFFER_SIZE)
+    var entryBytes = 0L
+    while (true) {
+        val n = zis.read(chunk)
+        if (n == -1) return null
+        entryBytes += n
+        val tripped =
+            when {
+                entryBytes > maxEntryBytes -> InflateLimit.EntrySize
+                budget?.charge(n) == false -> InflateLimit.CumulativeSize
+                else -> null
+            }
+        if (tripped != null) return tripped
+        buffer?.write(chunk, 0, n)
+    }
 }
 
 /**
@@ -135,7 +179,7 @@ internal class ArchiveSizeExceededException : IOException()
 internal const val READ_BUFFER_SIZE: Int = 8 * 1024
 private const val MAGIC_PREFIX_LENGTH = 4
 internal val LOCAL_FILE_HEADER_MAGIC: ByteArray = byteArrayOf(0x50, 0x4B, 0x03, 0x04)
-private const val LOCAL_HEADER_FIXED_LENGTH = 30
+internal const val LOCAL_HEADER_FIXED_LENGTH: Int = 30
 private const val LOCAL_HEADER_NAME_LENGTH_OFFSET = 26
 private val END_OF_CENTRAL_DIR_MAGIC = byteArrayOf(0x50, 0x4B, 0x05, 0x06)
 
