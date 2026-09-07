@@ -2,6 +2,7 @@ package `is`.walt.passes.storage.internal
 
 import android.content.ContentValues
 import android.database.Cursor
+import androidx.annotation.VisibleForTesting
 import `is`.walt.passes.core.ImageBytes
 import `is`.walt.passes.core.ImageRole
 import `is`.walt.passes.core.LocalizedStrings
@@ -317,25 +318,26 @@ internal class SqlCipherPassStore(
         )
     }
 
-    /**
-     * Query shapes, exposed so the JVM `SqlCipherPassStoreQueryShapeTest` can pin that the
-     * list / detail / summary paths select from `passes` only and never join the archive.
-     */
+    // The hot-path statements select from `passes` only; a JVM test pins that shape.
     internal companion object {
         private const val SUMMARY_COLUMNS: String =
             "id, type, serial_number, organization_name, description, " +
                 "expiration_epoch_ms, voided, signature_status_kind, " +
                 "created_at_epoch_ms, updated_at_epoch_ms, user_label"
 
+        @VisibleForTesting
         const val LIST_SUMMARIES_SQL: String =
             "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} ORDER BY created_at_epoch_ms DESC"
 
+        @VisibleForTesting
         const val LOAD_BY_ID_SQL: String =
             "SELECT $SUMMARY_COLUMNS, pass_json FROM ${Schema.Tables.PASSES} WHERE id = ?"
 
+        @VisibleForTesting
         const val SUMMARY_BY_ID_SQL: String =
             "SELECT $SUMMARY_COLUMNS FROM ${Schema.Tables.PASSES} WHERE id = ?"
 
+        @VisibleForTesting
         const val LOAD_ARCHIVE_SQL: String =
             "SELECT a.bytes FROM ${Schema.Tables.PASSES} p " +
                 "LEFT JOIN ${Schema.Tables.PASS_ARCHIVES} a ON a.pass_id = p.id WHERE p.id = ?"

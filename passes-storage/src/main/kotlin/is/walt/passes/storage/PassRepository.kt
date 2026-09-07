@@ -358,11 +358,8 @@ public object PassUserLabelBounds {
 }
 
 /**
- * Defensive cap `passes-storage` enforces on the retained archive in [PassRepository.upsert].
- * Same figure the parser applies (`ParserConfig.maxArchiveBytes` default), carried again
- * here so a future caller bug cannot land an oversized sidecar row. This is a hard storage
- * ceiling independent of a consumer's configured `ParserConfig.maxArchiveBytes`: a parser
- * configured above it still gets [PassUpdateRejectedKind.ArchiveOversized] at storage.
+ * Hard storage ceiling on the retained archive in [PassRepository.upsert], independent of a
+ * consumer's `ParserConfig.maxArchiveBytes`; same figure as the parser default.
  */
 public object PassArchiveBounds {
     public const val MAX_BYTES: Long = ParserConfig.DEFAULT_MAX_ARCHIVE_BYTES

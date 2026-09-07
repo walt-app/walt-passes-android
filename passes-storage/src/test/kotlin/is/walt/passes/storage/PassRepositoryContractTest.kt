@@ -429,6 +429,8 @@ class PassRepositoryContractTest {
 
     @Test
     fun retainedArchiveIsIsolatedFromCallerMutationOnBothSides() = runTest {
+        // Pins the contract on the fake; production isolation comes from the SQLite
+        // boundary and is covered by the instrumented reload test (CipherCompatReopenTest).
         val store = FakePassStore()
         val repo = newRepo(store)
 

@@ -6,20 +6,8 @@ import java.sql.Connection
 import java.sql.DriverManager
 
 /**
- * JVM-side verification of the v1 -> v2 schema migration. Mirrors [SchemaDdlTest]'s
- * approach: stock `sqlite-jdbc` standing in for SQLCipher, since SQLCipher is
- * wire-compatible with SQLite for DDL.
- *
- * The properties locked here:
- *
- *  1. A v1 database (passes/pass_images/pass_locales tables only) can have the v1 -> v2
- *     migration statements applied without error.
- *  2. After the migration, the `documents` and `document_thumbnails` tables exist with
- *     the expected columns, the `idx_documents_imported_at` index is present, and the
- *     foreign-key cascade on the thumbnails table is wired up.
- *  3. Pre-existing v1 data (a `passes` row plus children) is preserved across the
- *     migration: forward-only does not mean forward-and-truncate.
- *  4. The migration list is exactly the v1 entry today; future versions add to this.
+ * JVM-side verification of the migration hops v1 through v7, each applied over
+ * [V1_SCHEMA_SNAPSHOT] via [openDbAtVersion]. The v7 -> v8 hop lives in [PassArchivesMigrationTest].
  */
 class SchemaMigrationTest {
 
