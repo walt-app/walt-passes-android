@@ -55,7 +55,8 @@ public interface PassRepository {
      * one-shot stream parse). Stores NO sidecar row, and on replacement drops any archive
      * a prior import retained, since the model may have changed. Rows written this way
      * return `Success(null)` from [loadArchiveBytes] and can only export as a regenerated,
-     * unsigned archive. Retained only until walt-android's call sites migrate (wlt-lasc).
+     * unsigned archive. Retained only until walt-android's call sites migrate (wlt-lasc);
+     * migrate every caller in one change, since a mixed fleet discards archives on re-import.
      */
     @Deprecated(
         message = "Pass the original archive bytes: upsert(pass, signatureStatus, archiveBytes).",
