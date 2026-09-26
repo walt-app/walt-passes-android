@@ -102,6 +102,7 @@ public fun FullScreenDocumentView(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    initialPageIndex: Int = 0,
     closeButton: @Composable (onClose: () -> Unit) -> Unit = { handler ->
         CloseFullScreenButton(onClick = handler)
     },
@@ -132,6 +133,7 @@ public fun FullScreenDocumentView(
                         "FullScreenDocumentView(PdfDocument) requires a non-null renderer"
                     },
                     telemetry = telemetry,
+                    initialPageIndex = initialPageIndex,
                 )
                 // wpass-8lu / wpass-pl7.4: a composite's retained photo zooms through the same
                 // isolated image-decode surface as a plain image; the barcode half stays with
@@ -178,13 +180,14 @@ private fun FullScreenPdfPager(
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
     telemetry: DocumentTelemetryGuard,
+    initialPageIndex: Int = 0,
 ) {
     val cache = remember(doc.id) { PdfThumbnailCache() }
     DisposableEffect(doc.id) {
         onDispose { cache.clear() }
     }
 
-    val pagerState = rememberPagerState(pageCount = { doc.pageCount })
+    val pagerState = rememberPagerState(initialPage = initialPageIndex, pageCount = { doc.pageCount })
 
     // Deliberately no beyondViewportPageCount here (unlike DocumentView's inline
     // pager): full-screen rasters are far larger and the peek redesign does not
