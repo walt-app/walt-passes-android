@@ -93,7 +93,7 @@ public fun DocumentView(
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
-    onOpenFullScreen: (() -> Unit)? = null,
+    onOpenFullScreen: ((pageIndex: Int) -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
     faceTint: Color = Color.Unspecified,
 ) {
@@ -199,7 +199,7 @@ private fun PdfDocumentView(
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
-    onOpenFullScreen: (() -> Unit)? = null,
+    onOpenFullScreen: ((pageIndex: Int) -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
     faceTint: Color = Color.Unspecified,
 ) {
@@ -228,6 +228,7 @@ private fun PdfDocumentView(
             faceTint = faceTint,
             onOpenFullScreen = onOpenFullScreen,
             fullScreenAffordance = fullScreenAffordance,
+            pageIndex = pagerState.currentPage,
         ) { contentModifier ->
             // Adjacent page rasterises ahead of the viewport so a swipe or peek reveals a
             // ready page (wpass-tjc.3); up to 4 live pages mid-swipe, inside DEFAULT_PAGE_WINDOW.
@@ -285,7 +286,7 @@ private fun ImageDocumentView(
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
     trustCaption: TrustCaptionPlacement = TrustCaptionPlacement.Docked,
-    onOpenFullScreen: (() -> Unit)? = null,
+    onOpenFullScreen: ((pageIndex: Int) -> Unit)? = null,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)? = null,
     faceTint: Color = Color.Unspecified,
 ) {
@@ -307,6 +308,7 @@ private fun ImageDocumentView(
             faceTint = faceTint,
             onOpenFullScreen = onOpenFullScreen,
             fullScreenAffordance = fullScreenAffordance,
+            pageIndex = 0,
         ) { contentModifier ->
             Box(modifier = contentModifier) {
                 InlineDecodedImage(
@@ -338,8 +340,9 @@ private fun ImageDocumentView(
 @Composable
 private fun ColumnScope.DocumentFaceSlot(
     faceTint: Color,
-    onOpenFullScreen: (() -> Unit)?,
+    onOpenFullScreen: ((pageIndex: Int) -> Unit)?,
     fullScreenAffordance: (@Composable (onOpen: () -> Unit) -> Unit)?,
+    pageIndex: Int = 0,
     content: @Composable (contentModifier: Modifier) -> Unit,
 ) {
     Box(
@@ -351,7 +354,7 @@ private fun ColumnScope.DocumentFaceSlot(
         val contentModifier = Modifier
             .fillMaxSize()
             .let {
-                if (onOpenFullScreen != null) it.clickable(onClick = onOpenFullScreen) else it
+                if (onOpenFullScreen != null) it.clickable(onClick = { onOpenFullScreen(pageIndex) }) else it
             }
             .padding(PaddingValues(horizontal = 16.dp, vertical = 8.dp))
         content(contentModifier)
@@ -364,7 +367,7 @@ private fun ColumnScope.DocumentFaceSlot(
                     .align(Alignment.BottomCenter)
                     .padding(bottom = 16.dp),
             ) {
-                fullScreenAffordance(onOpenFullScreen)
+                fullScreenAffordance { onOpenFullScreen(pageIndex) }
             }
         }
     }
@@ -373,7 +376,7 @@ private fun ColumnScope.DocumentFaceSlot(
     // so default consumers' content is never obscured. The trust caption above this
     // Column cannot be pushed off-screen by it.
     if (onOpenFullScreen != null && fullScreenAffordance == null) {
-        FullScreenBanner(onClick = onOpenFullScreen)
+        FullScreenBanner(onClick { onOpenFullScreen(pageIndex) })
     }
 }
 
