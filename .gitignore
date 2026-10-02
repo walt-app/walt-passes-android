@@ -16,8 +16,7 @@
 *.iws
 out/
 
-# Beads (synced via beads-sync branch, not working branches)
-.beads/issues.jsonl
+# Beads: issues.jsonl is tracked; runtime files are ignored by .beads/.gitignore
 .beads/interactions.jsonl
 .beads/embeddeddolt/
 .beads/backup/
