@@ -1,0 +1,10 @@
+# Default gitleaks rules plus one narrow allowlist.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Beads export: the JSON field is literally named key, so memory slugs match the generic rule. Values are kebab-case slugs, never credentials."
+condition = "AND"
+paths = ['''^\.beads/issues\.jsonl$''']
+regexTarget = "match"
+regexes = ['''^key":"[a-z0-9._-]+"$''']
