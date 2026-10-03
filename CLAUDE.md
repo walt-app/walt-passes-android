@@ -50,14 +50,9 @@ bd update wpass-xxx --claim  # Start work
 bd close wpass-xxx --reason "Completed and tested"
 ```
 
-## Decisions and Memories
+## Decisions
 
-Brainstorming-phase decisions are captured as `bd remember` entries in this repo's beads database (mirrored from walt-android on 2026-05-04):
-
-- `decision-wlt-0tn-q1` through `decision-wlt-0tn-q5`
-- `foss-pkpass-signature-policy-field-survey` (empirical FOSS signature-policy survey)
-
-Search with `bd memories <keyword>`.
+Brainstorming-phase decisions (`decision-wlt-0tn-q1`..`q5`) and the FOSS signature-policy field survey live in [`docs/brainstorm-decisions.md`](docs/brainstorm-decisions.md). Later ADRs in `docs/adr/` supersede them where they differ.
 
 
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:ca08a54f -->
