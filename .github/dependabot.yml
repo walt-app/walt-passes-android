@@ -26,10 +26,22 @@ updates:
       - dependency-name: "org.jetbrains.kotlin:*"
         update-types:
           ["version-update:semver-major", "version-update:semver-minor"]
+      # Plugin-marker coordinates: the catalog declares AGP and Kotlin as plugins
+      # too, and the library coordinates alone did not stop PR #248.
+      - dependency-name: "com.android.library"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
+      - dependency-name: "org.jetbrains.kotlin.*"
+        update-types:
+          ["version-update:semver-major", "version-update:semver-minor"]
       - dependency-name: "androidx.core:core-ktx"
         update-types: ["version-update:semver-major"]
       - dependency-name: "net.zetetic:sqlcipher-android"
         update-types: ["version-update:semver-major"]
+      # sqlcipher-android 4.19.0+ requires compileSdk 37 (PR #249); drop this
+      # once the repo moves off compileSdk 36.
+      - dependency-name: "net.zetetic:sqlcipher-android"
+        versions: [">=4.19.0"]
     groups:
       kotlin-and-agp:
         patterns:
