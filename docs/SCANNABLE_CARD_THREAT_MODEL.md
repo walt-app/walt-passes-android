@@ -400,12 +400,11 @@ rather than a gate that quietly stops covering a format. And the kernel now owns
 predicate for which symbologies need confirming, which is where the trust claim
 requires that decision to live.
 
-**The consumer's copy is not yet retired.** walt-android still carries an identical
-`canCarryAutoActingPayload()` in `feature/passes/common/AutoActingSymbologies.kt`,
-and it is the copy actually in the path — called ahead of the kernel predicate at
-both create-time call sites. Until it is deleted (`wpass-j6b`) the two can drift,
-and a correction made here would not take effect on its own. The discharge above is
-therefore complete on the kernel side only.
+**The consumer's copy is retired.** walt-android carried an identical
+`canCarryAutoActingPayload()` that ran ahead of the kernel predicate at both
+create-time call sites. It was deleted on 2026-08-13, and both call sites now let
+`requiresCreateConfirmation(format)` decide alone, so a correction made here takes
+effect in the app. The discharge above is complete.
 
 Widening the trigger also made the sheet's own copy wrong: every arm read "this QR
 will…". The strings now say "this code", since an Aztec boarding pass raising a
