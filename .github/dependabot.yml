@@ -38,10 +38,6 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "net.zetetic:sqlcipher-android"
         update-types: ["version-update:semver-major"]
-      # sqlcipher-android 4.19.0+ requires compileSdk 37 (PR #249); drop this
-      # once the repo moves off compileSdk 36.
-      - dependency-name: "net.zetetic:sqlcipher-android"
-        versions: [">=4.19.0"]
     groups:
       kotlin-and-agp:
         patterns:

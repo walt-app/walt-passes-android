@@ -22,7 +22,7 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
             version = providers.gradleProperty("walt.passes.version").get()
 
             extensions.configure<LibraryExtension> {
-                compileSdk = 36
+                compileSdk = 37
 
                 defaultConfig {
                     minSdk = 28

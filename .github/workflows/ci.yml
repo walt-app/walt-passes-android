@@ -37,8 +37,8 @@ jobs:
         run: |
           set -eu
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-36" \
-            "build-tools;36.0.0"
+            "platforms;android-37.0" \
+            "build-tools;37.0.0"
           echo "ANDROID_HOME=$ANDROID_SDK_ROOT" >> "$GITHUB_ENV"
 
       - name: Setup Gradle
@@ -108,8 +108,8 @@ jobs:
           set -eu
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
+            "platforms;android-37.0" \
+            "build-tools;37.0.0" \
             "platform-tools" \
             "emulator" \
             "system-images;android-${{ matrix.api }};google_apis;x86_64"
