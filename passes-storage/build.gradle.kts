@@ -20,7 +20,7 @@ android {
     //
     // The four arms cover the API floor (28 = minSdk, where StrongBox detection landed),
     // the SECURITY_LEVEL_STRONGBOX KeyInfo enum introduction (API 31 = S), the current
-    // long-term LTS image (API 34), and head (API 36 = compileSdk).
+    // long-term LTS image (API 34), and API 36 (head when the matrix was set).
     testOptions {
         managedDevices {
             localDevices {
