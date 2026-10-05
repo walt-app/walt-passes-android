@@ -623,7 +623,7 @@ class TrustClaimSurfaceTest {
                             PassField(
                                 key = "ticketNoBack",
                                 label = "#LABELTICKETNUMBER#",
-                                value = "52311919",
+                                value = "10203040",
                             ),
                         ),
                     ),
@@ -636,7 +636,7 @@ class TrustClaimSurfaceTest {
         }
         composeRule.onNodeWithText("Ticket Number").assertIsDisplayed()
         // Dynamic value (the actual ticket digits) must pass through unchanged.
-        composeRule.onNodeWithText("52311919").assertIsDisplayed()
+        composeRule.onNodeWithText("10203040").assertIsDisplayed()
     }
 
     private fun localizedFixture(
