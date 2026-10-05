@@ -13,7 +13,7 @@ class LocalizedStringsTest {
     @Test
     fun lookupOrSelfReturnsRawWhenKeyAbsent() {
         val strings = LocalizedStrings(mapOf("#LABELTICKETNUMBER#" to "Ticket Number"))
-        assertThat(strings.lookupOrSelf("52311919")).isEqualTo("52311919")
+        assertThat(strings.lookupOrSelf("10203040")).isEqualTo("10203040")
     }
 
     @Test
@@ -159,7 +159,7 @@ class LocalizedStringsTest {
         assertThat(strings.lookupOrSelf("#LABELORDERNUMBER#")).isEqualTo("Order Number")
         assertThat(strings.lookupOrSelf("#LABELPRICEZONE#")).isEqualTo("Price Zone")
         // Dynamic values (the actual ticket digits) must pass through unchanged.
-        assertThat(strings.lookupOrSelf("52311919")).isEqualTo("52311919")
+        assertThat(strings.lookupOrSelf("10203040")).isEqualTo("10203040")
     }
 
     private fun sampleLocalizedPass(vararg locales: Pair<PassLocale, LocalizedStrings>): Pass =

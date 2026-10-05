@@ -69,15 +69,15 @@ class FieldLinkScannerTest {
 
     @Test
     fun rejectsBareEightDigitTicketNumberAsPhone() {
-        // chroniques pass back-field "ticketNoBack" value: "52311919".
-        val spans = FieldLinkScanner.scan("52311919", source)
+        // A bare 8-digit ticket number, the shape real passes put in a back field.
+        val spans = FieldLinkScanner.scan("10203040", source)
         assertThat(spans).isEmpty()
     }
 
     @Test
     fun rejectsBareSevenDigitOrderNumberAsPhone() {
-        // chroniques pass back-field "orderNoBack" value: "5847559".
-        val spans = FieldLinkScanner.scan("5847559", source)
+        // A bare 7-digit order number, the shape real passes put in a back field.
+        val spans = FieldLinkScanner.scan("1020304", source)
         assertThat(spans).isEmpty()
     }
 
@@ -91,7 +91,7 @@ class FieldLinkScannerTest {
 
     @Test
     fun rejectsBareDigitRunAdjacentToProseAsPhone() {
-        val spans = FieldLinkScanner.scan("Order 52311919 placed.", source)
+        val spans = FieldLinkScanner.scan("Order 10203040 placed.", source)
         assertThat(spans).isEmpty()
     }
 
