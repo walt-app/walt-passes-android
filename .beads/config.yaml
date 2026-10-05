@@ -53,4 +53,5 @@
 # - github.org
 # - github.repo
 
-export.git-add: true
+# The issue export is never staged: this repo is public
+export.git-add: false

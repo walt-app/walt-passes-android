@@ -17,7 +17,8 @@
 *.iws
 out/
 
-# Beads: issues.jsonl is tracked; runtime files are ignored by .beads/.gitignore
+# Beads: the issue database stays local and is never committed
+.beads/issues.jsonl
 .beads/interactions.jsonl
 .beads/embeddeddolt/
 .beads/backup/

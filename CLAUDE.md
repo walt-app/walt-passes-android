@@ -50,6 +50,9 @@ bd update wpass-xxx --claim  # Start work
 bd close wpass-xxx --reason "Completed and tested"
 ```
 
+The bead database is local-only: `.beads/issues.jsonl` is gitignored and never committed.
+Keep bead text out of commits, PRs and GitHub issues.
+
 ## Decisions
 
 Brainstorming-phase decisions (`decision-wlt-0tn-q1`..`q5`) and the FOSS signature-policy field survey live in [`docs/brainstorm-decisions.md`](docs/brainstorm-decisions.md). Later ADRs in `docs/adr/` supersede them where they differ.
