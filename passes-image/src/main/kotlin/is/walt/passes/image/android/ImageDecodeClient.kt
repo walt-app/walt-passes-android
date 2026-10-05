@@ -8,6 +8,7 @@ import android.os.SharedMemory
 import `is`.walt.passes.image.android.ImageDecodeBinderProxy.Companion.CODE_DECODE
 import `is`.walt.passes.image.android.ImageDecodeBinderProxy.Companion.TAG_OK
 import `is`.walt.passes.image.android.ImageDecodeBinderProxy.Companion.TAG_REJECTED
+import `is`.walt.passes.isolation.rasterReplyFits
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -67,22 +68,32 @@ public class ImageDecodeClient(
                 }
                 // Untrusted reply (sender may be a compromised sandbox): any parse failure
                 // folds to DecoderUnavailable instead of throwing out of this suspend result.
-                runCatching { parseReply(reply) }.getOrElse { decoderUnavailable() }
+                runCatching { parseReply(reply, maxWidthPx, maxHeightPx) }.getOrElse { decoderUnavailable() }
             } finally {
                 reply.recycle()
                 data.recycle()
             }
         }
 
-    private fun parseReply(reply: Parcel): ImageDecodeResult =
+    private fun parseReply(
+        reply: Parcel,
+        maxWidthPx: Int,
+        maxHeightPx: Int,
+    ): ImageDecodeResult =
         when (val tag = reply.readInt()) {
-            TAG_OK ->
-                ImageDecodeResult.Ok(
-                    sharedMemory = reply.readTypedObject(SharedMemory.CREATOR) ?: error("Decode reply missing raster"),
-                    widthPx = reply.readInt(),
-                    heightPx = reply.readInt(),
-                    sourceAspect = reply.readFloat(),
-                )
+            TAG_OK -> {
+                val sm = reply.readTypedObject(SharedMemory.CREATOR) ?: error("Decode reply missing raster")
+                val w = reply.readInt()
+                val h = reply.readInt()
+                val maxPixels = ImageDecodeConfig.DEFAULT_MAX_OUTPUT_PIXELS
+                // Dims the buffer cannot back would make the host allocate on the sandbox's say-so.
+                if (rasterReplyFits(w, h, maxWidthPx, maxHeightPx, maxPixels, sm.size.toLong())) {
+                    ImageDecodeResult.Ok(sm, w, h, sourceAspect = reply.readFloat())
+                } else {
+                    runCatching { sm.close() }
+                    decoderUnavailable()
+                }
+            }
             TAG_REJECTED -> ImageDecodeResult.Rejected(ImageDecodeRejectedKindWire.decode(reply.readInt()))
             else -> error("Unknown decode reply tag: $tag")
         }

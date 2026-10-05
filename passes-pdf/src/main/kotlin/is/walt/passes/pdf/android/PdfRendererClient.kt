@@ -6,6 +6,7 @@ import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import android.os.SharedMemory
 import `is`.walt.passes.document.DocumentRejectedKind
+import `is`.walt.passes.isolation.rasterReplyFits
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_PROBE
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_RENDER
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.TAG_OK
@@ -124,7 +125,13 @@ public class PdfRendererClient(
                         val w = reply.readInt()
                         val h = reply.readInt()
                         val pageAspect = reply.readFloat()
-                        RenderResult.Ok(sm, w, h, pageAspect)
+                        // The sender may be a compromised sandbox: never hand on dims its buffer cannot back.
+                        if (rasterReplyFits(w, h, widthPx, heightPx, PdfRendererService.MAX_PIXELS, sm.size.toLong())) {
+                            RenderResult.Ok(sm, w, h, pageAspect)
+                        } else {
+                            runCatching { sm.close() }
+                            RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
+                        }
                     }
                     TAG_REJECTED -> RenderResult.Rejected(RejectedKindWire.decode(reply.readInt()))
                     else -> error("Unknown render reply tag: $tag")
