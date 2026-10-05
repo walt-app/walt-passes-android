@@ -81,6 +81,24 @@ class ImageDecodeBinderRoundTripTest {
     }
 
     @Test
+    fun replyClaimingMorePixelsThanItsBufferHoldsIsDecoderUnavailable() = runTest {
+        val unavailable = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecoderUnavailable)
+        // Buffer backs 32x16. Claims: far past it, one row past it, and past the requested bound.
+        val lies =
+            listOf(
+                Triple(20_000, 20_000, 20_000),
+                Triple(WIDTH_PX, HEIGHT_PX + 1, 20_000),
+                Triple(WIDTH_PX, HEIGHT_PX, 8),
+            )
+        for ((claimedWidth, claimedHeight, requestedHeight) in lies) {
+            val sm = SharedMemory.create("walt-test-image-lie", PIXEL_BYTES)
+            val client = clientFor(StaticImpl(ImageDecodeResult.Ok(sm, claimedWidth, claimedHeight, ASPECT)))
+            val result = client.decode(pipeRead, maxWidthPx = 20_000, maxHeightPx = requestedHeight)
+            assertThat(result).isEqualTo(unavailable)
+        }
+    }
+
+    @Test
     fun rejectedRoundTripCarriesEachKind() = runTest {
         for (kind in allKinds) {
             val client = clientFor(StaticImpl(ImageDecodeResult.Rejected(kind)))

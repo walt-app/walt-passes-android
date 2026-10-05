@@ -6,6 +6,7 @@ import android.os.ParcelFileDescriptor
 import android.os.RemoteException
 import android.os.SharedMemory
 import `is`.walt.passes.document.DocumentRejectedKind
+import `is`.walt.passes.isolation.rasterReplyFits
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_PROBE
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.CODE_RENDER
 import `is`.walt.passes.pdf.android.PdfRendererBinderProxy.Companion.TAG_OK
@@ -55,13 +56,12 @@ import kotlinx.coroutines.withContext
  *    condition. Folding it in costs one line and avoids the alternative — decoding an
  *    empty reply parcel where `readInt()` returns `0`, which equals `TAG_OK`, would
  *    surface a phantom `Ok(0)`.
- *  - Unrecognised reply tags, missing SharedMemory on a `TAG_OK` render reply, and
- *    unrecognised rejection-kind codes are wire-invariant assertions and fail-fast
- *    via [error]. Same-module proxy and client are required to agree on the wire
- *    format by construction; a disagreement is a programmer error to be caught at the
- *    nearest test run, not silently absorbed by the consumer. The structural gate is
- *    [PdfRendererBinderRoundTripTest] (wire shape) and [RejectedKindWireSurfaceTest]
- *    (rejection-kind table).
+ *  - The reply is untrusted: the sender may be a compromised sandbox. An unrecognised
+ *    tag or rejection code, a missing SharedMemory, a page count outside
+ *    `1..MAX_PAGES`, raster dims outside the request, the pixel cap or the buffer, or
+ *    an unusable aspect all fold into [DocumentRejectedKind.RendererFailed] and never
+ *    throw. Same-build wire mismatches are still caught by
+ *    [PdfRendererBinderRoundTripTest] and [RejectedKindWireSurfaceTest].
  */
 public class PdfRendererClient(
     private val binder: IBinder,
@@ -81,11 +81,8 @@ public class PdfRendererClient(
                 if (!accepted) {
                     return@withContext ProbeResult.Rejected(DocumentRejectedKind.RendererFailed)
                 }
-                when (val tag = reply.readInt()) {
-                    TAG_OK -> ProbeResult.Ok(reply.readInt())
-                    TAG_REJECTED -> ProbeResult.Rejected(RejectedKindWire.decode(reply.readInt()))
-                    else -> error("Unknown probe reply tag: $tag")
-                }
+                runCatching { parseProbeReply(reply) }
+                    .getOrElse { ProbeResult.Rejected(DocumentRejectedKind.RendererFailed) }
             } finally {
                 reply.recycle()
                 data.recycle()
@@ -117,22 +114,47 @@ public class PdfRendererClient(
                 if (!accepted) {
                     return@withContext RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
                 }
-                when (val tag = reply.readInt()) {
-                    TAG_OK -> {
-                        val sm = reply.readTypedObject(SharedMemory.CREATOR)
-                            ?: error("Render reply missing SharedMemory")
-                        val w = reply.readInt()
-                        val h = reply.readInt()
-                        val pageAspect = reply.readFloat()
-                        RenderResult.Ok(sm, w, h, pageAspect)
-                    }
-                    TAG_REJECTED -> RenderResult.Rejected(RejectedKindWire.decode(reply.readInt()))
-                    else -> error("Unknown render reply tag: $tag")
-                }
+                runCatching { parseRenderReply(reply, widthPx, heightPx) }
+                    .getOrElse { RenderResult.Rejected(DocumentRejectedKind.RendererFailed) }
             } finally {
                 reply.recycle()
                 data.recycle()
             }
+        }
+
+    private fun parseProbeReply(reply: Parcel): ProbeResult =
+        when (val tag = reply.readInt()) {
+            TAG_OK -> {
+                val pages = reply.readInt()
+                check(pages in 1..PdfRendererService.MAX_PAGES) { "Probe reply page count out of range" }
+                ProbeResult.Ok(pages)
+            }
+            TAG_REJECTED -> ProbeResult.Rejected(RejectedKindWire.decode(reply.readInt()))
+            else -> error("Unknown probe reply tag: $tag")
+        }
+
+    private fun parseRenderReply(
+        reply: Parcel,
+        widthPx: Int,
+        heightPx: Int,
+    ): RenderResult =
+        when (val tag = reply.readInt()) {
+            TAG_OK -> {
+                val sm = reply.readTypedObject(SharedMemory.CREATOR) ?: error("Render reply missing SharedMemory")
+                val w = reply.readInt()
+                val h = reply.readInt()
+                val pageAspect = reply.readFloat()
+                val fits = rasterReplyFits(w, h, widthPx, heightPx, PdfRendererService.MAX_PIXELS, sm.size.toLong())
+                // Never hand on dims outside the request or the buffer, or an aspect the UI cannot lay out.
+                if (fits && pageAspect.isFinite() && pageAspect > 0f) {
+                    RenderResult.Ok(sm, w, h, pageAspect)
+                } else {
+                    runCatching { sm.close() }
+                    RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
+                }
+            }
+            TAG_REJECTED -> RenderResult.Rejected(RejectedKindWire.decode(reply.readInt()))
+            else -> error("Unknown render reply tag: $tag")
         }
 
     private fun writeSourceRect(data: Parcel, sourceRect: RenderSourceRect) {

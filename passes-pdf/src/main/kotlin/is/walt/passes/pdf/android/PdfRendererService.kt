@@ -41,7 +41,8 @@ public class PdfRendererService : Service() {
 
     private fun buildImpl(): PdfRendererBinder =
         object : PdfRendererBinder {
-            override suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult = doProbe(pdf, config.maxPages)
+            override suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult =
+                doProbe(pdf, config.maxPages, watchdog)
 
             override suspend fun render(
                 pdf: ParcelFileDescriptor,
@@ -70,14 +71,21 @@ public class PdfRendererService : Service() {
     }
 }
 
-internal suspend fun doProbe(pdf: ParcelFileDescriptor, maxPages: Int): ProbeResult =
+internal suspend fun doProbe(
+    pdf: ParcelFileDescriptor,
+    maxPages: Int,
+    watchdog: RenderWatchdog,
+): ProbeResult =
     runCatching {
-        PdfRenderer(pdf).use { renderer ->
-            val pages = renderer.pageCount
-            if (pages > maxPages) {
-                ProbeResult.Rejected(DocumentRejectedKind.TooManyPages)
-            } else {
-                ProbeResult.Ok(pages)
+        // Opening a document is native PDFium work too, so it runs under the same kill timer as render.
+        watchdog.guard {
+            PdfRenderer(pdf).use { renderer ->
+                val pages = renderer.pageCount
+                if (pages > maxPages) {
+                    ProbeResult.Rejected(DocumentRejectedKind.TooManyPages)
+                } else {
+                    ProbeResult.Ok(pages)
+                }
             }
         }
     }.getOrElse { t -> ProbeResult.Rejected(rejectedKindForOpenFailure(t)) }
