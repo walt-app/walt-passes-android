@@ -10,6 +10,10 @@ package `is`.walt.passes.core
  * against the input stream length before unzipping; [maxEntries] is checked while iterating
  * the central directory; [maxJsonDepth] is enforced inside the JSON reader.
  *
+ * [maxInflatedBytes] bounds the sum of every entry's decompressed bytes in one archive,
+ * directory payloads included, so many entries that each fit [maxEntryBytes] cannot add up
+ * to a heap-exhausting total.
+ *
  * [maxJsonStringBytes] is intentionally cross-format: it bounds individual string
  * values in `pass.json` *and* individual values in `<locale>.lproj/pass.strings`. The
  * two formats share an attack surface (a single oversized string deferring allocation
@@ -30,11 +34,13 @@ public data class ParserConfig(
     public val acceptUnsignedArchives: Boolean = true,
     public val acceptSelfSignedCertificates: Boolean = true,
     public val telemetryGuard: TelemetryGuard = TelemetryGuard.NoOp,
+    public val maxInflatedBytes: Long = DEFAULT_MAX_INFLATED_BYTES,
 ) {
     public companion object {
         public const val DEFAULT_MAX_ARCHIVE_BYTES: Long = 10L * 1024 * 1024
         public const val DEFAULT_MAX_ENTRIES: Int = 256
         public const val DEFAULT_MAX_ENTRY_BYTES: Long = 4L * 1024 * 1024
+        public const val DEFAULT_MAX_INFLATED_BYTES: Long = 32L * 1024 * 1024
         public const val DEFAULT_MAX_JSON_DEPTH: Int = 16
         public const val DEFAULT_MAX_JSON_STRING_BYTES: Int = 1 * 1024 * 1024
         public const val DEFAULT_MAX_IMAGE_PIXEL_COUNT: Int = 4096 * 4096
@@ -71,4 +77,5 @@ public fun ResourceLimit.limitFrom(config: ParserConfig): Long =
         ResourceLimit.JsonStringSize -> config.maxJsonStringBytes.toLong()
         ResourceLimit.ImagePixelCount -> config.maxImagePixelCount.toLong()
         ResourceLimit.LocaleCount -> config.maxLocaleCount.toLong()
+        ResourceLimit.InflatedSize -> config.maxInflatedBytes
     }

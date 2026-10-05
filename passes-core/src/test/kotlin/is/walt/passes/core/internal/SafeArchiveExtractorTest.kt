@@ -150,6 +150,32 @@ class SafeArchiveExtractorTest {
     }
 
     @Test
+    fun manyEntriesUnderTheEntryCapTripTheInflatedSizeLimitAtDefaults() {
+        // 48 x 4 MB of zeros is a ~200 KB archive that inflates to 192 MB; no single entry is over its cap.
+        val entryBytes = ParserConfig.DEFAULT_MAX_ENTRY_BYTES.toInt()
+        val zip = buildArchive { repeat(48) { i -> entry("icon$i.png", ByteArray(entryBytes)) } }
+        assertThat(zip.size).isLessThan(512 * 1_024)
+        val result = extractSafely(PassSource.Bytes(zip), ParserConfig())
+        assertExceeded(result, ResourceLimit.InflatedSize)
+    }
+
+    @Test
+    fun inflatedTotalExactlyAtTheLimitIsAccepted() {
+        val zip = buildArchive { repeat(4) { i -> entry("icon$i.png", ByteArray(1_024)) } }
+        val config = ParserConfig().copy(maxInflatedBytes = 4_096)
+        assertThat(extractSafely(PassSource.Bytes(zip), config)).isInstanceOf(ExtractResult.Success::class.java)
+        val oneByteTighter = config.copy(maxInflatedBytes = 4_095)
+        assertExceeded(extractSafely(PassSource.Bytes(zip), oneByteTighter), ResourceLimit.InflatedSize)
+    }
+
+    @Test
+    fun directoryEntryPayloadsAreChargedAgainstTheInflatedSizeLimit() {
+        val zip = buildArchive { repeat(4) { i -> entry("d$i.lproj/", ByteArray(2_048)) } }
+        val config = ParserConfig().copy(maxInflatedBytes = 4_096)
+        assertExceeded(extractSafely(PassSource.Bytes(zip), config), ResourceLimit.InflatedSize)
+    }
+
+    @Test
     fun tooManyEntriesHitsEntryCountLimit() {
         val zip =
             buildArchive {

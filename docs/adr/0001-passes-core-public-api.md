@@ -181,3 +181,25 @@ Rationale: Walt's export container requires every pass entry to be a `.pkpass`, 
 | D8 (limits) | `PassEncoderTest.everyParserLimitIsHonouredBeforeBytesAreReturned`, `outputAtTheDefaultConfigIsAcceptedAtTheSameConfig` |
 | D8 (determinism) | `PassEncoderTest.encodeIsByteIdenticalForEqualPassesRegardlessOfMapOrderOrTimeZone`, `localHeadersCarryNoExtraFieldAndAFixedDosTimestamp`, `entryOrderIsFixed` |
 | D8 (drift) | `PassEncoderTest.invertedNameTablesCoverEveryEnumValue` |
+
+## Addendum 2026-10-05: single-archive inflated-size cap
+
+**Amendment to D5.** One archive was bounded per entry (`maxEntryBytes`) and by
+count (`maxEntries`), which left the product of the two, about 1 GiB at
+defaults, as the real ceiling on retained bytes: a small archive of many
+highly compressible entries could exhaust the host heap before manifest or
+signature checks ran. `ParserConfig.maxInflatedBytes` (default 32 MiB) now
+bounds the sum of every entry's decompressed bytes, directory payloads
+included, checked while inflating. A breach is
+`MalformedReason.ResourceLimitExceeded(ResourceLimit.InflatedSize)`, flattened
+to `ParseFailureReason.InflatedSizeLimit`. `PassEncoder` honours the same cap.
+
+The new field is appended to `ParserConfig`, and the new enum values are
+appended to `ResourceLimit` and `ParseFailureReason`, so positional callers and
+existing arms are unaffected; a consumer with an exhaustive `when` over either
+enum gains one arm.
+
+| Decision | Test |
+|----------|------|
+| D5 (inflated total) | `SafeArchiveExtractorTest.manyEntriesUnderTheEntryCapTripTheInflatedSizeLimitAtDefaults`, `inflatedTotalExactlyAtTheLimitIsAccepted`, `directoryEntryPayloadsAreChargedAgainstTheInflatedSizeLimit`; `PassParserTest.manySmallerEntriesTripTheInflatedSizeLimit` |
+| D8 (limits) | `PassEncoderTest.everyParserLimitIsHonouredBeforeBytesAreReturned` |

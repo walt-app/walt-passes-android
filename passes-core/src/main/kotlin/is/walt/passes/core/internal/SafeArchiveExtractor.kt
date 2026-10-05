@@ -14,7 +14,7 @@ import java.util.zip.ZipInputStream
 /**
  * The single hardened ZIP-extraction entry point for one PKPASS archive. Guards: magic-byte
  * preflight, compressed-size cap (declared size, then a streaming bound), entry count,
- * per-entry decompressed cap (directory payloads drained through it too), zip-slip names,
+ * per-entry and whole-archive decompressed caps (directory payloads pay into both), zip-slip names,
  * a root-only extension allowlist plus the bare `signature` file, duplicate names, and
  * in-memory-only extraction. The stream chain and the shared checks live in
  * `ArchiveStreams.kt`. Symlink attributes are invisible to `java.util.zip`; nothing here
@@ -86,10 +86,11 @@ private fun extractAllEntries(
     config: ParserConfig,
 ): ExtractResult {
     val entries = LinkedHashMap<String, ByteArray>()
+    val budget = InflateBudget(config.maxInflatedBytes)
     var failure: ExtractResult.Failure? = null
     while (failure == null) {
         val entry = zis.nextEntry ?: break
-        failure = processEntry(zis, entry, entries, config)
+        failure = processEntry(zis, entry, entries, config, budget)
     }
     // archiveBytes is filled in by the caller from the BoundedInputStream counter
     // after the ZipInputStream closes; the value here is a placeholder.
@@ -101,6 +102,7 @@ private fun processEntry(
     entry: ZipEntry,
     entries: MutableMap<String, ByteArray>,
     config: ParserConfig,
+    budget: InflateBudget,
 ): ExtractResult.Failure? {
     // Validate the name unconditionally, even for directory entries we'd otherwise
     // skip. A `../foo/` directory is harmless today (nothing acts on directory
@@ -108,8 +110,8 @@ private fun processEntry(
     // can't accidentally bypass the path-traversal guard.
     return when {
         isUnsafeEntryName(entry.name) -> ExtractResult.Failure(MalformedReason.NotAZipArchive)
-        entry.isDirectory -> drainOrStore(zis, entry.name, entries = null, config.maxEntryBytes)
-        else -> validateAndRead(zis, entry.name, entries, config)
+        entry.isDirectory -> drainOrStore(zis, entry.name, entries = null, config.maxEntryBytes, budget)
+        else -> validateAndRead(zis, entry.name, entries, config, budget)
     }
 }
 
@@ -118,6 +120,7 @@ private fun validateAndRead(
     name: String,
     entries: MutableMap<String, ByteArray>,
     config: ParserConfig,
+    budget: InflateBudget,
 ): ExtractResult.Failure? {
     // isUnsafeEntryName already ran in processEntry; the chain picks up here.
     val rejection =
@@ -125,7 +128,7 @@ private fun validateAndRead(
             ?: duplicateEntryReason(entries, name)
             ?: entryCountReason(entries, config)
     return rejection?.let { ExtractResult.Failure(it) }
-        ?: drainOrStore(zis, name, entries, config.maxEntryBytes)
+        ?: drainOrStore(zis, name, entries, config.maxEntryBytes, budget)
 }
 
 private fun extensionReason(name: String): MalformedReason? {
@@ -161,24 +164,26 @@ private fun hasAllowedName(name: String): Boolean {
 }
 
 /**
- * Inflates the current entry under [maxEntryBytes], storing it under [name] when
- * [entries] is given and draining it otherwise (directory entries).
+ * Inflates the current entry under [maxEntryBytes] and the archive-wide [budget], storing
+ * it under [name] when [entries] is given and draining it otherwise (directory entries).
  */
 private fun drainOrStore(
     zis: ZipInputStream,
     name: String,
     entries: MutableMap<String, ByteArray>?,
     maxEntryBytes: Long,
+    budget: InflateBudget,
 ): ExtractResult.Failure? {
     val buffer = if (entries != null) ByteArrayOutputStream() else null
-    return when (inflateBounded(zis, buffer, maxEntryBytes)) {
+    return when (inflateBounded(zis, buffer, maxEntryBytes, budget)) {
         null -> {
             if (entries != null && buffer != null) entries[name] = buffer.toByteArray()
             null
         }
-        // No cumulative budget in single-archive mode, so CumulativeSize is unreachable; both are the entry cap.
-        InflateLimit.EntrySize, InflateLimit.CumulativeSize ->
+        InflateLimit.EntrySize ->
             ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.EntrySize))
+        InflateLimit.CumulativeSize ->
+            ExtractResult.Failure(MalformedReason.ResourceLimitExceeded(ResourceLimit.InflatedSize))
     }
 }
 
