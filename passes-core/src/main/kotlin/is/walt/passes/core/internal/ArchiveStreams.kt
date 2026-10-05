@@ -77,7 +77,7 @@ internal fun inflateBounded(
     zis: ZipInputStream,
     buffer: ByteArrayOutputStream?,
     maxEntryBytes: Long,
-    budget: InflateBudget? = null,
+    budget: InflateBudget,
 ): InflateLimit? {
     val chunk = ByteArray(READ_BUFFER_SIZE)
     var entryBytes = 0L
@@ -88,7 +88,7 @@ internal fun inflateBounded(
         val tripped =
             when {
                 entryBytes > maxEntryBytes -> InflateLimit.EntrySize
-                budget?.charge(n) == false -> InflateLimit.CumulativeSize
+                !budget.charge(n) -> InflateLimit.CumulativeSize
                 else -> null
             }
         if (tripped != null) return tripped

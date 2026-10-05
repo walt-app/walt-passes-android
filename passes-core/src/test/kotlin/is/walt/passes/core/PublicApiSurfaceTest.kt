@@ -97,7 +97,7 @@ class PublicApiSurfaceTest {
 
     /**
      * Companion to [parseResultFailureKindCoversEveryArm] for [ParseFailureReason]. Every
-     * [TamperReason] / [MalformedReason] / [UnsupportedReason] arm — including all seven
+     * [TamperReason] / [MalformedReason] / [UnsupportedReason] arm — including all eight
      * [ResourceLimit] sub-buckets that lift out of [MalformedReason.ResourceLimitExceeded] —
      * round-trips to a distinct [ParseFailureReason]. Together with the exhaustive `when`
      * inside [toFailureReason], this pins both directions of the mapping.

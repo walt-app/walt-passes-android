@@ -78,7 +78,7 @@ public enum class ParseFailureKind {
 
 /**
  * Telemetry-safe flattening of every [ParseResult] failure-reason arm. Mirrors the sealed
- * arms of [TamperReason], [MalformedReason], and [UnsupportedReason] (and the seven
+ * arms of [TamperReason], [MalformedReason], and [UnsupportedReason] (and the eight
  * [ResourceLimit] sub-buckets that lift out of [MalformedReason.ResourceLimitExceeded]).
  *
  * Lives as an enum, not a String, so the same structural-restriction discipline that

@@ -194,10 +194,14 @@ included, checked while inflating. A breach is
 `MalformedReason.ResourceLimitExceeded(ResourceLimit.InflatedSize)`, flattened
 to `ParseFailureReason.InflatedSizeLimit`. `PassEncoder` honours the same cap.
 
-The new field is appended to `ParserConfig`, and the new enum values are
-appended to `ResourceLimit` and `ParseFailureReason`, so positional callers and
-existing arms are unaffected; a consumer with an exhaustive `when` over either
-enum gains one arm.
+The default is about three times the compressed cap, since pass members are
+mostly PNGs that barely compress. A consumer that raises `maxArchiveBytes` past
+`maxInflatedBytes` must raise `maxInflatedBytes` with it.
+
+The new field is appended to `ParserConfig` and the new value to
+`ResourceLimit`; `ParseFailureReason.InflatedSizeLimit` joins the other limit
+values, ahead of the unsupported ones. Positional callers and existing arms are
+unaffected; a consumer with an exhaustive `when` over either enum gains one arm.
 
 | Decision | Test |
 |----------|------|

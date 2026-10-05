@@ -151,9 +151,10 @@ class SafeArchiveExtractorTest {
 
     @Test
     fun manyEntriesUnderTheEntryCapTripTheInflatedSizeLimitAtDefaults() {
-        // 48 x 4 MB of zeros is a ~200 KB archive that inflates to 192 MB; no single entry is over its cap.
+        // One entry more than the total allows; each is exactly at its own cap and compresses to a few KB.
         val entryBytes = ParserConfig.DEFAULT_MAX_ENTRY_BYTES.toInt()
-        val zip = buildArchive { repeat(48) { i -> entry("icon$i.png", ByteArray(entryBytes)) } }
+        val count = (ParserConfig.DEFAULT_MAX_INFLATED_BYTES / ParserConfig.DEFAULT_MAX_ENTRY_BYTES).toInt() + 1
+        val zip = buildArchive { repeat(count) { i -> entry("icon$i.png", ByteArray(entryBytes)) } }
         assertThat(zip.size).isLessThan(512 * 1_024)
         val result = extractSafely(PassSource.Bytes(zip), ParserConfig())
         assertExceeded(result, ResourceLimit.InflatedSize)
