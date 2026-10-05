@@ -23,8 +23,29 @@ class PassBarcodeMatrixTest {
 
     @Test
     fun declaredNonLatinLegacyCharsetRoundTrips() {
-        val matrix = encode("Билет-42", "windows-1251", BarcodeFormat.QR_CODE)
-        assertThat(decode(matrix!!)).isEqualTo("Билет-42")
+        for (format in TWO_DIMENSIONAL) {
+            val matrix = encode("Билет-42", "windows-1251", format)
+            assertWithMessage("$format").that(decode(matrix!!)).isEqualTo("Билет-42")
+        }
+    }
+
+    @Test
+    fun latin1TextDeclaredUtf8IsEncodedAsUtf8AndRoundTrips() {
+        for (format in TWO_DIMENSIONAL) {
+            val matrix = encode("café-123", "utf-8", format)
+            val latin1Symbol = MultiFormatWriter().encode("café-123", format, SIZE, SIZE)
+            assertWithMessage("$format").that(matrix).isNotEqualTo(latin1Symbol)
+            assertWithMessage("$format").that(decode(matrix!!)).isEqualTo("café-123")
+        }
+    }
+
+    @Test
+    fun charsetWithNoEciAssignmentIsRefusedWhenItsBytesDifferFromLatin1() {
+        for (format in TWO_DIMENSIONAL) {
+            assertWithMessage("$format").that(encode("Билет-42", "KOI8-R", format)).isNull()
+            assertWithMessage("$format").that(encode("abc", "UTF-16", format)).isNull()
+            assertWithMessage("$format ascii").that(encode("ABC-42", "KOI8-R", format)).isNotNull()
+        }
     }
 
     @Test

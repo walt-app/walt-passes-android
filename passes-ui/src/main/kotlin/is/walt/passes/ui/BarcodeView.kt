@@ -86,14 +86,13 @@ public fun BarcodeView(
 }
 
 private fun BitMatrix.toBitmap(): Bitmap {
-    val matrix = this
-    val width = matrix.width
-    val height = matrix.height
+    val width = this.width
+    val height = this.height
     val pixels = IntArray(width * height)
     for (y in 0 until height) {
         val rowOffset = y * width
         for (x in 0 until width) {
-            pixels[rowOffset + x] = if (matrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
+            pixels[rowOffset + x] = if (get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
         }
     }
     return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
