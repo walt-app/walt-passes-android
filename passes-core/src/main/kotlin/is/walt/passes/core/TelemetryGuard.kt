@@ -78,7 +78,7 @@ public enum class ParseFailureKind {
 
 /**
  * Telemetry-safe flattening of every [ParseResult] failure-reason arm. Mirrors the sealed
- * arms of [TamperReason], [MalformedReason], and [UnsupportedReason] (and the seven
+ * arms of [TamperReason], [MalformedReason], and [UnsupportedReason] (and the eight
  * [ResourceLimit] sub-buckets that lift out of [MalformedReason.ResourceLimitExceeded]).
  *
  * Lives as an enum, not a String, so the same structural-restriction discipline that
@@ -117,6 +117,7 @@ public enum class ParseFailureReason {
     JsonStringSizeLimit,
     ImagePixelCountLimit,
     LocaleCountLimit,
+    InflatedSizeLimit,
 
     // UnsupportedReason arms.
     UnsupportedFormatVersion,
@@ -125,7 +126,7 @@ public enum class ParseFailureReason {
 }
 
 /**
- * Maps a [ParseFailureReason] to its enclosing [ParseFailureKind] bucket. Encodes the 20→4
+ * Maps a [ParseFailureReason] to its enclosing [ParseFailureKind] bucket. Encodes the 21→4
  * narrowing that exists implicitly across [toFailureReason] / [toFailureKind] so that the
  * cross-field invariant on [ParseFailedEvent] (`reason ∈ buckets-of(outcome)`) is checkable
  * in code rather than enforced by convention. Adding a new [ParseFailureReason] arm without
@@ -155,6 +156,7 @@ public fun ParseFailureReason.toKind(): ParseFailureKind =
         ParseFailureReason.JsonStringSizeLimit,
         ParseFailureReason.ImagePixelCountLimit,
         ParseFailureReason.LocaleCountLimit,
+        ParseFailureReason.InflatedSizeLimit,
         -> ParseFailureKind.ResourceLimitExceeded
 
         ParseFailureReason.UnsupportedFormatVersion,

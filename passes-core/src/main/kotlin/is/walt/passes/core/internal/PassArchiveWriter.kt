@@ -112,6 +112,7 @@ private fun entryLimit(
     when {
         members.size > config.maxEntries -> ResourceLimit.EntryCount
         members.values.any { it.size > config.maxEntryBytes } -> ResourceLimit.EntrySize
+        members.values.sumOf { it.size.toLong() } > config.maxInflatedBytes -> ResourceLimit.InflatedSize
         else -> null
     }
 

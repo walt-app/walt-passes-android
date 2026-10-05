@@ -157,6 +157,22 @@ class PassParserTest {
     }
 
     @Test
+    fun manySmallerEntriesTripTheInflatedSizeLimit() {
+        // Each entry fits maxEntryBytes; only the archive-wide total is over.
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries = (0 until 8).associate { "icon$it.png" to ByteArray(1024) },
+            )
+        val tightConfig = ParserConfig().copy(maxEntryBytes = 1024, maxInflatedBytes = 4 * 1024)
+        val result = PassParser.create(tightConfig).parse(PassSource.Bytes(zip))
+        assertThat(result)
+            .isEqualTo(
+                ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.InflatedSize)),
+            )
+    }
+
+    @Test
     fun pngPixelCountLimitTripsAsResourceLimit() {
         // Synthesize a PNG whose IHDR declares a canvas big enough to overshoot the
         // configured pixel cap. The bytes themselves are tiny — the parser inspects

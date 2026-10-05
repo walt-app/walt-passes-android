@@ -165,6 +165,7 @@ class PassEncoderTest {
                 ResourceLimit.JsonStringSize to (withStringsValue(pass, "y".repeat(33)) to shortStrings),
                 ResourceLimit.ImagePixelCount to (withImage(pass, giant) to ParserConfig()),
                 ResourceLimit.LocaleCount to (pass to ParserConfig(maxLocaleCount = 1)),
+                ResourceLimit.InflatedSize to (pass to ParserConfig(maxInflatedBytes = 64)),
             )
         for ((limit, input) in cases) {
             val (candidate, config) = input

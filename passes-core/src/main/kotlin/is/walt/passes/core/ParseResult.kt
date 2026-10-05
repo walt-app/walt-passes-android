@@ -95,6 +95,7 @@ public enum class ResourceLimit {
     JsonStringSize,
     ImagePixelCount,
     LocaleCount,
+    InflatedSize,
 }
 
 public sealed interface UnsupportedReason {
@@ -167,6 +168,7 @@ public fun ParseResult.toFailureReason(): ParseFailureReason? =
                         ResourceLimit.JsonStringSize -> ParseFailureReason.JsonStringSizeLimit
                         ResourceLimit.ImagePixelCount -> ParseFailureReason.ImagePixelCountLimit
                         ResourceLimit.LocaleCount -> ParseFailureReason.LocaleCountLimit
+                        ResourceLimit.InflatedSize -> ParseFailureReason.InflatedSizeLimit
                     }
             }
         is ParseResult.Unsupported ->
