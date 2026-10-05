@@ -7,7 +7,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * The timeout-then-kill behaviour from ADR 0005 D7. PDFium's `render` path can hang on
+ * The timeout-then-kill behaviour from ADR 0005 D7, applied to probe and render alike. PDFium can hang on
  * pathological documents (deeply-nested content streams, decoder recursion); rather than
  * hold the binder thread forever and starve the main process, the watchdog enforces a
  * hard wall-clock budget and, on expiry, terminates the renderer process. The main

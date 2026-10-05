@@ -86,9 +86,11 @@ public class ImageDecodeClient(
                 val w = reply.readInt()
                 val h = reply.readInt()
                 val maxPixels = ImageDecodeConfig.DEFAULT_MAX_OUTPUT_PIXELS
-                // Dims the buffer cannot back would make the host allocate on the sandbox's say-so.
-                if (rasterReplyFits(w, h, maxWidthPx, maxHeightPx, maxPixels, sm.size.toLong())) {
-                    ImageDecodeResult.Ok(sm, w, h, sourceAspect = reply.readFloat())
+                val sourceAspect = reply.readFloat()
+                val fits = rasterReplyFits(w, h, maxWidthPx, maxHeightPx, maxPixels, sm.size.toLong())
+                // Never hand on dims outside the request or the buffer, or an aspect the UI cannot lay out.
+                if (fits && sourceAspect.isFinite() && sourceAspect > 0f) {
+                    ImageDecodeResult.Ok(sm, w, h, sourceAspect)
                 } else {
                     runCatching { sm.close() }
                     decoderUnavailable()

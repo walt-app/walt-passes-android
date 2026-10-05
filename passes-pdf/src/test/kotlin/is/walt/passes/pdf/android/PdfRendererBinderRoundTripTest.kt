@@ -115,6 +115,32 @@ class PdfRendererBinderRoundTripTest {
     }
 
     @Test
+    fun renderReplySmallerThanTheRequestIsAccepted() = runTest {
+        val sm = SharedMemory.create("walt-test-render-small", PIXEL_BYTES)
+        val client = clientFor(StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX, 2f)))
+        val result = client.render(pipeRead, page = 0, widthPx = WIDTH_PX * 2, heightPx = HEIGHT_PX * 2)
+        assertThat(result).isInstanceOf(RenderResult.Ok::class.java)
+    }
+
+    @Test
+    fun renderReplyWithUnusableAspectIsRejected() = runTest {
+        for (aspect in listOf(Float.NaN, Float.POSITIVE_INFINITY, 0f, -1f)) {
+            val sm = SharedMemory.create("walt-test-render-aspect", PIXEL_BYTES)
+            val client = clientFor(StaticImpl(renderResult = RenderResult.Ok(sm, WIDTH_PX, HEIGHT_PX, aspect)))
+            val result = client.render(pipeRead, page = 0, widthPx = WIDTH_PX, heightPx = HEIGHT_PX)
+            assertThat(result).isEqualTo(RenderResult.Rejected(DocumentRejectedKind.RendererFailed))
+        }
+    }
+
+    @Test
+    fun probePageCountOutsideTheServiceRangeIsRejected() = runTest {
+        for (pages in listOf(0, -5, PdfRendererService.MAX_PAGES + 1)) {
+            val client = clientFor(StaticImpl(probeResult = ProbeResult.Ok(pageCount = pages)))
+            assertThat(client.probe(pipeRead)).isEqualTo(ProbeResult.Rejected(DocumentRejectedKind.RendererFailed))
+        }
+    }
+
+    @Test
     fun renderRejectedRoundTripCarriesEachKind() = runTest {
         for (kind in DocumentRejectedKind.entries) {
             val client = clientFor(StaticImpl(renderResult = RenderResult.Rejected(kind)))
