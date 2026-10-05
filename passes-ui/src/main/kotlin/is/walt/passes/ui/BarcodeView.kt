@@ -17,11 +17,10 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.painter.BitmapPainter
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat as ZxingFormat
-import com.google.zxing.MultiFormatWriter
-import com.google.zxing.WriterException
 import com.google.zxing.common.BitMatrix
 import `is`.walt.passes.core.Barcode
 import `is`.walt.passes.core.BarcodeFormat
+import `is`.walt.passes.ui.internal.encodePassBarcodeMatrix
 
 /**
  * Renders [barcode] using ZXing. Enforces a minimum on-screen size so the barcode is
@@ -32,9 +31,9 @@ import `is`.walt.passes.core.BarcodeFormat
  * caption type. It is the accessibility-and-fallback text the PKPASS spec defines for
  * scanners that fail.
  *
- * Decoding errors (rare; would mean ZXing rejected the encoded message) render as an
- * empty placeholder rather than throwing, so a malformed barcode does not crash the
- * pass-rendering surface.
+ * The symbol carries the message in the pass's declared `messageEncoding`. A message that
+ * cannot be encoded (unknown or unfit charset, or ZXing rejects it) renders as an empty
+ * placeholder rather than throwing or showing an altered payload.
  */
 @Composable
 public fun BarcodeView(
@@ -47,15 +46,14 @@ public fun BarcodeView(
         BarcodeFormat.PDF417, BarcodeFormat.Code128 -> 320 to 96
     }
 
-    val bitmap = remember(barcode.message, zxingFormat, minWidthDp, minHeightDp) {
-        runCatching {
-            encodeBarcode(
-                message = barcode.message,
-                format = zxingFormat,
-                widthPx = minWidthDp * 3,
-                heightPx = minHeightDp * 3,
-            )
-        }.getOrNull()
+    val bitmap = remember(barcode.message, barcode.messageEncoding, zxingFormat, minWidthDp, minHeightDp) {
+        encodePassBarcodeMatrix(
+            message = barcode.message,
+            messageEncoding = barcode.messageEncoding,
+            format = zxingFormat,
+            widthPx = minWidthDp * 3,
+            heightPx = minHeightDp * 3,
+        )?.toBitmap()
     }
 
     Column(
@@ -72,7 +70,7 @@ public fun BarcodeView(
                 ),
             )
         } else {
-            // Decode-failure placeholder. Same dimensions as the barcode so the layout
+            // Encode-failure placeholder. Same dimensions as the barcode so the layout
             // does not shift between the success and failure paths.
             Spacer(Modifier.defaultMinSize(minWidth = minWidthDp.dp, minHeight = minHeightDp.dp))
         }
@@ -87,24 +85,14 @@ public fun BarcodeView(
     }
 }
 
-private fun encodeBarcode(
-    message: String,
-    format: ZxingFormat,
-    widthPx: Int,
-    heightPx: Int,
-): Bitmap {
-    val matrix: BitMatrix = try {
-        MultiFormatWriter().encode(message, format, widthPx, heightPx)
-    } catch (e: WriterException) {
-        throw IllegalArgumentException("ZXing rejected payload", e)
-    }
-    val width = matrix.width
-    val height = matrix.height
+private fun BitMatrix.toBitmap(): Bitmap {
+    val width = this.width
+    val height = this.height
     val pixels = IntArray(width * height)
     for (y in 0 until height) {
         val rowOffset = y * width
         for (x in 0 until width) {
-            pixels[rowOffset + x] = if (matrix.get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
+            pixels[rowOffset + x] = if (get(x, y)) AndroidColor.BLACK else AndroidColor.WHITE
         }
     }
     return Bitmap.createBitmap(pixels, width, height, Bitmap.Config.ARGB_8888)
