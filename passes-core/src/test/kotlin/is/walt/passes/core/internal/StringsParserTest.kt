@@ -421,9 +421,22 @@ class StringsParserTest {
 
     @Test
     fun utf8WithAStrayNulIsNotMistakenForUtf16() {
-        val source = "\"\u0000k\" = \"v\";"
-        val ok = parseStrings(source.toByteArray(StandardCharsets.UTF_8), ParserConfig()).asOk()
-        assertThat(ok.strings.entries).containsExactly("\u0000k", "v")
+        // Even length with a NUL at byte 1, so only the NUL-parity rule keeps this UTF-8.
+        val bytes = "\"\u0000ab\" = \"v\";".toByteArray(StandardCharsets.UTF_8)
+        assertThat(bytes.size % 2).isEqualTo(0)
+        val ok = parseStrings(bytes, ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("\u0000ab", "v")
+    }
+
+    @Test
+    fun loneSurrogateFromUtf32IsRejected() {
+        // The JDK UTF-32 decoder lets U+D800 through as a lone char; the post-decode scan must not.
+        val bom = byteArrayOf(0, 0, 0xFE.toByte(), 0xFF.toByte())
+        val quote = byteArrayOf(0, 0, 0, 0x22)
+        val payload =
+            "\"k\" = ".toByteArray(charset("UTF-32BE")) + quote + byteArrayOf(0, 0, 0xD8.toByte(), 0) + quote +
+                ";".toByteArray(charset("UTF-32BE"))
+        assertFailedWith(parseStrings(bom + payload, ParserConfig()), StringsFailure.InvalidEncoding)
     }
 
     // Input that stays malformed under the widened grammar.

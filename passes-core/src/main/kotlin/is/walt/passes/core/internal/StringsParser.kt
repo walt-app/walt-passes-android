@@ -98,9 +98,23 @@ private fun decodeStrict(
         charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
             .onUnmappableCharacter(CodingErrorAction.REPORT)
+    // The JDK's UTF-32 decoder passes surrogate code points through even under REPORT.
     return runCatching {
         decoder.decode(ByteBuffer.wrap(bytes, skip, bytes.size - skip)).toString()
-    }.getOrNull()
+    }.getOrNull()?.takeUnless { it.hasUnpairedSurrogate() }
+}
+
+private fun String.hasUnpairedSurrogate(): Boolean {
+    var i = 0
+    while (i < length) {
+        val c = this[i]
+        when {
+            c.isHighSurrogate() && i + 1 < length && this[i + 1].isLowSurrogate() -> i += 2
+            c.isSurrogate() -> return true
+            else -> i++
+        }
+    }
+    return false
 }
 
 /**
@@ -390,7 +404,7 @@ private const val UTF8_THREE_BYTE_THRESHOLD = 0x800
 private const val UTF16_SNIFF_BYTES = 64
 private const val ZERO_BYTE: Byte = 0
 private const val UNQUOTED_PUNCTUATION = "_$/:.-"
-private const val LINE_TERMINATORS = "\n\r  "
+private const val LINE_TERMINATORS = "\n\r\u2028\u2029"
 
 // A backslash before CR or LF yields that character, as in Apple's parser.
 private val SIMPLE_ESCAPES: Map<Char, Char> =
