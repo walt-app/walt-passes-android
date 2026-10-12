@@ -117,22 +117,43 @@ internal object ScannableFormatConstraints {
     }
 
     /**
-     * UTF-8 byte ceiling for a **byte-mode** QR payload at the encoder's pinned ECC level
-     * (M) and the largest QR version (40). The spec's table says 2,331, minus one for the
-     * 12-bit ECI header the encoder's pinned UTF-8 CHARACTER_SET adds to every byte-mode
-     * symbol (measured against ZXing 3.5.4: the longest fitting byte-mode payload drops
-     * from 2,331 to 2,330 with the pin). Used by the encoder for a proactive
-     * PayloadTooDense check that does not depend on matching ZXing's English exception
-     * text. ECC-M and UTF-8 were chosen at the encoder; if either pin changes, this
-     * constant must change in lockstep.
-     *
-     * **Mode-scoped.** QR's numeric and alphanumeric modes have larger ceilings (~5,596
-     * digits, ~3,391 alphanumeric chars at v40-M) and carry no ECI header. The encoder
-     * gates this byte-mode ceiling behind a charset check ([isQrAlphanumericChar]);
-     * payloads that fit a denser mode bypass the proactive check and fall through to
-     * ZXing's mode selection.
+     * True when the encoder pins UTF-8 for [payload], adding an ECI header that scanners without
+     * ECI support reject (#224). Aztec decoders default to ISO-8859-1, so Aztec needs it only past
+     * Latin-1; QR decoders guess the charset of unannounced bytes, so QR needs it past ASCII.
      */
-    internal const val QR_BYTE_CEILING_ECC_M_BYTE_MODE: Int = 2_330
+    internal fun needsUtf8Eci(
+        format: ScannableFormat,
+        payload: String,
+    ): Boolean =
+        when (format) {
+            ScannableFormat.Qr -> payload.any { it.code > ASCII_MAX }
+            ScannableFormat.Aztec -> !Charsets.ISO_8859_1.newEncoder().canEncode(payload)
+            // PDF417_AUTO_ECI adds its own header only past Latin-1; the 1D writers take none.
+            ScannableFormat.Pdf417,
+            ScannableFormat.Code128,
+            ScannableFormat.Code39,
+            ScannableFormat.Ean13,
+            ScannableFormat.UpcA,
+            -> false
+        }
+
+    /**
+     * Byte-mode QR capacity at the encoder's pinned ECC level (M) and version 40: the spec's 2,331,
+     * matched by ZXing 3.5.4. A UTF-8 ECI header costs one byte of it (measured: 2,330).
+     *
+     * **Mode-scoped.** Numeric and alphanumeric modes hold far more (~5,596 digits, ~3,391
+     * characters) and carry no ECI header, so the encoder applies this only to payloads outside
+     * the alphanumeric set ([isQrAlphanumericChar]); the rest fall through to ZXing's mode choice.
+     */
+    internal const val QR_BYTE_CEILING_ECC_M_BYTE_MODE: Int = 2_331
+
+    /** True when [payload] overflows QR byte mode, counted in the bytes the encoder will write. */
+    internal fun exceedsQrByteCeiling(payload: String): Boolean =
+        if (needsUtf8Eci(ScannableFormat.Qr, payload)) {
+            payload.toByteArray(Charsets.UTF_8).size > QR_BYTE_CEILING_ECC_M_BYTE_MODE - ECI_HEADER_BYTES
+        } else {
+            payload.length > QR_BYTE_CEILING_ECC_M_BYTE_MODE
+        }
 
     /**
      * QR alphanumeric mode's character set (per ISO/IEC 18004): digits, uppercase A-Z, and
@@ -168,8 +189,8 @@ internal object ScannableFormatConstraints {
      * is consumed in bytes.** The same measurement over three-byte characters gives PDF417 528
      * and Aztec 623 — both far below the caps here, and both payloads this object accepts. An
      * exact predicate is not available at this layer: the writers pick a compaction mode per
-     * run, so capacity swings with the payload's composition (Aztec fits 2,995 ASCII characters
-     * but 934 accented ones; a mixed payload does better than either rate predicts). A flat byte
+     * run, so capacity swings with the payload's composition (Aztec fits 3,000 ASCII characters
+     * but 623 CJK ones; a mixed payload does better than either rate predicts). A flat byte
      * ceiling tight enough to be safe would reject ordinary accented text well under the cap.
      *
      * What closes the hole instead is the encoder lifting the writers' over-capacity errors to
@@ -184,6 +205,10 @@ internal object ScannableFormatConstraints {
     private const val AZTEC_MAX = 1500
     private const val PRINTABLE_ASCII_MIN = 0x20
     private const val PRINTABLE_ASCII_MAX = 0x7E
+    private const val ASCII_MAX = 0x7F
+
+    // The 12-bit ECI header rounds up to one byte of v40-M byte-mode capacity.
+    private const val ECI_HEADER_BYTES = 1
 
     private val CODE39_ALLOWED: Set<Char> =
         buildSet {

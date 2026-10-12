@@ -364,15 +364,22 @@ not cover. Both new writers default to ISO-8859-1 while the validator admits any
 visible character on a byte-capable format, so a payload the user can legitimately
 type was unrenderable: `PDF417Writer` threw outright, and `AztecWriter` did worse
 — it encoded and decoded back transliterated, a silent corruption. Pinned
-`PDF417_AUTO_ECI` and `CHARACTER_SET` respectively; both measured to leave the
-all-ASCII case byte-identical in matrix size and capacity. QR had the same
+`PDF417_AUTO_ECI` and `CHARACTER_SET` respectively. QR had the same
 silent-transliteration defect (it predates these writers) and was closed
-separately by `wpass-qj6` with the same `CHARACTER_SET` pin. QR's pin is not free
-the way Aztec's was: `QRCodeWriter` prepends a UTF-8 ECI header to every
-byte-mode symbol, so ASCII byte-mode symbols keep their matrix size but change
-bit pattern, the v40-M byte-mode ceiling drops one byte (2,331 to 2,330, tracked
-in `ScannableFormatConstraints`), and every stored non-ASCII QR card re-renders
-as a different — now correctly decoding — symbol.
+separately with the same `CHARACTER_SET` pin.
+
+Those UTF-8 pins were unconditional, and that was wrong (#224): Aztec and QR
+then wrote a UTF-8 ECI header into every byte-mode symbol, plain ASCII included.
+Phone decoders read the same text, but scanners without ECI support (supermarket
+tills among them) reject the symbol. `PDF417_AUTO_ECI` never had the problem: it
+adds a header only past ISO-8859-1. The pin is now conditional, decided by
+`ScannableFormatConstraints.needsUtf8Eci`: Aztec takes it only past ISO-8859-1,
+its decoders' default; QR takes it past ASCII, because QR decoders guess the
+charset of unannounced bytes (ZXing reads Latin-1 `ééé` back as Shift_JIS).
+ASCII symbols now match other generators, and an ASCII QR payload regains the
+byte of v40-M byte-mode capacity the header cost (2,330 to 2,331); non-ASCII QR
+keeps the header and the 2,330 ceiling. Stored Aztec cards that fit ISO-8859-1,
+and byte-mode ASCII QR cards, re-render as different symbols with the same text.
 
 **C4. Create-time URI-scheme preview for the byte-capable symbologies.** When the
 user creates a ScannableCard in a format that can carry an actionable payload,
