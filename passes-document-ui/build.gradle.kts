@@ -7,7 +7,7 @@ plugins {
 android {
     namespace = "is.walt.passes.document.ui"
 
-    // Same managed-device span as passes-ui; CI runs the api34googleDebugAndroidTest task.
+    // Same managed-device span as passes-ui; CI runs only the API 34 task.
     testOptions {
         managedDevices {
             localDevices {

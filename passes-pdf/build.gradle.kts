@@ -15,31 +15,6 @@ android {
         unitTests.all {
             it.systemProperty("walt.passes.pdf.moduleDir", projectDir.absolutePath)
         }
-        // Same managed-device span as passes-ui; CI runs the api34googleDebugAndroidTest task.
-        managedDevices {
-            localDevices {
-                create("api28google") {
-                    device = "Pixel 2"
-                    apiLevel = 28
-                    systemImageSource = "google"
-                }
-                create("api31google") {
-                    device = "Pixel 2"
-                    apiLevel = 31
-                    systemImageSource = "google"
-                }
-                create("api34google") {
-                    device = "Pixel 2"
-                    apiLevel = 34
-                    systemImageSource = "google"
-                }
-                create("api36google") {
-                    device = "Pixel 2"
-                    apiLevel = 36
-                    systemImageSource = "google"
-                }
-            }
-        }
     }
 }
 

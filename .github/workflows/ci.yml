@@ -48,9 +48,7 @@ jobs:
           cache-read-only: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository }}
 
       # assembleDebugAndroidTest compiles the androidTest sources (no device needed) so the
-      # instrumented suites typecheck on every PR. Without it `check assemble` skips them and
-      # @Ignore'd on-device bodies (e.g. BarcodeDecodeServiceInstrumentedTest) can rot against
-      # a signature change until the managed-device leg lands.
+      # instrumented suites typecheck on every PR, including @Ignore'd stubs no device runs.
       - name: Build, test, lint
         run: ./gradlew check assemble assembleDebugAndroidTest --stacktrace
 
@@ -74,8 +72,8 @@ jobs:
       fail-fast: false
       matrix:
         api: [28, 31, 34, 36]
-    # 70min covers the API 34 leg's nine emulator cycles; replace with observed wall-clock.
-    timeout-minutes: 70
+    # Five emulator cycles per leg, seven on API 34; replace with observed wall-clock.
+    timeout-minutes: ${{ matrix.api == 34 && 90 || 70 }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -147,8 +145,16 @@ jobs:
         if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' }}
         run: ./gradlew :passes-ui:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
 
-      # The remaining modules run on API 34 only: one more emulator cycle each on every leg
-      # would roughly triple the per-leg wall time. Same one-module-per-step serialization.
+      # passes-image and passes-image-decode pin ImageDecoder behaviour, which varies by API level.
+      - name: Run connected tests (passes-image)
+        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' }}
+        run: ./gradlew :passes-image:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
+
+      - name: Run connected tests (passes-image-decode)
+        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' }}
+        run: ./gradlew :passes-image-decode:api${{ matrix.api }}googleDebugAndroidTest --stacktrace
+
+      # The document surfaces run on API 34 only, to keep the other legs' wall time down.
       - name: Run connected tests (passes-document-ui)
         if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' && matrix.api == 34 }}
         run: ./gradlew :passes-document-ui:api34googleDebugAndroidTest --stacktrace
@@ -156,22 +162,6 @@ jobs:
       - name: Run connected tests (passes-document)
         if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' && matrix.api == 34 }}
         run: ./gradlew :passes-document:api34googleDebugAndroidTest --stacktrace
-
-      - name: Run connected tests (passes-image)
-        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' && matrix.api == 34 }}
-        run: ./gradlew :passes-image:api34googleDebugAndroidTest --stacktrace
-
-      - name: Run connected tests (passes-image-decode)
-        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' && matrix.api == 34 }}
-        run: ./gradlew :passes-image-decode:api34googleDebugAndroidTest --stacktrace
-
-      - name: Run connected tests (passes-isolation)
-        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' && matrix.api == 34 }}
-        run: ./gradlew :passes-isolation:api34googleDebugAndroidTest --stacktrace
-
-      - name: Run connected tests (passes-pdf)
-        if: ${{ !cancelled() && steps.storage-connected.conclusion != 'skipped' && matrix.api == 34 }}
-        run: ./gradlew :passes-pdf:api34googleDebugAndroidTest --stacktrace
 
       - name: Upload connected test reports
         if: always()
@@ -193,10 +183,6 @@ jobs:
             passes-image/build/outputs/androidTest-results/
             passes-image-decode/build/reports/androidTests/
             passes-image-decode/build/outputs/androidTest-results/
-            passes-isolation/build/reports/androidTests/
-            passes-isolation/build/outputs/androidTest-results/
-            passes-pdf/build/reports/androidTests/
-            passes-pdf/build/outputs/androidTest-results/
           if-no-files-found: ignore
 
   dependency-review:

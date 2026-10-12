@@ -6,7 +6,7 @@ plugins {
 android {
     namespace = "is.walt.passes.image.decode"
 
-    // Same managed-device span as passes-ui; CI runs the api34googleDebugAndroidTest task.
+    // Same managed-device span as passes-ui; CI runs every arm.
     testOptions {
         managedDevices {
             localDevices {
