@@ -66,37 +66,22 @@ import com.google.zxing.BarcodeFormat as ZxingFormat
  * space the render layer then letterboxes, on top of the quiet zone it already applies
  * itself. This is the one place the kernel overrides a writer's own margin.
  *
- * **Character set.** The writers default to ISO-8859-1, and the validator admits any visible
- * character for the byte-capable formats, so the default loses payloads a user can legitimately
- * type. The three symbologies fail differently and all are addressed: `PDF417Writer` throws
- * outright on a non-Latin-1 character, fixed by `PDF417_AUTO_ECI`, which emits an ECI header
- * only when one is actually needed; `AztecWriter` and `QRCodeWriter` are the worse case — they
- * encode happily and decode back transliterated ("東京" returns as "??"), a silent corruption
- * fixed by pinning CHARACTER_SET. Measured: the PDF417 and Aztec pins leave the all-ASCII case
- * byte-identical in matrix size and capacity, so they cost nothing at boarding-pass payloads.
- *
- * The QR pin (wpass-qj6) is not free in the same way, because `QRCodeWriter` prepends a UTF-8
- * ECI header to every BYTE-MODE symbol once the hint is set: numeric/alphanumeric-mode symbols
- * stay byte-identical, ASCII byte-mode symbols keep their matrix size but change bit pattern,
- * and the 12-bit header lowers the v40-M byte-mode ceiling by one byte (see
- * [ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M_BYTE_MODE]). Every non-ASCII QR card
- * created before the pin re-renders as a different (now correct) symbol.
+ * **Character set.** The writers default to ISO-8859-1 while the validator admits any visible
+ * character for the byte-capable formats. Past Latin-1, `PDF417Writer` throws and `AztecWriter` /
+ * `QRCodeWriter` silently transliterate ("東京" decodes as "??"). PDF417 is fixed by
+ * `PDF417_AUTO_ECI`, which adds an ECI header only when one is needed. Aztec and QR pin UTF-8 only
+ * when [ScannableFormatConstraints.needsUtf8Eci] says so, because scanners without ECI support
+ * reject a header on plain ASCII.
  */
 internal object ZxingBarcodeEncoder {
     // Per-writer hint maps. Each writer reads ERROR_CORRECTION as a different type —
     // ErrorCorrectionLevel for QR, an Int percentage for Aztec, an Int level for PDF417 —
     // so the maps cannot be merged. See the class KDoc for how each value was chosen.
     private val qrHints: Map<EncodeHintType, Any> =
-        mapOf(
-            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
-            EncodeHintType.CHARACTER_SET to UTF_8,
-        )
+        mapOf(EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M)
 
     private val aztecHints: Map<EncodeHintType, Any> =
-        mapOf(
-            EncodeHintType.ERROR_CORRECTION to AZTEC_ERROR_CORRECTION_PERCENT,
-            EncodeHintType.CHARACTER_SET to UTF_8,
-        )
+        mapOf(EncodeHintType.ERROR_CORRECTION to AZTEC_ERROR_CORRECTION_PERCENT)
 
     private val pdf417Hints: Map<EncodeHintType, Any> =
         mapOf(
@@ -134,10 +119,9 @@ internal object ZxingBarcodeEncoder {
      * The refusals that are decided without running a writer, or null to proceed.
      *
      * An empty payload is refused for every format. The validator rejects it upstream, so this
-     * is defense in depth — but it cannot be left to the writers: five of the six throw on an
-     * empty input and `AztecWriter` does not once a CHARACTER_SET is pinned, happily emitting a
-     * 15x15 symbol that encodes nothing. Uniform refusal here beats six incidental behaviors
-     * that a hint change can flip.
+     * is defense in depth — but it cannot be left to the writers, which disagree: `AztecWriter`
+     * has emitted an empty 15x15 symbol rather than throwing. Uniform refusal here beats
+     * per-writer behaviors that a hint change can flip.
      *
      * PDF417 refuses supplementary-plane characters (emoji, historic scripts — anything outside
      * the BMP, which Kotlin holds as a surrogate pair). ZXing cannot encode one in PDF417 under
@@ -151,11 +135,11 @@ internal object ZxingBarcodeEncoder {
      *
      * The QR check is a proactive [EncoderFailureReason.PayloadTooDense], gated by the alphanumeric-mode
      * membership test: a payload that fits QR's numeric or alphanumeric mode has a much larger
-     * capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs 2,330
+     * capacity than byte mode (~5,596 digits or ~3,391 alphanumeric chars at v40-M vs 2,331
      * bytes), and ZXing's QRCodeWriter auto-selects the densest fitting mode, so pre-rejecting
      * such payloads against the byte-mode ceiling would over-reject. Anything outside the
-     * alphanumeric set must use byte mode, where the byte-count check applies — UTF-8 because
-     * byte-mode capacity is in bytes (a payload of "é" × 1500 is 3000 bytes). The "Data too
+     * alphanumeric set must use byte mode, where the check counts the bytes and ECI header the
+     * writer will emit (a payload of "é" × 1500 is 3000 UTF-8 bytes). The "Data too
      * big" message match in [translateFailure] stays as belt-and-suspenders for dense
      * alphanumeric/numeric payloads that still overflow at v40.
      */
@@ -170,8 +154,7 @@ internal object ZxingBarcodeEncoder {
                 EncoderFailureReason.WriterRejected(format, NO_SUPPLEMENTARY_CHARS_MESSAGE)
             format == ScannableFormat.Qr &&
                 payload.any { !ScannableFormatConstraints.isQrAlphanumericChar(it) } &&
-                payload.toByteArray(Charsets.UTF_8).size >
-                ScannableFormatConstraints.QR_BYTE_CEILING_ECC_M_BYTE_MODE ->
+                ScannableFormatConstraints.exceedsQrByteCeiling(payload) ->
                 EncoderFailureReason.PayloadTooDense
             else -> null
         }
@@ -189,14 +172,25 @@ internal object ZxingBarcodeEncoder {
                 ScannableFormat.Code39 -> Code39Writer().encode(payload, ZxingFormat.CODE_39, 0, 0)
                 ScannableFormat.Ean13 -> EAN13Writer().encode(payload, ZxingFormat.EAN_13, 0, 0)
                 ScannableFormat.UpcA -> UPCAWriter().encode(payload, ZxingFormat.UPC_A, 0, 0)
-                ScannableFormat.Qr -> QRCodeWriter().encode(payload, ZxingFormat.QR_CODE, 0, 0, qrHints)
+                ScannableFormat.Qr ->
+                    QRCodeWriter().encode(payload, ZxingFormat.QR_CODE, 0, 0, qrHints.charsetFor(format, payload))
                 ScannableFormat.Pdf417 ->
                     PDF417Writer().encode(payload, ZxingFormat.PDF_417, 0, 0, pdf417Hints)
                 ScannableFormat.Aztec ->
-                    AztecWriter().encode(payload, ZxingFormat.AZTEC, 0, 0, aztecHints)
+                    AztecWriter().encode(payload, ZxingFormat.AZTEC, 0, 0, aztecHints.charsetFor(format, payload))
             }
         return bitMatrix.toBarcodeMatrix()
     }
+
+    private fun Map<EncodeHintType, Any>.charsetFor(
+        format: ScannableFormat,
+        payload: String,
+    ): Map<EncodeHintType, Any> =
+        if (ScannableFormatConstraints.needsUtf8Eci(format, payload)) {
+            this + (EncodeHintType.CHARACTER_SET to UTF_8)
+        } else {
+            this
+        }
 
     private fun translateFailure(
         format: ScannableFormat,

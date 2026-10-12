@@ -79,11 +79,8 @@ class BarcodeEncoderRoundTripTest {
 
     @Test
     fun nonAsciiPayloadsSurviveOnTheCharsetPinnedFormats() {
-        // The charset pins, and the reason they are pins rather than defaults. At ZXing's
-        // ISO-8859-1 default PDF417 throws outright while AZTEC AND QR ARE THE DANGEROUS ONES:
-        // they encode happily and decode back "café ? naïve ? ??", a wrong scan with no error at
-        // any layer (QR's fix is wpass-qj6). Dropping any of the three hints has to fail here,
-        // so all byte-capable formats share the one payload.
+        // Without the charset hints PDF417 throws, while Aztec and QR decode back "café ? naïve ? ??"
+        // with no error at any layer. The hints apply only to such payloads, never to ASCII.
         for (format in listOf(ScannableFormat.Pdf417, ScannableFormat.Aztec, ScannableFormat.Qr)) {
             assertThat(decodeLuminance(render(NON_ASCII_PAYLOAD, format)))
                 .isEqualTo(BarcodeDecodeResult.DecodedBarcode(NON_ASCII_PAYLOAD, format))

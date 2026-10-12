@@ -36,6 +36,7 @@ internal fun encodePassBarcodeMatrix(
 /**
  * ZXing's writers assume ISO-8859-1 and a CHARACTER_SET hint adds an ECI header. The hint
  * is set only when the declared bytes differ from that default, so Latin-1 symbols are unchanged.
+ * User-created cards (passes-core `needsUtf8Eci`) have no declared encoding and follow their own rule.
  */
 private fun charsetHint(
     message: String,
