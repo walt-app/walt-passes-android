@@ -120,8 +120,8 @@ private fun BackFieldRow(
             fieldLabel = displayLabel,
             organizationName = organizationName,
         )
-        val spans = FieldLinkScanner.scan(displayValue, source)
-        val annotated = buildAnnotatedFieldValue(displayValue, spans)
+        val spans = remember(displayValue, source) { FieldLinkScanner.scan(displayValue, source) }
+        val annotated = remember(displayValue, spans) { buildAnnotatedFieldValue(displayValue, spans) }
 
         @Suppress("DEPRECATION")
         ClickableText(

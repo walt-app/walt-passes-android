@@ -34,7 +34,9 @@ package `is`.walt.passes.ui
  *   and prevents two failure modes: (a) accidental "Call this number?" prompts on
  *   every numeric field of a real pass, and (b) a malicious pass embedding a
  *   premium-rate dial string in a value that the user reads as a reference number.
- * - An email requires an `@` with non-empty ASCII local and domain parts.
+ * - An email requires an `@` with non-empty ASCII local and domain parts. The local part
+ *   is the whole run of local-part characters before the `@` and may not follow another
+ *   `@`, so in `a@b.example-c@d.example` or `a@b@c.example` only `a@b.example` can link.
  *
  * Rendering hazards are checked at two levels:
  *
@@ -70,7 +72,11 @@ public object FieldLinkScanner {
     private val urlRegex = Regex(
         """https?://[^\t\n\u000B\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000<>"'()]+""",
     )
-    private val emailRegex = Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""")
+
+    // Matches start only where a local-part run starts and not after an `@`, so a run without
+    // a usable `@` is read once, not once per position. `@` is outside the `++` class.
+    private val emailRegex =
+        Regex("""(?<![A-Za-z0-9._%+\-@])[A-Za-z0-9._%+\-]++@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""")
 
     // ASCII digits only, so the dialled digits are exactly the ones displayed, on any engine.
     // The only whitespace admitted is U+0020, U+00A0, U+2007, U+2009 and U+202F.
