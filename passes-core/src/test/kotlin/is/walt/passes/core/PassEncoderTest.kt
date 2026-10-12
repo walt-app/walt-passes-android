@@ -142,6 +142,16 @@ class PassEncoderTest {
     }
 
     @Test
+    fun controlCharactersRoundTripAndNeverWriteANulByte() {
+        // A raw NUL could make the reader's BOM-less UTF-16 sniff misread the file.
+        val strings = LocalizedStrings(mapOf("\u0000k" to "a\u0000\u0007b", "\u0001" to "\u001F"))
+        val pass = parse(richArchive()).pass.copy(locales = mapOf(PassLocale("en") to strings))
+        val bytes = encode(pass)
+        assertThat(entryBytes(bytes, "en.lproj/pass.strings").contains(0.toByte())).isFalse()
+        assertThat(parse(bytes).pass.locales).containsExactly(PassLocale("en"), strings)
+    }
+
+    @Test
     fun invalidLocaleTagIsRefusedNotWritten() {
         val pass = parse(richArchive()).pass
         for (tag in listOf("", "en/US", "en\\US", "C:", "en\uD83D")) {

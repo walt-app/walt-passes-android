@@ -64,6 +64,26 @@ internal object SyntheticPkpass {
     }
 
     /**
+     * Build a self-signed archive, then swap [replacedName]'s bytes for [replacement]
+     * after the manifest and signature were computed over the originals.
+     */
+    fun signedSelfSignedWithReplacedEntry(
+        passJson: String,
+        extraEntries: Map<String, ByteArray>,
+        replacedName: String,
+        replacement: ByteArray,
+    ): ByteArray {
+        val members = LinkedHashMap<String, ByteArray>()
+        members[PASS_JSON] = passJson.toByteArray(Charsets.UTF_8)
+        members.putAll(extraEntries)
+        val manifest = buildManifest(members)
+        members[MANIFEST_FILE_NAME] = manifest
+        members[SIGNATURE_FILE_NAME] = buildSelfSignedSignature(manifest)
+        members[replacedName] = replacement
+        return zip(members)
+    }
+
+    /**
      * Build a signed archive then mutate one byte of `pass.json` post-manifest so the
      * declared SHA-1 no longer matches the actual contents. Used to exercise the
      * tamper-detection path through the public API.

@@ -207,3 +207,57 @@ unaffected; a consumer with an exhaustive `when` over either enum gains one arm.
 |----------|------|
 | D5 (inflated total) | `SafeArchiveExtractorTest.manyEntriesUnderTheEntryCapTripTheInflatedSizeLimitAtDefaults`, `inflatedTotalExactlyAtTheLimitIsAccepted`, `directoryEntryPayloadsAreChargedAgainstTheInflatedSizeLimit`; `PassParserTest.manySmallerEntriesTripTheInflatedSizeLimit` |
 | D8 (limits) | `PassEncoderTest.everyParserLimitIsHonouredBeforeBytesAreReturned` |
+
+## Addendum 2026-10-12: a bad `.strings` file drops its locale, not the pass
+
+Context: #252, a pass other wallets open that this parser refused as
+`Malformed(InvalidStrings)`. Two changes. Root cause unconfirmed (no sample);
+the locale drop is the fix, the grammar widening is best-effort and may be
+narrowed.
+
+**Per-locale drop.** A `<locale>.lproj/pass.strings` that fails to decode or
+parse is left out of `Pass.locales`; the pass still parses, and the renderer
+falls back as it does for any missing locale. This is what `InvalidStrings`'s
+KDoc already promised ("a bad .strings file degrades one locale") but the
+pipeline never did. Integrity is untouched: manifest and signature checks
+run over every archive entry before any `.strings` file is parsed, so a
+tampered file is still `Tampered(FileHashMismatch)` whatever its content. Only
+the parse result is dropped. The resource limits still fail the whole pass:
+`maxLocaleCount` is checked before parsing, and a value over
+`maxJsonStringBytes` is still `ResourceLimitExceeded(JsonStringSize)`.
+`MalformedReason.InvalidStrings` and `ParseFailureReason.InvalidStrings` stay
+on the surface so consumers' exhaustive `when`s compile, but the default
+parser no longer returns them.
+
+**Amendment to D3.** `ParseSucceededEvent` gains `droppedLocaleCount: Int = 0`,
+appended with a default. Source-compatible; not binary-compatible
+(constructor/copy signatures change). It is a count, like `localeCount`, and
+carries no locale tag or file content.
+
+**Wider grammar.** The `.strings` parser now reads a subset of Apple's
+old-style property-list strings grammar, wider than the `"key" = "value";`
+form alone: `'`-quoted and unquoted tokens (`[A-Za-z0-9_$/:.-]`), the
+`"key";` shorthand, an optional enclosing `{ }`, ASCII-range octal escapes,
+`\a \b \f \v \'`, a backslash before a line break, UTF-32 BOMs, and BOM-less
+UTF-16 recognised by its NUL-byte pattern. The value cap now also applies to
+a shorthand key that becomes its value and to unquoted values.
+
+Deliberate divergences, where Apple's parser accepts input this one rejects
+(the locale is dropped): unknown escapes such as `\x` (Apple reads the
+literal character), `\U` with fewer than four hex digits, octal `\200` to
+`\377` (Apple maps these through the NeXTSTEP Latin table), an unterminated
+block comment (Apple treats it as end of file), trailing text after the last
+entry (Apple stops and keeps what it read), XML and binary-plist `.strings`
+files, and BOM-less files that are not UTF-8 or UTF-16 (no single-byte
+fallback, which would bring back the silent mis-rendering the strict decoder
+exists to prevent). Also rejected: lone surrogates, unterminated strings,
+and non-string values. `PassEncoder` now
+writes control characters as `\Uxxxx`, so its output never holds a NUL byte
+the UTF-16 sniff could misread.
+
+| Decision | Test |
+|----------|------|
+| Per-locale drop | `PassParserTest.unparseableLocaleIsDroppedAndTheOthersKept`, `undecodableLocaleIsDroppedToo`, `passWithEveryLocaleBadStillParsesWithNoLocales`, `oversizedStringsValueStillFailsThePass`, `oversizedValueFailsThePassEvenAlongsideADroppedLocale` |
+| Integrity unchanged | `PassParserTest.tamperedStringsFileStillFailsIntegrity` |
+| Grammar | `StringsParserTest` (one test per accepted form, plus the still-rejected forms) |
+| Encoder | `PassEncoderTest.controlCharactersRoundTripAndNeverWriteANulByte` |

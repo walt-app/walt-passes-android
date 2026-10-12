@@ -238,6 +238,109 @@ class PassParserTest {
     }
 
     @Test
+    fun unparseableLocaleIsDroppedAndTheOthersKept() {
+        // One bad .strings file must not take the pass down with it.
+        val good = "\"destination\" = \"Destination\";".toByteArray(Charsets.UTF_8)
+        val bad = "\"destination\" = \"Ziel".toByteArray(Charsets.UTF_8)
+        val recorder = RecordingTelemetryGuard()
+        val zip =
+            SyntheticPkpass.signedSelfSigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries = mapOf("en.lproj/pass.strings" to good, "de.lproj/pass.strings" to bad),
+            )
+        val result = PassParser.create(ParserConfig(telemetryGuard = recorder)).parse(PassSource.Bytes(zip))
+
+        val success = result as ParseResult.Success
+        assertThat(success.signatureStatus).isEqualTo(SignatureStatus.SelfSigned)
+        assertThat(success.pass.locales.keys).containsExactly(PassLocale("en"))
+        assertThat(success.pass.locales[PassLocale("en")]?.entries).containsExactly("destination", "Destination")
+        val event = (recorder.events[1] as RecordedEvent.Succeeded).event
+        assertThat(event.localeCount).isEqualTo(1)
+        assertThat(event.droppedLocaleCount).isEqualTo(1)
+    }
+
+    @Test
+    fun undecodableLocaleIsDroppedToo() {
+        val good = "\"k\" = \"v\";".toByteArray(Charsets.UTF_8)
+        val notUtf8 = byteArrayOf(0x22, 0xC3.toByte(), 0x28, 0x22, 0x3B)
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries = mapOf("en.lproj/pass.strings" to good, "fr.lproj/pass.strings" to notUtf8),
+            )
+        val success = PassParser.create().parse(PassSource.Bytes(zip)) as ParseResult.Success
+        assertThat(success.pass.locales.keys).containsExactly(PassLocale("en"))
+    }
+
+    @Test
+    fun oversizedStringsValueStillFailsThePass() {
+        // The per-value cap is a resource limit, not a parse failure: it still halts.
+        val oversized = ("\"k\" = \"" + "x".repeat(16) + "\";").toByteArray(Charsets.UTF_8)
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries = mapOf("en.lproj/pass.strings" to oversized),
+            )
+        val result = PassParser.create(ParserConfig(maxJsonStringBytes = 8)).parse(PassSource.Bytes(zip))
+        assertThat(result)
+            .isEqualTo(ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonStringSize)))
+    }
+
+    @Test
+    fun oversizedValueFailsThePassEvenAlongsideADroppedLocale() {
+        val bad = "\"k\" = \"unterminated".toByteArray(Charsets.UTF_8)
+        val oversized = ("\"k\" = \"" + "x".repeat(16) + "\";").toByteArray(Charsets.UTF_8)
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries = mapOf("de.lproj/pass.strings" to bad, "en.lproj/pass.strings" to oversized),
+            )
+        val result = PassParser.create(ParserConfig(maxJsonStringBytes = 8)).parse(PassSource.Bytes(zip))
+        assertThat(result)
+            .isEqualTo(ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonStringSize)))
+    }
+
+    @Test
+    fun passWithEveryLocaleBadStillParsesWithNoLocales() {
+        val bad = "\"k\" = \"v\"".toByteArray(Charsets.UTF_8)
+        val recorder = RecordingTelemetryGuard()
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries =
+                    mapOf(
+                        "en.lproj/pass.strings" to bad,
+                        "de.lproj/pass.strings" to bad,
+                        "fr.lproj/pass.strings" to bad,
+                    ),
+            )
+        val result = PassParser.create(ParserConfig(telemetryGuard = recorder)).parse(PassSource.Bytes(zip))
+
+        assertThat((result as ParseResult.Success).pass.locales).isEmpty()
+        val event = (recorder.events[1] as RecordedEvent.Succeeded).event
+        assertThat(event.localeCount).isEqualTo(0)
+        assertThat(event.droppedLocaleCount).isEqualTo(3)
+    }
+
+    @Test
+    fun tamperedStringsFileStillFailsIntegrity() {
+        // Dropping a bad locale must never skip the hash check over its bytes, whether
+        // the swapped-in content parses or not.
+        val original = "\"k\" = \"v\";".toByteArray(Charsets.UTF_8)
+        for (replacement in listOf("\"k\" = \"w\";", "\"k\" = \"unterminated")) {
+            val zip =
+                SyntheticPkpass.signedSelfSignedWithReplacedEntry(
+                    passJson = SyntheticPkpass.minimalPassJson("generic"),
+                    extraEntries = mapOf("en.lproj/pass.strings" to original),
+                    replacedName = "en.lproj/pass.strings",
+                    replacement = replacement.toByteArray(Charsets.UTF_8),
+                )
+            assertThat(PassParser.create().parse(PassSource.Bytes(zip)))
+                .isEqualTo(ParseResult.Tampered(TamperReason.FileHashMismatch))
+        }
+    }
+
+    @Test
     fun imagesAreBoundIntoPassByRole() {
         val tinyPng = SyntheticPkpass.fakePng(widthDeclared = 1, heightDeclared = 1)
         val zip =
