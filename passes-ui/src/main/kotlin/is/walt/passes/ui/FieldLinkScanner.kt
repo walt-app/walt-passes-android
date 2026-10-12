@@ -170,13 +170,8 @@ public object FieldLinkScanner {
     private fun isLinkablePhone(match: MatchResult, text: String): Boolean =
         match.value.count { it.isDigit() } >= 7 && hasPhoneFormattingHint(match, text)
 
-    /**
-     * Flags, in one linear pass, every index inside a run (decimal digits plus the phone
-     * separators and `+-()`) that holds a non-ASCII decimal digit; null when none does.
-     * A phone match in such a run is a truncated slice of what the user reads as one
-     * number, so it is dropped. Runs join across a space, so a non-ASCII digit one space
-     * away from a phone number drops the whole phone.
-     */
+    // Flags, in one linear pass, every index of a run holding a non-ASCII decimal digit;
+    // null when no run does. A phone inside such a run is a truncated slice, so it is dropped.
     private fun mixedDigitRuns(text: String): BooleanArray? {
         var flags: BooleanArray? = null
         var runStart = 0
@@ -216,7 +211,7 @@ public object FieldLinkScanner {
         return before in PHONE_PREFIX_HINTS || after == ')'
     }
 
-    // A phone match starts and ends on an ASCII digit, so surrounding parens are found by
+    // A phone match starts on `+` or a digit and ends on a digit, so parens are found by
     // adjacency. No-break spaces are not hints: such a number without `+` stays unlinked.
     private val INTERNAL_PHONE_HINTS = setOf('+', '-', ' ')
 

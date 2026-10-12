@@ -329,9 +329,10 @@ per-format charset rules (EAN-13 / UPC-A numeric only, Code39 limited
 alphanumeric, Code128 the printable ASCII subset; QR, PDF417 and Aztec are
 byte-capable and admit any character), and Unicode Cf (Format) / Cc (Control)
 codepoint rejection in both `payload` and `label`. The Cf/Cc rejection runs
-before the per-format rules, so it covers the byte-capable formats too, and
-mirrors the discipline that `FieldLinkScanner` enforces on the fields that hold
-link targets and that the PDF document-label path already enforces.
+before the per-format rules, so it covers the byte-capable formats too. It is
+stricter than `FieldLinkScanner`, which keeps Cf/Cc out of every link it
+surfaces but admits LF, tab and CRLF in the surrounding field text, and it
+matches the discipline the PDF document-label path already enforces.
 
 The PDF417 and Aztec caps (`wpass-pl7.1`) were set to hold at any plausible
 error-correction level, because the level itself was not pinned until the writer
@@ -825,7 +826,7 @@ in-scope for the Threat 6 upgrade cadence.
 | `ParserConfig.maxArchiveBytes` (10 MB)          | Per-format payload caps in `passes-core` (Code128 80, QR ~2000, etc.); enforced again at storage |
 | Manifest hash + PKCS#7 signature                | Not applicable; provenance is "user-typed", structurally a sibling class                |
 | `SignatureStatus` four-band badge               | "Created by you" caption + visually distinct tile in its own lane (C1 + C2)             |
-| `FieldLinkScanner` Cf/Cc rejection              | Same posture; applied to `payload` and `label` at the create boundary (C3)              |
+| `FieldLinkScanner` Cf/Cc rejection              | Stricter (LF and tab rejected too); applied to `payload` and `label` at the create boundary (C3) |
 | `B3UrlConfirmSheet`                             | Create-time URI-scheme preview on the byte-capable formats (C4); same dialog pattern                |
 | `ExpiredOverlayState`                           | Not applicable (no expiration metadata; user can delete)                                |
 | `TelemetryGuard` PII discipline                 | New `ScannableCardTelemetryGuard` mirrors the existing discipline (counts / formats only, no payload bytes) |

@@ -307,8 +307,7 @@ class FieldLinkScannerTest {
     fun percentEncodedBidiInUrlIsAccepted() {
         // %E2%80%AE is the percent-encoding of U+202E. After percent-decoding, the
         // URL would contain a bidi char; pre-decoding, the bytes are pure ASCII and
-        // safe to render. This is the legitimate way for a pass author to include
-        // non-ASCII data in a URL — the renderer never sees the decoded form.
+        // safe to render. The renderer never sees the decoded form.
         val url = "https://example.com/%E2%80%AEsomething"
         val spans = FieldLinkScanner.scan(url, source)
         assertThat(spans).hasSize(1)
@@ -526,6 +525,38 @@ class FieldLinkScannerTest {
         ).forEach { text ->
             assertWithMessage(text).that(FieldLinkScanner.scan(text, source)).isEmpty()
         }
+    }
+
+    @Test
+    fun nonAsciiDigitOutsideThePhoneRunKeepsThePhone() {
+        listOf(
+            "Ref \u0663\u0664\u0665\n+1 555 123 4567", // a line break ends the run
+            "\u0663 x +1 555 123 4567", // a letter ends the run
+            "\u0663\uD83D\uDE00+1 555 123 4567", // a supplementary non-run char ends the run
+        ).forEach { text ->
+            val spans = FieldLinkScanner.scan(text, source)
+            assertWithMessage(text).that(spans).hasSize(1)
+            assertWithMessage(text).that((spans.single().intent as PhoneIntent).phoneNumber)
+                .isEqualTo("+1 555 123 4567")
+        }
+    }
+
+    @Test
+    fun phoneInsideUrlOrEmailIsNotLinkedTwice() {
+        val inUrl = FieldLinkScanner.scan("https://acme.example/call/555-123-4567", source)
+        assertThat(inUrl.single().intent).isInstanceOf(B3UrlIntent::class.java)
+
+        val inEmail = FieldLinkScanner.scan("555-123-4567@acme.example", source)
+        assertThat(inEmail.single().intent).isInstanceOf(EmailIntent::class.java)
+
+        val text = "+1 555 123 4567 https://x.example/555-123-4567 a@b.example +1 555 765 4321"
+        val kinds = FieldLinkScanner.scan(text, source).map { it.intent::class.java }
+        assertThat(kinds).containsExactly(
+            PhoneIntent::class.java,
+            B3UrlIntent::class.java,
+            EmailIntent::class.java,
+            PhoneIntent::class.java,
+        ).inOrder()
     }
 
     @Test

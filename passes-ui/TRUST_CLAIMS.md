@@ -120,8 +120,8 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
   supplementary-plane TAG character is rejected. Engine-independence cases pin
   phone numbers spaced with U+00A0 / U+202F as one span, and Arabic-Indic,
   fullwidth or mixed ASCII and non-ASCII digit runs as unlinked. Timing
-  tripwires pin that phone matching and mixed-digit run detection stay linear
-  in field length. Plus `urlBytesAreVerbatimNoCfStripping`
+  tripwires catch quadratic regressions in phone matching and mixed-digit run
+  detection. Plus `urlBytesAreVerbatimNoCfStripping`
   (a clean URL passes through byte-equal — no silent sanitization) and the
   categorization helper test covering Cf and Cc enumerable points.
 - `TrustClaimSurfaceTest.securitySheetUrlIsBidiIsolated` and
