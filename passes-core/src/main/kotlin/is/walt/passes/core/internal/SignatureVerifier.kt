@@ -99,25 +99,26 @@ internal fun verifySignature(
     signatureBytes: ByteArray,
     manifestBytes: ByteArray,
     config: ParserConfig,
+): SignatureVerifyResult =
+    verifySignatureWithTrustLoader(signatureBytes, manifestBytes, config) {
+        AppleTrustAnchors.trustAnchors() to AppleTrustAnchors.knownIntermediates()
+    }
+
+/**
+ * The one `runCatching` both entrypoints share. `internal` so a test can inject a
+ * faulting [loadTrust], which returns trust anchors and known intermediates.
+ */
+internal fun verifySignatureWithTrustLoader(
+    signatureBytes: ByteArray,
+    manifestBytes: ByteArray,
+    config: ParserConfig,
+    loadTrust: () -> Pair<Set<TrustAnchor>, Set<X509Certificate>>,
 ): SignatureVerifyResult {
-    // Anchor lookups MUST live inside the runCatching: AppleTrustAnchors.trustAnchors()
-    // calls into resource I/O and CertificateFactory.generateCertificate, both of which
-    // can still throw on a genuinely stripped JAR or a corrupted .cer file. (The loader
-    // resolves the bundled certs by absolute classpath name, so it is itself robust to
-    // an R8/ProGuard consumer build *repackaging* this class — see AppleTrustAnchors.)
-    // Kotlin's default `by lazy` (LazyThreadSafetyMode.SYNCHRONIZED)
-    // does NOT cache the exception: each call retries the initializer and re-throws on
-    // failure. The end-user effect is the same (every parse fails until the JAR is
-    // rebuilt), but the mechanic is "retry and re-throw," not "first call poisons the
-    // cache." Treating the loader as part of the verification operation collapses that
-    // failure mode onto the documented Failed(SignatureCryptoFailure) arm.
+    // loadTrust stays inside: a stripped or corrupt bundled .cer throws there, and `by lazy`
+    // re-throws on every call, so each call must still map to SignatureCryptoFailure.
     return runCatching {
-        val ctx =
-            VerifyContext(
-                config,
-                AppleTrustAnchors.trustAnchors(),
-                AppleTrustAnchors.knownIntermediates(),
-            )
+        val (trustAnchors, knownIntermediates) = loadTrust()
+        val ctx = VerifyContext(config, trustAnchors, knownIntermediates)
         verifyAndClassify(signatureBytes, manifestBytes, ctx)
     }.getOrElse { SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure) }
 }
@@ -142,11 +143,10 @@ internal fun verifySignatureAgainstAnchorsForTesting(
     config: ParserConfig,
     trustAnchors: Set<TrustAnchor>,
     knownIntermediates: Set<X509Certificate>,
-): SignatureVerifyResult {
-    val ctx = VerifyContext(config, trustAnchors, knownIntermediates)
-    return runCatching { verifyAndClassify(signatureBytes, manifestBytes, ctx) }
-        .getOrElse { SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure) }
-}
+): SignatureVerifyResult =
+    verifySignatureWithTrustLoader(signatureBytes, manifestBytes, config) {
+        trustAnchors to knownIntermediates
+    }
 
 private fun verifyAndClassify(
     signatureBytes: ByteArray,
@@ -221,6 +221,8 @@ private val BC_PROVIDER: BouncyCastleProvider by lazy { BouncyCastleProvider() }
 private fun firstSignerWithCert(signedData: CMSSignedData): SignerWithHolder? {
     val signer = signedData.signerInfos.signers.firstOrNull() ?: return null
     val store = signedData.holderStore()
+    // Issuer+serial can collide in a crafted envelope, making this pick arbitrary. Safe:
+    // verifyMath must pass under the picked cert's key, so a wrong pick only fails.
     val holder = store.getMatches(signer.sid.asHolderSelector()).firstOrNull()
     return holder?.let { SignerWithHolder(signer, it) }
 }
@@ -440,6 +442,8 @@ private fun isLeafOnlyAndSelfSigned(
 }
 
 private fun isSelfSigned(cert: X509Certificate): Boolean {
+    // X500Principal.equals normalizes names, so this is only a fast reject; the
+    // signature check below is what proves the cert is self-issued.
     if (cert.subjectX500Principal != cert.issuerX500Principal) return false
     return runCatching { cert.verify(cert.publicKey) }.isSuccess
 }

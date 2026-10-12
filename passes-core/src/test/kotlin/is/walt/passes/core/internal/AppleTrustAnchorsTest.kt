@@ -1,7 +1,9 @@
 package `is`.walt.passes.core.internal
 
 import com.google.common.truth.Truth.assertThat
+import com.google.common.truth.Truth.assertWithMessage
 import org.junit.Test
+import java.io.File
 import java.security.MessageDigest
 
 /**
@@ -75,6 +77,24 @@ class AppleTrustAnchorsTest {
         for (file in bundled) {
             assertThat(loader.getResourceAsStream("$base/$file")).isNotNull()
         }
+    }
+
+    @Test
+    fun everyBundledCertFileIsRegistered() {
+        // The reverse of the check above: a .cer added to certs/ without being registered
+        // would ship in the JAR but never load.
+        val url =
+            Thread.currentThread().contextClassLoader
+                .getResource(AppleTrustAnchors.RESOURCE_DIR.removePrefix("/"))
+        assertThat(url).isNotNull()
+        assertWithMessage("unit tests read resources from a directory, not a JAR")
+            .that(url!!.protocol)
+            .isEqualTo("file")
+        val onDisk = File(url.toURI()).list()!!.filter { it.endsWith(".cer") }
+        assertThat(onDisk).containsExactlyElementsIn(
+            AppleTrustAnchors.BUNDLED_TRUST_ANCHOR_FILENAMES +
+                AppleTrustAnchors.BUNDLED_INTERMEDIATE_FILENAMES,
+        )
     }
 
     @Test
