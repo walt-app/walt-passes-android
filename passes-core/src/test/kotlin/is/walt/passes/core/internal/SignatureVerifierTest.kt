@@ -10,6 +10,7 @@ import org.bouncycastle.cms.CMSProcessableByteArray
 import org.bouncycastle.cms.CMSSignedData
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
+import org.bouncycastle.util.CollectionStore
 import org.junit.BeforeClass
 import org.junit.Test
 import java.security.Provider
@@ -322,6 +323,37 @@ class SignatureVerifierTest {
         val result = verifySignature(fixture.signature, fixture.manifest, ParserConfig())
 
         assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    @Test
+    fun realAppleSignedPkpassVerifiesWhenEnvelopeOmitsTheG4Intermediate() {
+        // An issuer may ship only the leaf; the bundled WWDR G4 must complete the chain.
+        val fixture = loadAppleSignedFixture()
+        val signature = withoutWwdrIntermediates(fixture.signature)
+
+        val withoutBundledIntermediates =
+            verifySignatureAgainstAnchorsForTesting(
+                signatureBytes = signature,
+                manifestBytes = fixture.manifest,
+                config = ParserConfig(),
+                trustAnchors = AppleTrustAnchors.trustAnchors(),
+                knownIntermediates = emptySet(),
+            )
+        assertOk(withoutBundledIntermediates, SignatureStatus.CertChainIncomplete)
+
+        val result = verifySignature(signature, fixture.manifest, ParserConfig())
+
+        assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    private fun withoutWwdrIntermediates(signature: ByteArray): ByteArray {
+        val signed = CMSSignedData(signature)
+
+        @Suppress("UNCHECKED_CAST")
+        val holders = signed.certificates.getMatches(null) as Collection<X509CertificateHolder>
+        val leafOnly = holders.filterNot { "Worldwide Developer Relations" in it.subject.toString() }
+        assertThat(leafOnly).hasSize(holders.size - 1)
+        return CMSSignedData.replaceCertificatesAndCRLs(signed, CollectionStore(leafOnly), null, null).encoded
     }
 
     /**

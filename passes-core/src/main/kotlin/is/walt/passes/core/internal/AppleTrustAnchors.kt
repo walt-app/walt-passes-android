@@ -43,6 +43,7 @@ internal object AppleTrustAnchors {
     internal val BUNDLED_INTERMEDIATE_FILENAMES: List<String> =
         listOf(
             "apple-wwdr-g3.cer",
+            "apple-wwdr-g4.cer",
             "apple-wwdr-g6.cer",
         )
 

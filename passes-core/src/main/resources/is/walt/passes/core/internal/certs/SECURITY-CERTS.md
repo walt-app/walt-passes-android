@@ -33,6 +33,7 @@ without reaching a root above is `CertChainIncomplete`, not `AppleVerified`.
 | File | Subject | SHA-256 fingerprint | Validity |
 |------|---------|---------------------|----------|
 | `apple-wwdr-g3.cer` | CN=Apple Worldwide Developer Relations Certification Authority, OU=G3, O=Apple Inc., C=US | `DC:F2:18:78:C7:7F:41:98:E4:B4:61:4F:03:D6:96:D8:9C:66:C6:60:08:D4:24:4E:1B:99:16:1A:AC:91:60:1F` | 2020-02-19 to 2030-02-20 |
+| `apple-wwdr-g4.cer` | CN=Apple Worldwide Developer Relations Certification Authority, OU=G4, O=Apple Inc., C=US | `EA:47:57:88:55:38:DD:8C:B5:9F:F4:55:6F:67:60:87:D8:3C:85:E7:09:02:C1:22:E4:2C:08:08:B5:BC:E1:4C` | 2020-12-16 to 2030-12-10 |
 | `apple-wwdr-g6.cer` | CN=Apple Worldwide Developer Relations Certification Authority, OU=G6, O=Apple Inc., C=US | `BD:D4:ED:6E:74:69:1F:0C:2B:FD:01:BE:02:96:19:7A:F1:37:9E:04:18:E2:D3:00:EF:A9:C3:BE:F6:42:CA:30` | 2021-03-17 to 2036-03-19 |
 
 The legacy WWDR CA (G1, expired 2023-02-07) is intentionally **not** bundled.
@@ -43,11 +44,18 @@ an expired anchor would muddy the trust posture without buying coverage.
 
 ## Sources
 
-The five certificates above were exported from the macOS system keychain on
-2026-05-05 from a fully-updated host (and cross-checked against the copies
-distributed inside `Xcode.app`'s `DVTFoundation.framework`). The fingerprints
-above match the values Apple publishes at
+The root CAs and the G3 and G6 intermediates were exported from the macOS system
+keychain on 2026-05-05 from a fully-updated host (and cross-checked against the
+copies distributed inside `Xcode.app`'s `DVTFoundation.framework`). Their
+fingerprints matched the values Apple published at the time at
 <https://www.apple.com/certificateauthority/>.
+
+`apple-wwdr-g4.cer` was downloaded on 2026-10-13 from
+<https://www.apple.com/certificateauthority/AppleWWDRCAG4.cer>, linked from that
+page. Apple's page lists no fingerprints as of that date, so it was checked by
+`openssl verify -x509_strict` against the bundled `apple-root-ca.cer`, and its
+SHA-256 matches both the G4 copy embedded in a real Apple-signed pass and the
+public Certificate Transparency record at <https://crt.sh/>.
 
 A reviewer can re-derive any of these locally with:
 

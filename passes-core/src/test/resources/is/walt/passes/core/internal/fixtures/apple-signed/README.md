@@ -1,8 +1,9 @@
 # `apple-signed/` fixture
 
 Real Apple-signed pkpass artifacts pulled from a Tixly Chroniques ticket. Used by
-`SignatureVerifierTest.realAppleSignedPkpassFixtureVerifies` and
-`SignatureVerifierTest.realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider`
+`SignatureVerifierTest.realAppleSignedPkpassFixtureVerifies`,
+`SignatureVerifierTest.realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider` and
+`SignatureVerifierTest.realAppleSignedPkpassVerifiesWhenEnvelopeOmitsTheG4Intermediate`
 to exercise the full production verifier path against a wire-shape Apple ships, on top
 of the bundled Apple Root CA anchor set.
 
@@ -26,7 +27,7 @@ ID certificates are typically issued for 1 year). The verifier sets
 `PKIXBuilderParameters.date` to *now* and `isRevocationEnabled = false`; revocation is
 fine forever, but expiry will trip on the wall clock.
 
-When the leaf expires, both fixture-based tests will downgrade from
+When the leaf expires, the fixture-based tests will downgrade from
 `Ok(AppleVerified)` to `Ok(CertChainIncomplete)` and fail — per the documented behavior
 in `SignatureVerifier`'s "No date-shift override" docblock.
 
