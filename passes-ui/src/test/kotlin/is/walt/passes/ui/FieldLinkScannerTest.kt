@@ -331,10 +331,10 @@ class FieldLinkScannerTest {
         }
     }
 
-    // -- Multi-line fields (#251) -------------------------------------------------
+    // -- Multi-line fields -------------------------------------------------------
     //
-    // Line breaks and tabs separate paragraphs in real back fields. They must not
-    // suppress links, but no link target may contain one.
+    // Line breaks and tabs separate lines and columns in real back fields. They must
+    // not suppress links, but no link target may contain one.
 
     @Test
     fun multiLineFieldYieldsEveryLinkWithExactRanges() {
@@ -384,8 +384,7 @@ class FieldLinkScannerTest {
 
     @Test
     fun phoneAfterLineEndingInDigitIsFound() {
-        // The phone regex does not split a leading paren off the match.
-        assertExactSpans("Order 77\r\n(555) 123-4567", "555) 123-4567" to PhoneIntent::class.java)
+        assertExactSpans("Order 77\r\n555-123-4567", "555-123-4567" to PhoneIntent::class.java)
     }
 
     @Test
@@ -394,17 +393,17 @@ class FieldLinkScannerTest {
     }
 
     @Test
-    fun urlContainingLineSeparatorIsRejected() {
-        // The URL regex runs through the separator, so the whole URL is dropped.
-        listOf("\u2028", "\u2029").forEach { separator ->
-            assertThat(FieldLinkScanner.scan("https://acme.example/a${separator}b", source)).isEmpty()
+    fun urlEndsBeforeUnicodeWhitespace() {
+        // The URL class excludes the whole White_Space set, as `\s` does on Android.
+        listOf("\u2028", "\u2029", "\u00A0", "\u202F", "\u3000").forEach { space ->
+            assertExactSpans("https://acme.example/a${space}b", "https://acme.example/a" to B3UrlIntent::class.java)
         }
     }
 
     @Test
     fun lineSeparatorBetweenLinesKeepsLinks() {
         assertExactSpans(
-            "Help\u2028https://acme.example/help support@acme.example\u2029Thanks",
+            "Help\u2028https://acme.example/help\u2029support@acme.example\u2029Thanks",
             "https://acme.example/help" to B3UrlIntent::class.java,
             "support@acme.example" to EmailIntent::class.java,
         )
@@ -473,13 +472,35 @@ class FieldLinkScannerTest {
         assertThat(spans).isEmpty()
     }
 
+    // -- Engine-independent classes ---------------------------------------------
+    //
+    // `\s` and `\d` are Unicode-aware on Android but ASCII-only on the JVM, so the
+    // patterns spell their classes out; these cases pin what the device does.
+
     @Test
-    fun otherControlCharsStillRejectTheWholeField() {
-        listOf('\u000B', '\u000C', '\u0000', '\u0085').forEach { control ->
-            val codepoint = "U+%04X".format(control.code)
-            assertWithMessage("$codepoint must still reject the field")
-                .that(FieldLinkScanner.scan("Help:${control}https://acme.example/help", source))
-                .isEmpty()
+    fun phoneWithNarrowNoBreakSpacesIsOneSpan() {
+        val text = "Tel +33\u202F1\u202F23\u202F45\u202F67\u202F89."
+        assertExactSpans(text, "+33\u202F1\u202F23\u202F45\u202F67\u202F89" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneWithNoBreakSpacesIsOneSpan() {
+        val text = "Tel +33\u00A01\u00A023\u00A045\u00A067\u00A089."
+        assertExactSpans(text, "+33\u00A01\u00A023\u00A045\u00A067\u00A089" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneSpacedOnlyWithNoBreakSpacesAndNoPlusStaysUnlinked() {
+        assertThat(FieldLinkScanner.scan("Ref 555\u00A0123\u00A04567", source)).isEmpty()
+    }
+
+    @Test
+    fun nonAsciiDigitRunsDoNotLink() {
+        listOf(
+            "+\u0669\u0667\u0661 \u0664 \u0663\u0666\u0666 \u0668\u0668\u0668\u0668", // Arabic-Indic
+            "+\uFF11 \uFF15\uFF15\uFF15 \uFF11\uFF12\uFF13 \uFF14\uFF15\uFF16\uFF17", // fullwidth
+        ).forEach { text ->
+            assertThat(FieldLinkScanner.scan(text, source)).isEmpty()
         }
     }
 

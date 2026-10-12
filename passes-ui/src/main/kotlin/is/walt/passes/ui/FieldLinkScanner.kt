@@ -16,13 +16,13 @@ package `is`.walt.passes.ui
  * Intentionally conservative: prefers false negatives over false positives.
  *
  * - A URL without an `http`/`https` scheme is not detected as a URL.
- * - The URL character class is RFC 3986's reserved + unreserved + percent-encoded ASCII
- *   only. Unicode characters in URLs MUST be percent-encoded (`%E2%80%AE` for U+202E,
- *   `xn--` Punycode for IDN hosts) to be detected; raw bidi / format / control
- *   characters cause the URL to be rejected outright. This defends against the bidi
- *   spoofing class — e.g. `https://attacker.example/‮gpj.elgoog//:sptth` rendering
- *   visually as a Google asset URL while `Uri.parse` resolves to `attacker.example`.
- *   Tested in `FieldLinkScannerTest`.
+ * - A URL runs from the scheme to the first Unicode White_Space character or one of
+ *   `<>"'()`. It is not limited to ASCII: raw non-ASCII characters, including in the
+ *   host, are part of the match. Raw format or control characters inside the run
+ *   reject the URL outright (see the match-level check below). This defends against
+ *   the bidi spoofing class — e.g. `https://attacker.example/‮gpj.elgoog//:sptth`
+ *   rendering visually as a Google asset URL while `Uri.parse` resolves to
+ *   `attacker.example`. Tested in `FieldLinkScannerTest`.
  * - A phone number requires at least seven digits AND at least one formatting hint
  *   (a leading `+`, an embedded space, dash, or parenthesis) before it is recognised.
  *   Bare digit runs — ticket numbers, order IDs, member numbers, barcode payloads —
@@ -36,15 +36,20 @@ package `is`.walt.passes.ui
  *
  * - Field level ([containsFieldHazard]): a field containing any Unicode formatting
  *   (Cf) or control (Cc) codepoint surfaces no links at all, except that line feed,
- *   carriage return and tab are allowed, since multi-paragraph back fields use them
- *   and they cannot reorder glyphs. A clean link beside a bidi control is dropped too:
+ *   carriage return and tab are allowed, since they separate lines and columns in
+ *   real back fields and cannot reorder glyphs. A clean link beside a bidi control is dropped too:
  *   an author who plants one has shown intent to deceive, and the context the user
  *   reads is no longer trustworthy.
  * - Match level ([containsRenderingHazard]): every match is also rejected if it
  *   contains ANY Cf or Cc codepoint (line feed, carriage return and tab included) or
- *   a line or paragraph separator (U+2028 / U+2029). This check is load-bearing, not
- *   a backstop: the URL regex admits any non-whitespace character, including Cf
- *   codepoints and both separators, so this is what keeps them out of link targets.
+ *   a line or paragraph separator (U+2028 / U+2029). It is load-bearing for Cf and
+ *   most Cc: the URL pattern admits them, so this check is what keeps them out of link
+ *   targets. No pattern can match whitespace that breaks a line, so for line feed,
+ *   carriage return, tab and U+2028 / U+2029 it is a backstop.
+ *
+ * Every pattern spells out its character classes instead of `\s` / `\d`, which are
+ * Unicode-aware on Android (ICU) but ASCII-only on the JVM, so unit tests describe
+ * device behaviour.
  *
  * Public so consumers that render their own back-field layouts (e.g. walt-android's
  * flat-row PKPASS detail screen) can invoke the canonical scanner instead of
@@ -56,17 +61,17 @@ package `is`.walt.passes.ui
  */
 public object FieldLinkScanner {
 
-    // Deliberately permissive so a URL with an embedded bidi control matches whole and
-    // is rejected, rather than matching a truncated safe-looking prefix.
-    private val urlRegex = Regex("""https?://[^\s<>"'()]+""")
+    // Stops only at Unicode White_Space or `<>"'()`, so a URL with an embedded bidi
+    // control matches whole and is rejected rather than truncated to a safe prefix.
+    private val urlRegex = Regex(
+        """https?://[^\t\n\u000B\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000<>"'()]+""",
+    )
     private val emailRegex = Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""")
 
-    // Phone: starts with + or with a digit; digits, spaces, dashes, parentheses; total
-    // digit count >= 7. Anchored on word boundaries so a serial number like "12345678"
-    // adjacent to other text does not accidentally match. Only a literal space separates
-    // digit groups, so a match never crosses a tab or line break.
+    // ASCII digits only, so digits that can be reordered on screen never link. The only
+    // whitespace admitted is horizontal (U+0020, U+00A0, U+2007, U+2009, U+202F).
     private val phoneRegex =
-        Regex("""(?<!\d)(\+?\d[\d \-()]{6,}\d)(?!\d)""")
+        Regex("""(?<![0-9])(\+?[0-9][0-9 \u00A0\u2007\u2009\u202F\-()]{6,}[0-9])(?![0-9])""")
 
     public fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
         if (containsFieldHazard(fieldValue)) return emptyList()
@@ -132,11 +137,8 @@ public object FieldLinkScanner {
     }
 
     /**
-     * The whole-field gate: Cf or Cc codepoints except line feed, carriage return and
-     * tab, which separate paragraphs in real back fields (#251). Every other Cf or Cc
-     * codepoint, including vertical tab and form feed, still rejects the field. U+2028 /
-     * U+2029 were never field hazards and, like line feed, break lines without
-     * reordering glyphs, so they stay allowed here and are rejected only inside a match.
+     * Whole-field gate: any Cf or Cc codepoint except line feed, carriage return and tab.
+     * U+2028 / U+2029 are not Cf or Cc and, like line feed, break lines without reordering.
      */
     internal fun containsFieldHazard(s: String): Boolean = s.codePoints().anyMatch { cp ->
         cp !in FIELD_WHITESPACE && isFormatOrControl(cp)
@@ -186,12 +188,8 @@ public object FieldLinkScanner {
         existing: List<LinkSpan>,
     ): Boolean = existing.any { it.start < endExclusive && start < it.endExclusive }
 
-    // The phone regex `(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)` cannot start with `(` or
-    // end with `)` (its outer anchors require digits at both edges), so any paren
-    // surrounding a phone number lands *adjacent to* the match, not inside it. The
-    // internal-hint set therefore lists only the characters that can actually appear
-    // inside `match.value` — `+`, `-`, and space. Adjacent parens are picked up via
-    // [PHONE_PREFIX_HINTS] / the trailing-`)` check in [hasPhoneFormattingHint].
+    // A phone match starts and ends on an ASCII digit, so surrounding parens are found by
+    // adjacency. No-break spaces are not hints: such a number without `+` stays unlinked.
     private val INTERNAL_PHONE_HINTS = setOf('+', '-', ' ')
 
     /** `+` and `(` immediately before a digit run signal an unmatched-paren or international form. */
