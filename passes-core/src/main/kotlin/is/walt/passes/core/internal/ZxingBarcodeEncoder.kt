@@ -70,8 +70,8 @@ import com.google.zxing.BarcodeFormat as ZxingFormat
  * character for the byte-capable formats. Past Latin-1, `PDF417Writer` throws and `AztecWriter` /
  * `QRCodeWriter` silently transliterate ("東京" decodes as "??"). PDF417 is fixed by
  * `PDF417_AUTO_ECI`, which adds an ECI header only when one is needed. Aztec and QR pin UTF-8 only
- * when [ScannableFormatConstraints.needsUtf8Eci] says so: an unconditional pin put an ECI header on
- * plain ASCII, which scanners without ECI support reject (#224).
+ * when [ScannableFormatConstraints.needsUtf8Eci] says so, because scanners without ECI support
+ * reject a header on plain ASCII.
  */
 internal object ZxingBarcodeEncoder {
     // Per-writer hint maps. Each writer reads ERROR_CORRECTION as a different type —
@@ -119,10 +119,9 @@ internal object ZxingBarcodeEncoder {
      * The refusals that are decided without running a writer, or null to proceed.
      *
      * An empty payload is refused for every format. The validator rejects it upstream, so this
-     * is defense in depth — but it cannot be left to the writers: the others throw on an empty
-     * input but `AztecWriter` given a CHARACTER_SET hint happily emits a 15x15 symbol that
-     * encodes nothing. Uniform refusal here beats six incidental behaviors
-     * that a hint change can flip.
+     * is defense in depth — but it cannot be left to the writers, which disagree: `AztecWriter`
+     * has emitted an empty 15x15 symbol rather than throwing. Uniform refusal here beats
+     * per-writer behaviors that a hint change can flip.
      *
      * PDF417 refuses supplementary-plane characters (emoji, historic scripts — anything outside
      * the BMP, which Kotlin holds as a surrogate pair). ZXing cannot encode one in PDF417 under

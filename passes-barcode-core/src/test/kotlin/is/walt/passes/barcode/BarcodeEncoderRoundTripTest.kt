@@ -80,7 +80,7 @@ class BarcodeEncoderRoundTripTest {
     @Test
     fun nonAsciiPayloadsSurviveOnTheCharsetPinnedFormats() {
         // Without the charset hints PDF417 throws, while Aztec and QR decode back "café ? naïve ? ??"
-        // with no error at any layer. The hints apply only to such payloads, never to ASCII (#224).
+        // with no error at any layer. The hints apply only to such payloads, never to ASCII.
         for (format in listOf(ScannableFormat.Pdf417, ScannableFormat.Aztec, ScannableFormat.Qr)) {
             assertThat(decodeLuminance(render(NON_ASCII_PAYLOAD, format)))
                 .isEqualTo(BarcodeDecodeResult.DecodedBarcode(NON_ASCII_PAYLOAD, format))

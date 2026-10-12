@@ -374,7 +374,7 @@ Phone decoders read the same text, but scanners without ECI support (supermarket
 tills among them) reject the symbol. `PDF417_AUTO_ECI` never had the problem: it
 adds a header only past ISO-8859-1. The pin is now conditional, decided by
 `ScannableFormatConstraints.needsUtf8Eci`: Aztec takes it only past ISO-8859-1,
-its decoders' default; QR takes it past ASCII, because QR decoders guess the
+the spec default; QR takes it past ASCII, because QR decoders guess the
 charset of unannounced bytes (ZXing reads Latin-1 `ééé` back as Shift_JIS).
 ASCII symbols now match other generators, and an ASCII QR payload regains the
 byte of v40-M byte-mode capacity the header cost (2,330 to 2,331); non-ASCII QR

@@ -5,7 +5,7 @@ package `is`.walt.passes.core
  * structural-checksum rules. Hook point for the wpass-lzi threat model — if a constraint
  * here changes, the threat-model doc must change alongside it.
  *
- * Kept `internal` so the validator is the only callable boundary; the consumer never picks
+ * Kept `internal` so the validator and the encoder are its only callers; the consumer never picks
  * "is this character allowed" off of this object directly. Bidi / control-character checks
  * live in [ScannableCardInputValidator] because they apply uniformly across all formats.
  */
@@ -118,8 +118,10 @@ internal object ScannableFormatConstraints {
 
     /**
      * True when the encoder pins UTF-8 for [payload], adding an ECI header that scanners without
-     * ECI support reject (#224). Aztec decoders default to ISO-8859-1, so Aztec needs it only past
-     * Latin-1; QR decoders guess the charset of unannounced bytes, so QR needs it past ASCII.
+     * ECI support reject. Aztec's spec default is ISO-8859-1, so Aztec needs it only past Latin-1;
+     * QR decoders guess the charset of unannounced bytes, so QR needs it past ASCII.
+     * Issuer barcodes (encodePassBarcodeMatrix) follow the pass's declared encoding instead; a card
+     * has no issuer to match.
      */
     internal fun needsUtf8Eci(
         format: ScannableFormat,
@@ -152,6 +154,7 @@ internal object ScannableFormatConstraints {
         if (needsUtf8Eci(ScannableFormat.Qr, payload)) {
             payload.toByteArray(Charsets.UTF_8).size > QR_BYTE_CEILING_ECC_M_BYTE_MODE - ECI_HEADER_BYTES
         } else {
+            // An unhinted QR payload is ASCII, so its length is its byte count.
             payload.length > QR_BYTE_CEILING_ECC_M_BYTE_MODE
         }
 

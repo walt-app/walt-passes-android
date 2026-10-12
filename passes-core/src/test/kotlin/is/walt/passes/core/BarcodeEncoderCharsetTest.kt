@@ -17,7 +17,7 @@ import org.junit.Test
 import com.google.zxing.BarcodeFormat as ZxingFormat
 
 /**
- * When Aztec and QR carry a UTF-8 ECI header (#224). Matrices are compared against direct ZXing
+ * When Aztec and QR carry a UTF-8 ECI header. Matrices are compared against direct ZXing
  * encodes at the encoder's error-correction pins, so a test fails if the header appears or vanishes.
  */
 class BarcodeEncoderCharsetTest {
@@ -35,7 +35,7 @@ class BarcodeEncoderCharsetTest {
 
     @Test
     fun numericAztecCarriesNoEciHeader() {
-        // The header grew this symbol from 15 to 19 modules.
+        // With the header this symbol is 19 modules.
         val matrix = encode("9876543210", ScannableFormat.Aztec)
         assertThat(matrix).isEqualTo(zxing("9876543210", ScannableFormat.Aztec, utf8 = false))
         assertThat(matrix.width).isEqualTo(15)
@@ -64,9 +64,17 @@ class BarcodeEncoderCharsetTest {
     }
 
     @Test
+    fun unhintedLatin1QrDoesNotDecodeBack() {
+        // The premise behind QR's ASCII rule: without a header the decoder guesses the charset.
+        val unhinted = zxing("ééé", ScannableFormat.Qr, utf8 = false)
+        assertThat(decode(unhinted, ScannableFormat.Qr)).isNotEqualTo("ééé")
+    }
+
+    @Test
     fun decodeRoundTripReturnsTheExactPayload() {
         // "ééé" and "½¼¾ÀÁÂ" decode as Shift_JIS from a QR symbol without an ECI header.
-        val payloads = listOf("abc123", "WALT-CHECK-1", "Grüße aus Köln", "ééé", "½¼¾ÀÁÂ", "東京", "a👍b")
+        val payloads =
+            listOf("abc123", "WALT-CHECK-1", "C:\\cards\\~42", "Grüße aus Köln", "ééé", "½¼¾ÀÁÂ", "東京", "a👍b")
         for (format in listOf(ScannableFormat.Aztec, ScannableFormat.Qr)) {
             for (payload in payloads) {
                 assertThat(decode(encode(payload, format), format)).isEqualTo(payload)
