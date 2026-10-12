@@ -41,9 +41,10 @@ package `is`.walt.passes.ui
  *   an author who plants one has shown intent to deceive, and the context the user
  *   reads is no longer trustworthy.
  * - Match level ([containsRenderingHazard]): every match is also rejected if it
- *   contains ANY Cf or Cc codepoint, line breaks and tabs included, so no link target
- *   can carry one. Redundant under the current regexes, but it locks the property so
- *   a future regex relaxation cannot re-open a spoofing path.
+ *   contains ANY Cf or Cc codepoint (line feed, carriage return and tab included) or
+ *   a line or paragraph separator (U+2028 / U+2029). This check is load-bearing, not
+ *   a backstop: the URL regex admits any non-whitespace character, including Cf
+ *   codepoints and both separators, so this is what keeps them out of link targets.
  *
  * Public so consumers that render their own back-field layouts (e.g. walt-android's
  * flat-row PKPASS detail screen) can invoke the canonical scanner instead of
@@ -62,9 +63,10 @@ public object FieldLinkScanner {
 
     // Phone: starts with + or with a digit; digits, spaces, dashes, parentheses; total
     // digit count >= 7. Anchored on word boundaries so a serial number like "12345678"
-    // adjacent to other text does not accidentally match.
+    // adjacent to other text does not accidentally match. Only a literal space separates
+    // digit groups, so a match never crosses a tab or line break.
     private val phoneRegex =
-        Regex("""(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)""")
+        Regex("""(?<!\d)(\+?\d[\d \-()]{6,}\d)(?!\d)""")
 
     public fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
         if (containsFieldHazard(fieldValue)) return emptyList()
@@ -113,29 +115,42 @@ public object FieldLinkScanner {
         regex.findAll(fieldValue).filterNot { containsRenderingHazard(it.value) }
 
     /**
-     * True if [s] contains any Unicode Cf (Format) or Cc (Control) codepoint. These
-     * include bidi controls (U+202A-U+202E, U+2066-U+2069, U+200E/U+200F, U+061C),
-     * zero-width characters (U+200B-U+200D, U+FEFF), and raw control bytes (U+0000-U+001F,
-     * U+007F-U+009F). All of them can change the rendered glyph order or visibility of
-     * a string without changing its byte content, breaking the "displayed string equals
-     * actionable string" trust claim.
+     * True if [s] contains any Unicode Cf (Format) or Cc (Control) codepoint, or a line
+     * or paragraph separator (U+2028 / U+2029). Cf and Cc include bidi controls
+     * (U+202A-U+202E, U+2066-U+2069, U+200E/U+200F, U+061C), zero-width characters
+     * (U+200B-U+200D, U+FEFF), supplementary-plane format characters such as TAG
+     * characters (U+E0001, U+E0020-U+E007F), and raw control bytes (U+0000-U+001F,
+     * U+007F-U+009F). All of them can change the rendered glyph order, visibility or
+     * line layout of a string without changing what it resolves to, breaking the
+     * "displayed string equals actionable string" trust claim.
      *
-     * Applied to every matched link substring, so no link target carries one.
+     * Iterates code points, not UTF-16 chars, so a surrogate pair is classified as the
+     * character it encodes. Applied to every matched link substring.
      */
-    internal fun containsRenderingHazard(s: String): Boolean = s.any { c ->
-        c.category == CharCategory.FORMAT || c.isISOControl()
+    internal fun containsRenderingHazard(s: String): Boolean = s.codePoints().anyMatch { cp ->
+        isFormatOrControl(cp) || Character.getType(cp) in SEPARATOR_TYPES
     }
 
     /**
-     * The whole-field gate: [containsRenderingHazard] minus line feed, carriage return
-     * and tab, which separate paragraphs in real back fields (#251). Every other Cf or
-     * Cc codepoint, including vertical tab and form feed, still rejects the field.
+     * The whole-field gate: Cf or Cc codepoints except line feed, carriage return and
+     * tab, which separate paragraphs in real back fields (#251). Every other Cf or Cc
+     * codepoint, including vertical tab and form feed, still rejects the field. U+2028 /
+     * U+2029 were never field hazards and, like line feed, break lines without
+     * reordering glyphs, so they stay allowed here and are rejected only inside a match.
      */
-    internal fun containsFieldHazard(s: String): Boolean = s.any { c ->
-        c !in FIELD_WHITESPACE && (c.category == CharCategory.FORMAT || c.isISOControl())
+    internal fun containsFieldHazard(s: String): Boolean = s.codePoints().anyMatch { cp ->
+        cp !in FIELD_WHITESPACE && isFormatOrControl(cp)
     }
 
-    private val FIELD_WHITESPACE = setOf('\n', '\r', '\t')
+    private fun isFormatOrControl(cp: Int): Boolean =
+        Character.getType(cp) == Character.FORMAT.toInt() || Character.isISOControl(cp)
+
+    private val FIELD_WHITESPACE = setOf('\n'.code, '\r'.code, '\t'.code)
+
+    private val SEPARATOR_TYPES = setOf(
+        Character.LINE_SEPARATOR.toInt(),
+        Character.PARAGRAPH_SEPARATOR.toInt(),
+    )
 
     /**
      * True if the matched phone candidate carries at least one visible formatting hint:

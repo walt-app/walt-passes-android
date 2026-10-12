@@ -77,9 +77,13 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
      paragraphs in real back fields and cannot reorder glyphs. The rejection is
      field-level: a clean URL adjacent to a hostile one in the same field becomes
      non-tappable too, since the surrounding context is untrustworthy. Every
-     match is then checked again with `containsRenderingHazard`, which allows no
-     Cf or Cc codepoint at all, line breaks and tabs included, so no link target
-     carries one.
+     match is then checked again with `containsRenderingHazard`, which rejects
+     any Cf or Cc codepoint (line feed, carriage return and tab included) and the
+     line and paragraph separators U+2028 / U+2029, so no link target carries
+     one. Both checks classify code points, not UTF-16 units, so
+     supplementary-plane format characters (e.g. TAG characters U+E0001,
+     U+E0020-U+E007F) are caught. The phone pattern separates digit groups with
+     a literal space only, so a phone match never crosses a tab or line break.
    - **Rendering-stage isolation.** The sheet wraps every user-controlled string —
      the URL, the issuer's organization name, and the source field's label — in
      U+2068 / U+2069 (FSI / PDI) bidi isolates. Within the isolate, the Unicode
@@ -95,8 +99,10 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
   ASCII control bytes, the same hazards in phone and email positions, and a
   "clean URL adjacent to hostile URL" case that asserts the entire field
   surfaces no links, including when the hazard sits on another line. Multi-line
-  cases (LF, CRLF, tab) pin that links in paragraph-separated fields stay
-  tappable with exact ranges, and that a match spanning a line break is
+  cases (LF, CRLF, tab, U+2028 / U+2029) pin that links in paragraph-separated
+  fields stay tappable with exact ranges, that a phone number on the line after
+  a trailing digit is still found, and that a URL running into a line or
+  paragraph separator, or containing a supplementary-plane TAG character, is
   rejected. Plus `urlBytesAreVerbatimNoCfStripping` (a clean URL passes
   through byte-equal — no silent sanitization) and the categorization helper
   test covering Cf and Cc enumerable points.

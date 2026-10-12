@@ -378,10 +378,68 @@ class FieldLinkScannerTest {
     }
 
     @Test
-    fun phoneSpanningLineBreakIsRejected() {
-        // Digits continue onto the next line, so the match would carry the break.
-        val spans = FieldLinkScanner.scan("Tel +1 555 123 4567\n10203040", source)
+    fun phoneStopsAtLineBreak() {
+        assertExactSpans("Tel +1 555 123 4567\n10203040", "+1 555 123 4567" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneAfterLineEndingInDigitIsFound() {
+        // The phone regex does not split a leading paren off the match.
+        assertExactSpans("Order 77\r\n(555) 123-4567", "555) 123-4567" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneAfterTabFollowingDigitIsFound() {
+        assertExactSpans("Seat 4\t555-123-4567", "555-123-4567" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun urlContainingLineSeparatorIsRejected() {
+        // The URL regex runs through the separator, so the whole URL is dropped.
+        listOf("\u2028", "\u2029").forEach { separator ->
+            assertThat(FieldLinkScanner.scan("https://acme.example/a${separator}b", source)).isEmpty()
+        }
+    }
+
+    @Test
+    fun lineSeparatorBetweenLinesKeepsLinks() {
+        assertExactSpans(
+            "Help\u2028https://acme.example/help support@acme.example\u2029Thanks",
+            "https://acme.example/help" to B3UrlIntent::class.java,
+            "support@acme.example" to EmailIntent::class.java,
+        )
+    }
+
+    @Test
+    fun urlContainingSupplementaryTagCharIsRejected() {
+        // U+E0001 LANGUAGE TAG, a Cf codepoint encoded as a surrogate pair.
+        val spans = FieldLinkScanner.scan("https://acme.example/\uDB40\uDC01path", source)
         assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun supplementaryFormatCharElsewhereRejectsTheWholeField() {
+        // U+E0020 TAG SPACE on its own line, away from the link.
+        val spans = FieldLinkScanner.scan("Note \uDB40\uDC20\nhttps://acme.example/help", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun supplementaryFormatCharsAreHazardsAtBothLevels() {
+        listOf(
+            "\uDB40\uDC01", // U+E0001 LANGUAGE TAG
+            "\uDB40\uDC20", // U+E0020 TAG SPACE
+            "\uD82F\uDCA0", // U+1BCA0 SHORTHAND FORMAT LETTER OVERLAP
+            "\uD834\uDD73", // U+1D173 MUSICAL SYMBOL BEGIN BEAM
+        ).forEach { hazard ->
+            val codepoint = "U+%04X".format(hazard.codePointAt(0))
+            assertWithMessage("$codepoint must be a field hazard")
+                .that(FieldLinkScanner.containsFieldHazard("safe$hazard"))
+                .isTrue()
+            assertWithMessage("$codepoint must be a match-level hazard")
+                .that(FieldLinkScanner.containsRenderingHazard("safe$hazard"))
+                .isTrue()
+        }
     }
 
     @Test
@@ -427,7 +485,7 @@ class FieldLinkScannerTest {
 
     @Test
     fun fieldHazardAllowsOnlyLineBreaksAndTab() {
-        listOf("\n", "\r", "\t", "\r\n").forEach { whitespace ->
+        listOf("\n", "\r", "\t", "\r\n", "\u2028", "\u2029").forEach { whitespace ->
             assertThat(FieldLinkScanner.containsFieldHazard("a${whitespace}b")).isFalse()
         }
         HAZARDS.forEach { hazard ->
@@ -440,7 +498,7 @@ class FieldLinkScannerTest {
 
     @Test
     fun renderingHazardStillFlagsLineBreaksAndTab() {
-        listOf('\n', '\r', '\t').forEach { whitespace ->
+        listOf('\n', '\r', '\t', '\u2028', '\u2029').forEach { whitespace ->
             val codepoint = "U+%04X".format(whitespace.code)
             assertWithMessage("$codepoint must be a match-level hazard")
                 .that(FieldLinkScanner.containsRenderingHazard("a${whitespace}b"))
