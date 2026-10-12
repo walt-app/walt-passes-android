@@ -48,7 +48,7 @@ internal object SyntheticPkpass {
      * Build a signed pkpass with a synthesized self-signed certificate. The signature
      * verifies cryptographically against the manifest bytes; default [ParserConfig]
      * surfaces it as `SignatureStatus.SelfSigned` (no Apple anchor reachable). Strict
-     * mode treats the same archive as `Tampered(SignatureCryptoFailure)`.
+     * mode treats the same archive as `Tampered(SignatureUntrusted)`.
      */
     fun signedSelfSigned(
         passJson: String,

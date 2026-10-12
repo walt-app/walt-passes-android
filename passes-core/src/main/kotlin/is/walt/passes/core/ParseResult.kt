@@ -56,6 +56,12 @@ public sealed interface TamperReason {
      * exposure.
      */
     public data object SignerCertificateMissing : TamperReason
+
+    /**
+     * The signature verified, but its chain reaches no bundled Apple anchor and
+     * [ParserConfig.acceptSelfSignedCertificates] is off. A policy refusal, not a crypto failure.
+     */
+    public data object SignatureUntrusted : TamperReason
 }
 
 public sealed interface MalformedReason {
@@ -146,6 +152,7 @@ public fun ParseResult.toFailureReason(): ParseFailureReason? =
                 TamperReason.FileHashMismatch -> ParseFailureReason.FileHashMismatch
                 TamperReason.SignatureCryptoFailure -> ParseFailureReason.SignatureCryptoFailure
                 TamperReason.SignerCertificateMissing -> ParseFailureReason.SignerCertificateMissing
+                TamperReason.SignatureUntrusted -> ParseFailureReason.SignatureUntrusted
             }
         is ParseResult.Malformed ->
             when (val r = reason) {

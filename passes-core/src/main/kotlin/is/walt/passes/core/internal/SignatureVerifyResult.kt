@@ -9,11 +9,8 @@ import `is`.walt.passes.core.TamperReason
  * [Failed] into the right [`is`.walt.passes.core.ParseResult] arm and an [Ok] into
  * [`is`.walt.passes.core.ParseResult.Success] with the contained [SignatureStatus].
  *
- * Mirrors [ManifestVerifyResult]'s and [PassJsonDecodeResult]'s split. Public failure
- * surface stays tight ([TamperReason] has only the two arms that this layer can produce
- * — [TamperReason.ManifestSignatureMismatch] and [TamperReason.SignatureCryptoFailure])
- * but routing happens here in terms of the same arms a parser-glue `when` will fan out
- * across, so adding a new policy outcome can never silently bypass the trust UI.
+ * Mirrors [ManifestVerifyResult]'s and [PassJsonDecodeResult]'s split. [Failed] carries
+ * the public [TamperReason] arm directly, so a new policy outcome cannot bypass the trust UI.
  *
  * The [SignatureStatus] inside [Ok] is constrained at the type level only by the public
  * sealed interface; this layer is documented to never produce

@@ -110,6 +110,7 @@ class PublicApiSurfaceTest {
                 ParseResult.Tampered(TamperReason.FileHashMismatch),
                 ParseResult.Tampered(TamperReason.SignatureCryptoFailure),
                 ParseResult.Tampered(TamperReason.SignerCertificateMissing),
+                ParseResult.Tampered(TamperReason.SignatureUntrusted),
             )
         val malformedReasons: List<ParseResult> =
             listOf(
@@ -158,6 +159,7 @@ class PublicApiSurfaceTest {
                 ParseResult.Tampered(TamperReason.FileHashMismatch),
                 ParseResult.Tampered(TamperReason.SignatureCryptoFailure),
                 ParseResult.Tampered(TamperReason.SignerCertificateMissing),
+                ParseResult.Tampered(TamperReason.SignatureUntrusted),
                 ParseResult.Malformed(MalformedReason.NotAZipArchive),
                 ParseResult.Malformed(MalformedReason.MissingPassJson),
                 ParseResult.Malformed(MalformedReason.MissingManifest),
@@ -202,6 +204,7 @@ class PublicApiSurfaceTest {
                 TamperReason.FileHashMismatch,
                 TamperReason.SignatureCryptoFailure,
                 TamperReason.SignerCertificateMissing,
+                TamperReason.SignatureUntrusted,
             )
         assertThat(reasons.toSet()).hasSize(reasons.size)
     }

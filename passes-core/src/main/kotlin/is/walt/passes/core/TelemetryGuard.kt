@@ -103,6 +103,7 @@ public enum class ParseFailureReason {
     FileHashMismatch,
     SignatureCryptoFailure,
     SignerCertificateMissing,
+    SignatureUntrusted,
 
     // MalformedReason arms (non-resource).
     NotAZipArchive,
@@ -131,7 +132,7 @@ public enum class ParseFailureReason {
 }
 
 /**
- * Maps a [ParseFailureReason] to its enclosing [ParseFailureKind] bucket. Encodes the 21→4
+ * Maps a [ParseFailureReason] to its enclosing [ParseFailureKind] bucket. Encodes the 22→4
  * narrowing that exists implicitly across [toFailureReason] / [toFailureKind] so that the
  * cross-field invariant on [ParseFailedEvent] (`reason ∈ buckets-of(outcome)`) is checkable
  * in code rather than enforced by convention. Adding a new [ParseFailureReason] arm without
@@ -144,6 +145,7 @@ public fun ParseFailureReason.toKind(): ParseFailureKind =
         ParseFailureReason.FileHashMismatch,
         ParseFailureReason.SignatureCryptoFailure,
         ParseFailureReason.SignerCertificateMissing,
+        ParseFailureReason.SignatureUntrusted,
         -> ParseFailureKind.Tampered
 
         ParseFailureReason.NotAZipArchive,

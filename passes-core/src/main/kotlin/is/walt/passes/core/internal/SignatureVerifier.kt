@@ -53,7 +53,7 @@ import java.security.cert.X509Certificate
  * signature and `manifestBytes` is always a tampering signal, regardless of the
  * trust toggle.
  *
- * **Four failure shapes, mapped to three [TamperReason] arms:**
+ * **Four failure shapes, mapped to four [TamperReason] arms:**
  *
  *  1. CMS structurally well-formed and the signed math evaluates against
  *     `manifestBytes` to "doesn't match" — either [SignerInformation.verify] returns
@@ -73,7 +73,7 @@ import java.security.cert.X509Certificate
  *  4. CMS verifies but the cert chain does not reach a bundled Apple anchor — the
  *     [ParserConfig.acceptSelfSignedCertificates] toggle decides between
  *     [SignatureStatus.SelfSigned] / [SignatureStatus.CertChainIncomplete] (lenient,
- *     default) or [TamperReason.SignatureCryptoFailure] (strict).
+ *     default) or [TamperReason.SignatureUntrusted] (strict).
  *
  * **Constant-time digest comparison.** `SignerInformation.verify` compares the signed
  * `messageDigest` attribute with [java.security.MessageDigest.isEqual] internally. The
@@ -128,7 +128,7 @@ internal fun verifySignature(
  * trust anchor. Production callers MUST go through [verifySignature]; passing
  * [emptySet] anchors here silently downgrades every Apple-signed input to
  * [SignatureStatus.SelfSigned] / [SignatureStatus.CertChainIncomplete] (lenient) or
- * [TamperReason.SignatureCryptoFailure] (strict) — a trust-degradation footgun no
+ * [TamperReason.SignatureUntrusted] (strict) — a trust-degradation footgun no
  * test in this suite would catch, since the suite itself routes through here. The
  * `ForTesting` suffix is the conventional flag.
  *
@@ -406,7 +406,7 @@ private fun classifyChain(
         chainReachesAnchor(leaf, included, ctx) ->
             SignatureVerifyResult.Ok(SignatureStatus.AppleVerified)
         !ctx.config.acceptSelfSignedCertificates ->
-            SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure)
+            SignatureVerifyResult.Failed(TamperReason.SignatureUntrusted)
         isLeafOnlyAndSelfSigned(leaf, included) ->
             SignatureVerifyResult.Ok(SignatureStatus.SelfSigned)
         else ->
