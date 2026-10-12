@@ -27,6 +27,10 @@ public interface TelemetryGuard {
     }
 }
 
+/**
+ * [droppedLocaleCount] counts locales whose `.strings` file did not parse and was left out
+ * of the pass (#252); [localeCount] counts only the ones kept.
+ */
 public data class ParseSucceededEvent(
     public val passType: PassType,
     public val signatureStatus: SignatureStatusKind,
@@ -34,6 +38,7 @@ public data class ParseSucceededEvent(
     public val durationMillis: Long,
     public val imageCount: Int,
     public val localeCount: Int,
+    public val droppedLocaleCount: Int = 0,
 )
 
 /**

@@ -70,12 +70,10 @@ public sealed interface MalformedReason {
     public data object InvalidManifest : MalformedReason
 
     /**
-     * A `<locale>.lproj/pass.strings` file is structurally invalid (charset error,
-     * unterminated token, missing `=`/`;`, unrecognized escape, unpaired surrogate).
-     * Surfaced separately from [InvalidPassJson] so telemetry and UI can distinguish
-     * a malformed localization payload from a malformed pass.json — the two have
-     * different operational implications (a bad .strings file degrades one locale;
-     * a bad pass.json takes the whole pass down).
+     * A `<locale>.lproj/pass.strings` file is structurally invalid. The default parser
+     * no longer returns this: since #252 a bad `.strings` file drops that one locale
+     * and is counted in [ParseSucceededEvent.droppedLocaleCount]. Kept so consumers'
+     * exhaustive `when`s still compile.
      */
     public data object InvalidStrings : MalformedReason
 

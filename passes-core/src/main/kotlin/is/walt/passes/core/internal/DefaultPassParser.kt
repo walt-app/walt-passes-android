@@ -47,7 +47,7 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
         val started = System.nanoTime()
         config.telemetryGuard.onParseStarted()
         val outcome = runPipeline(source)
-        emit(outcome.result, started, outcome.archiveBytes)
+        emit(outcome, started)
         return outcome.result
     }
 
@@ -103,10 +103,11 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
         return PipelineOutcome(
             result =
                 ParseResult.Success(
-                    pass = pass.copy(images = images, locales = locales),
+                    pass = pass.copy(images = images, locales = locales.locales),
                     signatureStatus = signatureStatus,
                 ),
             archiveBytes = archiveBytes,
+            droppedLocales = locales.dropped,
         )
     }
 
@@ -134,7 +135,7 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
         }
     }
 
-    private fun collectLocales(entries: Map<String, ByteArray>): Phase<LocaleMap> {
+    private fun collectLocales(entries: Map<String, ByteArray>): Phase<ParsedLocales> {
         // Two-pass over the entries: first identify the locale-bearing names so the cap
         // can fire before any .strings parsing happens, then parse. Doing the cap check
         // up-front avoids parsing N strings files just to reject N+1.
@@ -153,17 +154,25 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
         }
     }
 
-    private fun parseStringsEntries(stringsEntries: List<Pair<String, ByteArray>>): Phase<LocaleMap> {
+    /**
+     * A locale whose `.strings` does not parse is dropped, not fatal (#252): its bytes
+     * already passed the manifest and signature checks, so only its text is lost.
+     */
+    private fun parseStringsEntries(stringsEntries: List<Pair<String, ByteArray>>): Phase<ParsedLocales> {
         val map = LinkedHashMap<PassLocale, LocalizedStrings>(stringsEntries.size)
+        var dropped = 0
         var failure: ParseResult? = null
         for ((locale, bytes) in stringsEntries) {
             if (failure != null) break
             when (val r = parseStrings(bytes, config)) {
                 is StringsResult.Ok -> map[PassLocale(locale)] = r.strings
-                is StringsResult.Failed -> failure = stringsFailureToResult(r.failure)
+                is StringsResult.Failed -> {
+                    failure = stringsFailureHaltOrNull(r.failure)
+                    dropped++
+                }
             }
         }
-        return failure?.let { Phase.Halt(it) } ?: Phase.Continue(map)
+        return failure?.let { Phase.Halt(it) } ?: Phase.Continue(ParsedLocales(map, dropped))
     }
 
     private fun collectImages(entries: Map<String, ByteArray>): Phase<Map<ImageRole, ImageBytes>> {
@@ -216,21 +225,21 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
     }
 
     private fun emit(
-        result: ParseResult,
+        outcome: PipelineOutcome,
         startedNanos: Long,
-        archiveBytes: Long,
     ) {
         val durationMillis = (System.nanoTime() - startedNanos) / NANOS_PER_MILLI
-        when (result) {
+        when (val result = outcome.result) {
             is ParseResult.Success ->
                 config.telemetryGuard.onParseSucceeded(
                     ParseSucceededEvent(
                         passType = result.pass.type,
                         signatureStatus = result.signatureStatus.toKind(),
-                        archiveBytes = archiveBytes,
+                        archiveBytes = outcome.archiveBytes,
                         durationMillis = durationMillis,
                         imageCount = result.pass.images.size,
                         localeCount = result.pass.locales.size,
+                        droppedLocaleCount = outcome.droppedLocales,
                     ),
                 )
             else ->
@@ -256,7 +265,14 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
      * success, but the count is computed at extraction time — before the call site
      * knows which arm of [ParseResult] it will return.
      */
-    private data class PipelineOutcome(val result: ParseResult, val archiveBytes: Long)
+    private data class PipelineOutcome(
+        val result: ParseResult,
+        val archiveBytes: Long,
+        val droppedLocales: Int = 0,
+    )
+
+    /** Parsed locales plus how many were dropped for an unparseable `.strings` file. */
+    private data class ParsedLocales(val locales: LocaleMap, val dropped: Int)
 
     /**
      * Continuation outcome of any pipeline stage that can short-circuit with a
@@ -336,7 +352,8 @@ private fun passJsonFailureToResult(failure: PassJsonFailure): ParseResult =
             ParseResult.Unsupported(UnsupportedReason.UnknownPassStyle(failure.raw))
     }
 
-private fun stringsFailureToResult(failure: StringsFailure): ParseResult =
+/** The resource-limit trip still fails the pass; a structural failure only drops the locale. */
+private fun stringsFailureHaltOrNull(failure: StringsFailure): ParseResult? =
     when (failure) {
         is StringsFailure.ValueTooLong ->
             ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonStringSize))
@@ -345,7 +362,7 @@ private fun stringsFailureToResult(failure: StringsFailure): ParseResult =
         is StringsFailure.UnterminatedComment,
         is StringsFailure.BadStructure,
         is StringsFailure.BadEscape,
-        -> ParseResult.Malformed(MalformedReason.InvalidStrings)
+        -> null
     }
 
 private fun lprojStringsLocaleOrNull(name: String): String? {

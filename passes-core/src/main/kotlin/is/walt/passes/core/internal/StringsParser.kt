@@ -3,6 +3,7 @@ package `is`.walt.passes.core.internal
 import `is`.walt.passes.core.LocalizedStrings
 import `is`.walt.passes.core.ParserConfig
 import java.nio.ByteBuffer
+import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.nio.charset.StandardCharsets
 
@@ -12,26 +13,36 @@ import java.nio.charset.StandardCharsets
  * iteration order matches source order via [LinkedHashMap], duplicate keys are
  * resolved last-write-wins (matching Apple's parser).
  *
+ * **Grammar.** The old-style property-list strings grammar Apple's own parser reads
+ * (CoreFoundation `CFOldStylePList.c`), not just the `"key" = "value";` subset Xcode
+ * writes. Accepted since #252: `'`-quoted tokens, unquoted tokens drawn from
+ * `[A-Za-z0-9_$/:.-]`, the `"key";` shorthand (value = key), an optional enclosing
+ * `{ ... }`, octal escapes in the ASCII range, and `\a \b \f \v \' \<newline>`.
+ * Still rejected: unknown escapes (`\x`), octal above `\177` (Apple maps those through
+ * the NeXTSTEP Latin table, which this parser does not carry), lone surrogates,
+ * unterminated strings and comments, values that are not strings, and trailing junk.
+ *
  * **Defense-in-depth ordering.** The function runs three layers, in order, and the
  * earliest-firing arm wins:
  *
- *  1. Charset BOM-sniff and strict decode — UTF-16 LE/BE or UTF-8 BOM signs the file;
- *     otherwise UTF-8 is the documented default. The decoder is configured with
- *     [CodingErrorAction.REPORT] for both malformed input and unmappable characters,
- *     so a non-UTF-8 byte sequence with no BOM fails outright as
+ *  1. Charset sniff and strict decode — a UTF-32 / UTF-16 / UTF-8 BOM signs the file;
+ *     without one, a NUL-byte pattern identifies BOM-less UTF-16 (Apple sniffs it
+ *     too), and UTF-8 is the default. The decoder REPORTs malformed input and
+ *     unmappable characters, so undecodable bytes fail as
  *     [StringsFailure.InvalidEncoding] rather than producing U+FFFD replacement
- *     characters and silently mis-rendering on screen.
+ *     characters and silently mis-rendering on screen. There is deliberately no
+ *     single-byte fallback: no legacy charset can be detected reliably.
  *  2. Hand-rolled lexer / parser ([StringsLexer]) — single-pass character walker with
  *     explicit state for in-string and in-comment tokens. Regex on this format is
  *     brittle: Apple's `\Uxxxx` escape is 4 hex digits (not a 21-bit codepoint),
  *     supplementary-plane codepoints arrive as paired `\Uxxxx\Uxxxx` surrogates,
- *     block comments do not nest, and a backslash immediately before EOL is *not* a
- *     line continuation. The walker fits cleanly into ~150 lines and keeps each rule
- *     local to its branch.
+ *     block comments do not nest, and a backslash before EOL yields the line break
+ *     itself rather than a line continuation.
  *  3. Per-value byte cap — [ParserConfig.maxJsonStringBytes] applies to the decoded
  *     value of each entry (UTF-8 byte equivalent, summed as a conservative upper
  *     bound on a per-Char basis so an oversized value is rejected mid-read rather
- *     than after full materialization). Total file size is already bounded by
+ *     than after full materialization). A shorthand entry's key becomes its value, so
+ *     the cap is applied to it there. Total file size is already bounded by
  *     [ParserConfig.maxEntryBytes] upstream.
  *
  * The cap is applied to values only, not keys. Keys in real .strings files routinely
@@ -51,7 +62,7 @@ internal fun parseStrings(
     config: ParserConfig,
 ): StringsResult {
     val text =
-        decodeWithBomSniff(bytes)
+        decodeStringsBytes(bytes)
             ?: return StringsResult.Failed(StringsFailure.InvalidEncoding)
     return try {
         StringsResult.Ok(StringsLexer(text, config.maxJsonStringBytes).parse())
@@ -61,26 +72,28 @@ internal fun parseStrings(
 }
 
 /**
- * BOM-sniffs the leading bytes for UTF-16 LE/BE / UTF-8 and decodes the rest with a
- * [java.nio.charset.CharsetDecoder] whose error policy is REPORT on both malformed
- * input and unmappable characters. Returns `null` if decoding fails — surfaced as
- * [StringsFailure.InvalidEncoding] by the caller. UTF-8 is the no-BOM default per
- * Apple's documented behavior for .strings.
+ * Picks the charset from a BOM, else from the BOM-less UTF-16 sniff, else UTF-8, and
+ * decodes strictly; a sniffed UTF-16 that fails to decode falls back to UTF-8. Returns
+ * `null` if decoding fails, surfaced as [StringsFailure.InvalidEncoding].
  *
- * The BOM is stripped before handing bytes to the decoder. Java's `UTF_16LE` /
- * `UTF_16BE` charsets do *not* themselves treat a BOM as a marker (they are
- * explicit codings), so passing the BOM bytes through would surface the BOM as a
- * spurious U+FEFF leading character in the decoded text and break the lexer's
- * first-token assumptions.
+ * The BOM is stripped before decoding: Java's explicit-endian charsets do not treat it
+ * as a marker and would surface a spurious leading U+FEFF.
  */
-private fun decodeWithBomSniff(bytes: ByteArray): String? {
-    val (charset, skip) =
-        when {
-            hasPrefix(bytes, BOM_UTF8) -> StandardCharsets.UTF_8 to BOM_UTF8.size
-            hasPrefix(bytes, BOM_UTF16BE) -> StandardCharsets.UTF_16BE to BOM_UTF16BE.size
-            hasPrefix(bytes, BOM_UTF16LE) -> StandardCharsets.UTF_16LE to BOM_UTF16LE.size
-            else -> StandardCharsets.UTF_8 to 0
-        }
+private fun decodeStringsBytes(bytes: ByteArray): String? {
+    val bom = BOMS.firstOrNull { (prefix, _) -> hasPrefix(bytes, prefix) }
+    return if (bom != null) {
+        decodeStrict(bytes, bom.second, bom.first.size)
+    } else {
+        sniffBomlessUtf16(bytes)?.let { decodeStrict(bytes, it, 0) }
+            ?: decodeStrict(bytes, StandardCharsets.UTF_8, 0)
+    }
+}
+
+private fun decodeStrict(
+    bytes: ByteArray,
+    charset: Charset,
+    skip: Int,
+): String? {
     val decoder =
         charset.newDecoder()
             .onMalformedInput(CodingErrorAction.REPORT)
@@ -88,6 +101,30 @@ private fun decodeWithBomSniff(bytes: ByteArray): String? {
     return runCatching {
         decoder.decode(ByteBuffer.wrap(bytes, skip, bytes.size - skip)).toString()
     }.getOrNull()
+}
+
+/**
+ * ASCII-heavy UTF-16 puts a NUL in every other byte. Requiring that on at least half the
+ * sampled units, and none at the other parity, keeps UTF-8 with a stray U+0000 as UTF-8.
+ */
+private fun sniffBomlessUtf16(bytes: ByteArray): Charset? {
+    if (bytes.size < 2 || bytes.size % 2 != 0) return null
+    val sample = minOf(bytes.size, UTF16_SNIFF_BYTES)
+    var evenNuls = 0
+    var oddNuls = 0
+    for (i in 0 until sample) {
+        when {
+            bytes[i] != ZERO_BYTE -> Unit
+            i % 2 == 0 -> evenNuls++
+            else -> oddNuls++
+        }
+    }
+    val units = sample / 2
+    return when {
+        evenNuls == 0 && oddNuls * 2 >= units -> StandardCharsets.UTF_16LE
+        oddNuls == 0 && evenNuls * 2 >= units -> StandardCharsets.UTF_16BE
+        else -> null
+    }
 }
 
 private fun hasPrefix(
@@ -121,19 +158,35 @@ private class StringsLexer(
 
     fun parse(): LocalizedStrings {
         val map = LinkedHashMap<String, String>()
+        skipWhitespaceAndComments()
+        val braced = peek() == '{'
+        if (braced) pos++
         while (true) {
             skipWhitespaceAndComments()
-            if (pos >= text.length) break
-            val key = readQuotedString(maxBytes = Int.MAX_VALUE)
-            consumeAfterWhitespace('=')
-            val value = readQuotedString(maxBytes = maxValueBytes)
+            if (pos >= text.length || braced && peek() == '}') break
+            val key = readToken(maxBytes = Int.MAX_VALUE)
+            skipWhitespaceAndComments()
+            val value =
+                when (peek()) {
+                    ';' -> key.also { checkValueCap(it, maxValueBytes) }
+                    '=' -> {
+                        pos++
+                        readToken(maxBytes = maxValueBytes)
+                    }
+                    else -> stringsFail(StringsFailure.BadStructure)
+                }
             consumeAfterWhitespace(';')
             map[key] = value
+        }
+        if (braced) {
+            consumeAfterWhitespace('}')
+            skipWhitespaceAndComments()
+            if (pos < text.length) stringsFail(StringsFailure.BadStructure)
         }
         return LocalizedStrings(map)
     }
 
-    private fun fail(failure: StringsFailure): Nothing = throw StringsParseException(failure)
+    private fun peek(): Char? = text.getOrNull(pos)
 
     private fun skipWhitespaceAndComments() {
         while (pos < text.length) {
@@ -150,7 +203,7 @@ private class StringsLexer(
 
     private fun skipLineComment() {
         pos += 2
-        while (pos < text.length && text[pos] != '\n' && text[pos] != '\r') pos++
+        while (pos < text.length && text[pos] !in LINE_TERMINATORS) pos++
         if (pos < text.length) pos++
     }
 
@@ -165,19 +218,38 @@ private class StringsLexer(
                 pos++
             }
         }
-        if (!found) fail(StringsFailure.UnterminatedComment)
+        if (!found) stringsFail(StringsFailure.UnterminatedComment)
     }
 
-    private fun readQuotedString(maxBytes: Int): String {
+    private fun readToken(maxBytes: Int): String {
         skipWhitespaceAndComments()
-        if (pos >= text.length || text[pos] != '"') fail(StringsFailure.BadStructure)
+        val c = peek()
+        return when {
+            c == '"' || c == '\'' -> readQuotedString(c, maxBytes)
+            c != null && c.isUnquotedTokenChar() -> readUnquotedString(maxBytes)
+            else -> stringsFail(StringsFailure.BadStructure)
+        }
+    }
+
+    // Apple's unquoted set includes '/', so "//" inside a token is literal, not a comment.
+    private fun readUnquotedString(maxBytes: Int): String {
+        val start = pos
+        while (pos < text.length && text[pos].isUnquotedTokenChar()) pos++
+        if (pos - start > maxBytes) stringsFail(StringsFailure.ValueTooLong)
+        return text.substring(start, pos)
+    }
+
+    private fun readQuotedString(
+        quote: Char,
+        maxBytes: Int,
+    ): String {
         pos++
         val sb = StringBuilder()
         var byteCount = 0
         while (pos < text.length) {
             val c = text[pos]
             when (c) {
-                '"' -> {
+                quote -> {
                     pos++
                     return sb.toString()
                 }
@@ -193,22 +265,12 @@ private class StringsLexer(
                 }
             }
         }
-        fail(StringsFailure.UnterminatedString)
-    }
-
-    private fun bumpByteCount(
-        current: Int,
-        delta: Int,
-        max: Int,
-    ): Int {
-        val next = current + delta
-        if (next > max) fail(StringsFailure.ValueTooLong)
-        return next
+        stringsFail(StringsFailure.UnterminatedString)
     }
 
     private fun consumeAfterWhitespace(expected: Char) {
         skipWhitespaceAndComments()
-        if (pos >= text.length || text[pos] != expected) fail(StringsFailure.BadStructure)
+        if (pos >= text.length || text[pos] != expected) stringsFail(StringsFailure.BadStructure)
         pos++
     }
 
@@ -221,27 +283,30 @@ private class StringsLexer(
      */
     private fun readEscape(): String {
         pos++
-        if (pos >= text.length) fail(StringsFailure.BadEscape)
-        return when (val c = text[pos]) {
-            '\\', '"' -> {
+        val c = peek() ?: stringsFail(StringsFailure.BadEscape)
+        val simple = SIMPLE_ESCAPES[c]
+        return when {
+            simple != null -> {
                 pos++
-                c.toString()
+                simple.toString()
             }
-            'n' -> {
-                pos++
-                "\n"
-            }
-            'r' -> {
-                pos++
-                "\r"
-            }
-            't' -> {
-                pos++
-                "\t"
-            }
-            'U' -> readUnicodeEscape()
-            else -> fail(StringsFailure.BadEscape)
+            c in '0'..'7' -> readOctalEscape()
+            c == 'U' -> readUnicodeEscape()
+            else -> stringsFail(StringsFailure.BadEscape)
         }
+    }
+
+    /** One to three octal digits, as Apple reads them; only the ASCII range is accepted. */
+    private fun readOctalEscape(): String {
+        var value = 0
+        var digits = 0
+        while (digits < MAX_OCTAL_DIGITS && pos < text.length && text[pos] in '0'..'7') {
+            value = value * OCTAL_RADIX + (text[pos] - '0')
+            pos++
+            digits++
+        }
+        if (value > MAX_ASCII) stringsFail(StringsFailure.BadEscape)
+        return value.toChar().toString()
     }
 
     /**
@@ -254,27 +319,50 @@ private class StringsLexer(
     private fun readUnicodeEscape(): String {
         pos++
         val first = readUnicodeCodeUnit()
-        if (first.isLowSurrogate()) fail(StringsFailure.BadEscape)
+        if (first.isLowSurrogate()) stringsFail(StringsFailure.BadEscape)
         if (!first.isHighSurrogate()) return first.toString()
         val partnerOk =
             pos + SURROGATE_PARTNER_PREFIX_LEN <= text.length &&
                 text[pos] == '\\' &&
                 text[pos + 1] == 'U'
-        if (!partnerOk) fail(StringsFailure.BadEscape)
+        if (!partnerOk) stringsFail(StringsFailure.BadEscape)
         pos += SURROGATE_PARTNER_PREFIX_LEN
         val low = readUnicodeCodeUnit()
-        if (!low.isLowSurrogate()) fail(StringsFailure.BadEscape)
+        if (!low.isLowSurrogate()) stringsFail(StringsFailure.BadEscape)
         return "$first$low"
     }
 
     private fun readUnicodeCodeUnit(): Char {
-        if (pos + UNICODE_ESCAPE_HEX_DIGITS > text.length) fail(StringsFailure.BadEscape)
+        if (pos + UNICODE_ESCAPE_HEX_DIGITS > text.length) stringsFail(StringsFailure.BadEscape)
         val hex = text.substring(pos, pos + UNICODE_ESCAPE_HEX_DIGITS)
-        val code = hex.toIntOrNull(HEX_RADIX) ?: fail(StringsFailure.BadEscape)
+        val code = hex.toIntOrNull(HEX_RADIX) ?: stringsFail(StringsFailure.BadEscape)
         pos += UNICODE_ESCAPE_HEX_DIGITS
         return code.toChar()
     }
 }
+
+private fun stringsFail(failure: StringsFailure): Nothing = throw StringsParseException(failure)
+
+private fun bumpByteCount(
+    current: Int,
+    delta: Int,
+    max: Int,
+): Int {
+    val next = current + delta
+    if (next > max) stringsFail(StringsFailure.ValueTooLong)
+    return next
+}
+
+private fun checkValueCap(
+    value: String,
+    max: Int,
+) {
+    value.fold(0) { acc, c -> bumpByteCount(acc, c.utf8Bytes(), max) }
+}
+
+private fun Char.isUnquotedTokenChar(): Boolean = isAsciiLetterOrDigit() || this in UNQUOTED_PUNCTUATION
+
+private fun Char.isAsciiLetterOrDigit(): Boolean = this in 'a'..'z' || this in 'A'..'Z' || this in '0'..'9'
 
 /**
  * Internal control-flow vehicle for short-circuiting deeply-nested lexer helpers.
@@ -292,11 +380,47 @@ private class StringsLexer(
 private class StringsParseException(val failure: StringsFailure) : RuntimeException()
 
 private const val HEX_RADIX = 16
+private const val OCTAL_RADIX = 8
+private const val MAX_OCTAL_DIGITS = 3
+private const val MAX_ASCII = 0x7F
 private const val UNICODE_ESCAPE_HEX_DIGITS = 4
 private const val SURROGATE_PARTNER_PREFIX_LEN = 2
 private const val UTF8_TWO_BYTE_THRESHOLD = 0x80
 private const val UTF8_THREE_BYTE_THRESHOLD = 0x800
+private const val UTF16_SNIFF_BYTES = 64
+private const val ZERO_BYTE: Byte = 0
+private const val UNQUOTED_PUNCTUATION = "_$/:.-"
+private const val LINE_TERMINATORS = "\n\r  "
+
+// A backslash before CR or LF yields that character, as in Apple's parser.
+private val SIMPLE_ESCAPES: Map<Char, Char> =
+    mapOf(
+        '\\' to '\\',
+        '"' to '"',
+        '\'' to '\'',
+        'n' to '\n',
+        'r' to '\r',
+        't' to '\t',
+        'a' to '\u0007',
+        'b' to '\b',
+        'f' to '\u000C',
+        'v' to '\u000B',
+        '\n' to '\n',
+        '\r' to '\r',
+    )
 
 private val BOM_UTF8 = byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte())
 private val BOM_UTF16BE = byteArrayOf(0xFE.toByte(), 0xFF.toByte())
 private val BOM_UTF16LE = byteArrayOf(0xFF.toByte(), 0xFE.toByte())
+private val BOM_UTF32BE = byteArrayOf(0, 0, 0xFE.toByte(), 0xFF.toByte())
+private val BOM_UTF32LE = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0, 0)
+
+// UTF-32LE before UTF-16LE: their BOMs share a two-byte prefix.
+private val BOMS: List<Pair<ByteArray, Charset>> =
+    listOf(
+        BOM_UTF32BE to Charset.forName("UTF-32BE"),
+        BOM_UTF32LE to Charset.forName("UTF-32LE"),
+        BOM_UTF8 to StandardCharsets.UTF_8,
+        BOM_UTF16BE to StandardCharsets.UTF_16BE,
+        BOM_UTF16LE to StandardCharsets.UTF_16LE,
+    )

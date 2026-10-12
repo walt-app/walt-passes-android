@@ -295,6 +295,171 @@ class StringsParserTest {
         assertThat(ok.strings.entries).containsExactly("k", "v")
     }
 
+    // Forms Apple's old-style parser accepts, widened for #252.
+
+    @Test
+    fun unquotedKeysAndValuesParse() {
+        val source = "greeting = hello_world.v-1;\nprice = $12:30;"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("greeting", "hello_world.v-1", "price", "$12:30").inOrder()
+    }
+
+    @Test
+    fun doubleSlashInsideUnquotedTokenIsLiteralNotComment() {
+        val source = "link = https://example.test/a;"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries["link"]).isEqualTo("https://example.test/a")
+    }
+
+    @Test
+    fun mixedQuotedAndUnquotedTokensParse() {
+        val source = "\"k1\" = v1;\nk2 = \"two words\";"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("k1", "v1", "k2", "two words").inOrder()
+    }
+
+    @Test
+    fun singleQuotedTokensParseAndKeepDoubleQuotesLiteral() {
+        val source = "'k' = 'say \"hi\"';"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries["k"]).isEqualTo("say \"hi\"")
+    }
+
+    @Test
+    fun shorthandEntryUsesKeyAsValue() {
+        val source = "\"Seat\";\nGate;\n\"k\" = \"v\";"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("Seat", "Seat", "Gate", "Gate", "k", "v").inOrder()
+    }
+
+    @Test
+    fun shorthandEntryAppliesValueCapToTheKey() {
+        // Keys are uncapped, so a shorthand key must not become an uncapped value.
+        val cfg = ParserConfig(maxJsonStringBytes = 4)
+        assertFailedWith(parseStrings("\"longer\";".toByteArray(), cfg), StringsFailure.ValueTooLong)
+        assertThat(parseStrings("\"four\";".toByteArray(), cfg).asOk().strings.entries["four"]).isEqualTo("four")
+    }
+
+    @Test
+    fun unquotedValueIsCapped() {
+        val cfg = ParserConfig(maxJsonStringBytes = 4)
+        assertFailedWith(parseStrings("k = abcdef;".toByteArray(), cfg), StringsFailure.ValueTooLong)
+    }
+
+    @Test
+    fun octalEscapesDecodeUpToThreeDigits() {
+        // \101 = 'A'; \0 = NUL; \12 = LF; \1011 reads three digits then a literal '1'.
+        val source = "\"k\" = \"\\101\\0\\12\\1011\";"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries["k"]).isEqualTo("A\u0000\nA1")
+    }
+
+    @Test
+    fun octalEscapeAboveAsciiIsRejected() {
+        // Apple maps \200-\377 through NeXTSTEP Latin; without that table, refuse rather than guess.
+        val source = "\"k\" = \"\\200\";"
+        assertFailedWith(parseStrings(source.toByteArray(), ParserConfig()), StringsFailure.BadEscape)
+    }
+
+    @Test
+    fun controlAndQuoteEscapesDecode() {
+        val source = "\"k\" = \"\\a\\b\\f\\v\\'\";"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries["k"]).isEqualTo("\u0007\b\u000C\u000B'")
+    }
+
+    @Test
+    fun backslashBeforeLineBreakYieldsTheLineBreak() {
+        val source = "\"k\" = \"a\\\nb\\\r\nc\";"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries["k"]).isEqualTo("a\nb\r\nc")
+    }
+
+    @Test
+    fun commentsBetweenEveryTokenAreSkipped() {
+        val source = "/*a*/\"k\"/*b*/=// c\n\"v\" /* d */ ;// e"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("k", "v")
+    }
+
+    @Test
+    fun lineCommentTerminatesOnUnicodeLineSeparator() {
+        val source = "// comment\u2028\"k\" = \"v\";"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("k", "v")
+    }
+
+    @Test
+    fun bracedDictionaryParses() {
+        val source = "{\n  \"k\" = \"v\";\n  other = x;\n}\n"
+        val ok = parseStrings(source.toByteArray(), ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("k", "v", "other", "x").inOrder()
+    }
+
+    @Test
+    fun bomlessUtf16LeDecoded() {
+        val payload = "\"k\" = \"caf\u00E9\";".toByteArray(StandardCharsets.UTF_16LE)
+        val ok = parseStrings(payload, ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("k", "caf\u00E9")
+    }
+
+    @Test
+    fun bomlessUtf16BeDecoded() {
+        val payload = "/* c */ \"k\" = \"v\";".toByteArray(StandardCharsets.UTF_16BE)
+        val ok = parseStrings(payload, ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("k", "v")
+    }
+
+    @Test
+    fun utf32BomsDecoded() {
+        val text = "\"k\" = \"v\";"
+        val be = byteArrayOf(0, 0, 0xFE.toByte(), 0xFF.toByte()) + text.toByteArray(charset("UTF-32BE"))
+        val le = byteArrayOf(0xFF.toByte(), 0xFE.toByte(), 0, 0) + text.toByteArray(charset("UTF-32LE"))
+        assertThat(parseStrings(be, ParserConfig()).asOk().strings.entries).containsExactly("k", "v")
+        assertThat(parseStrings(le, ParserConfig()).asOk().strings.entries).containsExactly("k", "v")
+    }
+
+    @Test
+    fun utf8WithAStrayNulIsNotMistakenForUtf16() {
+        val source = "\"\u0000k\" = \"v\";"
+        val ok = parseStrings(source.toByteArray(StandardCharsets.UTF_8), ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly("\u0000k", "v")
+    }
+
+    // Input that stays malformed under the widened grammar.
+
+    @Test
+    fun trailingJunkAfterLastEntryIsRejected() {
+        val source = "\"k\" = \"v\"; junk"
+        assertFailedWith(parseStrings(source.toByteArray(), ParserConfig()), StringsFailure.BadStructure)
+    }
+
+    @Test
+    fun emptyStatementIsRejected() {
+        val source = "\"k\" = \"v\";;"
+        assertFailedWith(parseStrings(source.toByteArray(), ParserConfig()), StringsFailure.BadStructure)
+    }
+
+    @Test
+    fun nonStringValueIsRejected() {
+        val source = "\"k\" = { \"a\" = \"b\"; };"
+        assertFailedWith(parseStrings(source.toByteArray(), ParserConfig()), StringsFailure.BadStructure)
+    }
+
+    @Test
+    fun unclosedOrTrailingBraceIsRejected() {
+        val unclosed = "{ \"k\" = \"v\";"
+        val trailing = "{ \"k\" = \"v\"; } x = y;"
+        assertFailedWith(parseStrings(unclosed.toByteArray(), ParserConfig()), StringsFailure.BadStructure)
+        assertFailedWith(parseStrings(trailing.toByteArray(), ParserConfig()), StringsFailure.BadStructure)
+    }
+
+    @Test
+    fun unquotedTokenWithForbiddenCharacterIsRejected() {
+        val source = "k = a b;"
+        assertFailedWith(parseStrings(source.toByteArray(), ParserConfig()), StringsFailure.BadStructure)
+    }
+
     private fun StringsResult.asOk(): StringsResult.Ok {
         assertThat(this).isInstanceOf(StringsResult.Ok::class.java)
         return this as StringsResult.Ok
