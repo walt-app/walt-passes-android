@@ -185,6 +185,18 @@ class FieldLinkScannerTest {
         assertThat(fastestScanMillis(pathological)).isLessThan(REDOS_BUDGET_MS)
     }
 
+    @Test
+    fun phoneDenseFieldScansInLinearTime() {
+        // Every `+` is a hint and starts a new 8-digit match inside one long run.
+        assertThat(fastestScanMillis("+12345678 ".repeat(30_000))).isLessThan(REDOS_BUDGET_MS)
+    }
+
+    @Test
+    fun mixedDigitRunScansInLinearTime() {
+        // One run spanning the field, mixed by U+0663, holding 30k rejected phone matches.
+        assertThat(fastestScanMillis("1234-5678 \u0663 ".repeat(30_000))).isLessThan(REDOS_BUDGET_MS)
+    }
+
     /**
      * Scans [input] several times and returns the FASTEST run in milliseconds — the timing
      * method the ReDoS tripwires assert on. The untimed warm-up absorbs the cold-JIT compile
@@ -295,8 +307,7 @@ class FieldLinkScannerTest {
     fun percentEncodedBidiInUrlIsAccepted() {
         // %E2%80%AE is the percent-encoding of U+202E. After percent-decoding, the
         // URL would contain a bidi char; pre-decoding, the bytes are pure ASCII and
-        // safe to render. This is the legitimate way for a pass author to include
-        // non-ASCII data in a URL — the renderer never sees the decoded form.
+        // safe to render. The renderer never sees the decoded form.
         val url = "https://example.com/%E2%80%AEsomething"
         val spans = FieldLinkScanner.scan(url, source)
         assertThat(spans).hasSize(1)
@@ -331,6 +342,276 @@ class FieldLinkScannerTest {
         }
     }
 
+    // -- Multi-line fields -------------------------------------------------------
+    //
+    // Line breaks and tabs separate lines and columns in real back fields. They must
+    // not suppress links, but no link target may contain one.
+
+    @Test
+    fun multiLineFieldYieldsEveryLinkWithExactRanges() {
+        val text = "Terms apply.\nHelp: https://acme.example/help\nMail support@acme.example\n" +
+            "Phone +1 555 123 4567\nThanks"
+        assertExactSpans(
+            text,
+            "https://acme.example/help" to B3UrlIntent::class.java,
+            "support@acme.example" to EmailIntent::class.java,
+            "+1 555 123 4567" to PhoneIntent::class.java,
+        )
+    }
+
+    @Test
+    fun crlfFieldYieldsEveryLinkWithExactRanges() {
+        val text = "Terms apply.\r\nhttps://acme.example/help\r\nsupport@acme.example\r\n" +
+            "+1 555 123 4567\r\n"
+        assertExactSpans(
+            text,
+            "https://acme.example/help" to B3UrlIntent::class.java,
+            "support@acme.example" to EmailIntent::class.java,
+            "+1 555 123 4567" to PhoneIntent::class.java,
+        )
+    }
+
+    @Test
+    fun tabSeparatedFieldYieldsEveryLinkWithExactRanges() {
+        val text = "Web:\thttps://acme.example/help\tMail:\tsupport@acme.example\tTel:\t+1 555 123 4567"
+        assertExactSpans(
+            text,
+            "https://acme.example/help" to B3UrlIntent::class.java,
+            "support@acme.example" to EmailIntent::class.java,
+            "+1 555 123 4567" to PhoneIntent::class.java,
+        )
+    }
+
+    @Test
+    fun urlStopsAtLineBreak() {
+        val spans = FieldLinkScanner.scan("https://acme.example/a\nnext line", source)
+        assertThat((spans.single().intent as B3UrlIntent).url).isEqualTo("https://acme.example/a")
+    }
+
+    @Test
+    fun phoneStopsAtLineBreak() {
+        assertExactSpans("Tel +1 555 123 4567\n10203040", "+1 555 123 4567" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneAfterLineEndingInDigitIsFound() {
+        assertExactSpans("Order 77\r\n555-123-4567", "555-123-4567" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneAfterTabFollowingDigitIsFound() {
+        assertExactSpans("Seat 4\t555-123-4567", "555-123-4567" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun urlEndsBeforeUnicodeWhitespace() {
+        // The URL class excludes the White_Space set, as `\s` does on Android. The other
+        // six members (VT, FF, lone CR, NEL, U+2028, U+2029) are field hazards.
+        (listOf('\t', '\n', ' ', '\u00A0', '\u1680') + ('\u2000'..'\u200A') + listOf('\u202F', '\u205F', '\u3000'))
+            .forEach { space ->
+                assertExactSpans("https://acme.example/a${space}b", "https://acme.example/a" to B3UrlIntent::class.java)
+            }
+    }
+
+    @Test
+    fun whiteSpaceFieldHazardsYieldNoLinks() {
+        listOf('\u000B', '\u000C', '\r', '\u0085', '\u2028', '\u2029').forEach { space ->
+            val codepoint = "U+%04X".format(space.code)
+            assertWithMessage("$codepoint must reject the field")
+                .that(FieldLinkScanner.scan("Help${space}https://acme.example/help", source))
+                .isEmpty()
+        }
+    }
+
+    @Test
+    fun loneCarriageReturnRejectsTheField() {
+        // A lone CR may render with no width, hiding where a link ends.
+        assertThat(FieldLinkScanner.scan("support@bank.example\rm", source)).isEmpty()
+        assertThat(FieldLinkScanner.scan("Line\rhttps://acme.example/help", source)).isEmpty()
+    }
+
+    @Test
+    fun urlContainingSupplementaryTagCharIsRejected() {
+        // U+E0001 LANGUAGE TAG, a Cf codepoint encoded as a surrogate pair.
+        val spans = FieldLinkScanner.scan("https://acme.example/\uDB40\uDC01path", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun supplementaryFormatCharElsewhereRejectsTheWholeField() {
+        // U+E0020 TAG SPACE on its own line, away from the link.
+        val spans = FieldLinkScanner.scan("Note \uDB40\uDC20\nhttps://acme.example/help", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun supplementaryFormatCharsAreHazardsAtBothLevels() {
+        listOf(
+            "\uDB40\uDC01", // U+E0001 LANGUAGE TAG
+            "\uDB40\uDC20", // U+E0020 TAG SPACE
+            "\uD82F\uDCA0", // U+1BCA0 SHORTHAND FORMAT LETTER OVERLAP
+            "\uD834\uDD73", // U+1D173 MUSICAL SYMBOL BEGIN BEAM
+        ).forEach { hazard ->
+            val codepoint = "U+%04X".format(hazard.codePointAt(0))
+            assertWithMessage("$codepoint must be a field hazard")
+                .that(FieldLinkScanner.containsFieldHazard("safe$hazard"))
+                .isTrue()
+            assertWithMessage("$codepoint must be a match-level hazard")
+                .that(FieldLinkScanner.containsRenderingHazard("safe$hazard"))
+                .isTrue()
+        }
+    }
+
+    @Test
+    fun multiLineUrlContainingBidiOverrideIsRejected() {
+        val spans = FieldLinkScanner.scan(
+            "Line one\nhttps://attacker.example/\u202Egpj.elgoog//:sptth\nLine three",
+            source,
+        )
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun multiLineUrlContainingZeroWidthSpaceIsRejected() {
+        val spans = FieldLinkScanner.scan("Help:\nhttps://goog\u200Ble.com/path\n", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun bidiControlAdjacentToMatchOnMultiLineFieldRejectsTheField() {
+        val spans = FieldLinkScanner.scan("Help:\n\u202Ehttps://acme.example/help\n", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun bidiControlOnAnotherLineStillRejectsTheWholeField() {
+        // Line breaks do not split the field into independent trust units.
+        val spans = FieldLinkScanner.scan(
+            "Note \u202Ereversed\nhttps://acme.example/help\nsupport@acme.example",
+            source,
+        )
+        assertThat(spans).isEmpty()
+    }
+
+    // -- Engine-independent classes ---------------------------------------------
+    //
+    // `\s` and `\d` are Unicode-aware on Android but ASCII-only on the JVM, so the
+    // patterns spell their classes out; these cases pin what the device does.
+
+    @Test
+    fun phoneWithNarrowNoBreakSpacesIsOneSpan() {
+        val text = "Tel +33\u202F1\u202F23\u202F45\u202F67\u202F89."
+        assertExactSpans(text, "+33\u202F1\u202F23\u202F45\u202F67\u202F89" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneWithNoBreakSpacesIsOneSpan() {
+        val text = "Tel +33\u00A01\u00A023\u00A045\u00A067\u00A089."
+        assertExactSpans(text, "+33\u00A01\u00A023\u00A045\u00A067\u00A089" to PhoneIntent::class.java)
+    }
+
+    @Test
+    fun phoneSpacedOnlyWithNoBreakSpacesAndNoPlusStaysUnlinked() {
+        assertThat(FieldLinkScanner.scan("Ref 555\u00A0123\u00A04567", source)).isEmpty()
+    }
+
+    @Test
+    fun phoneRunMixingNonAsciiDigitsDoesNotLink() {
+        listOf(
+            "Call 0800 555 010\uD835\uDFD7 now", // trailing U+1D7D7 MATHEMATICAL BOLD DIGIT NINE
+            "Call \uFF11800-555-0100 now", // leading fullwidth one
+            "Call \uD835\uDFD7800-555-0100 now", // leading U+1D7D7 MATHEMATICAL BOLD DIGIT NINE
+            "Call 555-123-4567\u0663 now", // trailing Arabic-Indic three
+        ).forEach { text ->
+            assertWithMessage(text).that(FieldLinkScanner.scan(text, source)).isEmpty()
+        }
+    }
+
+    @Test
+    fun nonAsciiDigitOutsideThePhoneRunKeepsThePhone() {
+        listOf(
+            "Ref \u0663\u0664\u0665\n+1 555 123 4567", // a line break ends the run
+            "\u0663 x +1 555 123 4567", // a letter ends the run
+            "\u0663\uD83D\uDE00+1 555 123 4567", // a supplementary non-run char ends the run
+        ).forEach { text ->
+            val spans = FieldLinkScanner.scan(text, source)
+            assertWithMessage(text).that(spans).hasSize(1)
+            assertWithMessage(text).that((spans.single().intent as PhoneIntent).phoneNumber)
+                .isEqualTo("+1 555 123 4567")
+        }
+    }
+
+    @Test
+    fun phoneInsideUrlOrEmailIsNotLinkedTwice() {
+        val inUrl = FieldLinkScanner.scan("https://acme.example/call/555-123-4567", source)
+        assertThat(inUrl.single().intent).isInstanceOf(B3UrlIntent::class.java)
+
+        val inEmail = FieldLinkScanner.scan("555-123-4567@acme.example", source)
+        assertThat(inEmail.single().intent).isInstanceOf(EmailIntent::class.java)
+
+        val text = "+1 555 123 4567 https://x.example/555-123-4567 a@b.example +1 555 765 4321"
+        val kinds = FieldLinkScanner.scan(text, source).map { it.intent::class.java }
+        assertThat(kinds).containsExactly(
+            PhoneIntent::class.java,
+            B3UrlIntent::class.java,
+            EmailIntent::class.java,
+            PhoneIntent::class.java,
+        ).inOrder()
+    }
+
+    @Test
+    fun nonAsciiDigitRunsDoNotLink() {
+        listOf(
+            "+\u0669\u0667\u0661 \u0664 \u0663\u0666\u0666 \u0668\u0668\u0668\u0668", // Arabic-Indic
+            "+\uFF11 \uFF15\uFF15\uFF15 \uFF11\uFF12\uFF13 \uFF14\uFF15\uFF16\uFF17", // fullwidth
+        ).forEach { text ->
+            assertThat(FieldLinkScanner.scan(text, source)).isEmpty()
+        }
+    }
+
+    @Test
+    fun fieldHazardAllowsOnlyLineBreaksAndTab() {
+        listOf("\n", "\t", "\r\n", "\r\n\r\n").forEach { whitespace ->
+            assertThat(FieldLinkScanner.containsFieldHazard("a${whitespace}b")).isFalse()
+        }
+        HAZARDS.forEach { hazard ->
+            val codepoint = "U+%04X".format(hazard.code)
+            assertWithMessage("$codepoint must be a field hazard")
+                .that(FieldLinkScanner.containsFieldHazard("safe\n$hazard"))
+                .isTrue()
+        }
+        assertThat(FieldLinkScanner.containsFieldHazard("a\r\r\nb")).isTrue()
+    }
+
+    @Test
+    fun renderingHazardStillFlagsLineBreaksAndTab() {
+        listOf('\n', '\r', '\t', '\u2028', '\u2029').forEach { whitespace ->
+            val codepoint = "U+%04X".format(whitespace.code)
+            assertWithMessage("$codepoint must be a match-level hazard")
+                .that(FieldLinkScanner.containsRenderingHazard("a${whitespace}b"))
+                .isTrue()
+        }
+    }
+
+    private fun assertExactSpans(text: String, vararg expected: Pair<String, Class<out SecurityIntent>>) {
+        val spans = FieldLinkScanner.scan(text, source)
+        assertThat(spans).hasSize(expected.size)
+        spans.zip(expected).forEach { (span, want) ->
+            val (target, type) = want
+            val start = text.indexOf(target)
+            assertThat(span.start).isEqualTo(start)
+            assertThat(span.endExclusive).isEqualTo(start + target.length)
+            assertThat(text.substring(span.start, span.endExclusive)).isEqualTo(target)
+            assertThat(span.intent).isInstanceOf(type)
+            val actionable = when (val intent = span.intent) {
+                is B3UrlIntent -> intent.url
+                is EmailIntent -> intent.emailAddress
+                is PhoneIntent -> intent.phoneNumber
+            }
+            assertThat(actionable).isEqualTo(target)
+        }
+    }
+
     @Test
     fun containsRenderingHazardAcceptsPlainAscii() {
         assertThat(FieldLinkScanner.containsRenderingHazard("https://example.com/path"))
@@ -338,6 +619,14 @@ class FieldLinkScannerTest {
     }
 
     private companion object {
+        // Cf, Cc (bar line feed and tab) and separator codepoints that must reject a field.
+        val HAZARDS = listOf(
+            '\r', '\u2028', '\u2029',
+            '\u202E', '\u202D', '\u2066', '\u2067', '\u2068', '\u2069', '\u200B',
+            '\u200E', '\u200F', '\u061C', '\uFEFF', '\u0000', '\u0007', '\u001B',
+            '\u000B', '\u000C', '\u007F', '\u0085',
+        )
+
         // ReDoS tripwire timing knobs (warm-up runs, timed runs, budget); see [fastestScanMillis].
         const val REDOS_WARMUP_RUNS = 3
         const val REDOS_TIMED_RUNS = 5

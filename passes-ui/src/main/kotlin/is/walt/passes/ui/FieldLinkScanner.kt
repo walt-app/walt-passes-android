@@ -16,15 +16,19 @@ package `is`.walt.passes.ui
  * Intentionally conservative: prefers false negatives over false positives.
  *
  * - A URL without an `http`/`https` scheme is not detected as a URL.
- * - The URL character class is RFC 3986's reserved + unreserved + percent-encoded ASCII
- *   only. Unicode characters in URLs MUST be percent-encoded (`%E2%80%AE` for U+202E,
- *   `xn--` Punycode for IDN hosts) to be detected; raw bidi / format / control
- *   characters cause the URL to be rejected outright. This defends against the bidi
- *   spoofing class — e.g. `https://attacker.example/‮gpj.elgoog//:sptth` rendering
- *   visually as a Google asset URL while `Uri.parse` resolves to `attacker.example`.
- *   Tested in `FieldLinkScannerTest`.
- * - A phone number requires at least seven digits AND at least one formatting hint
- *   (a leading `+`, an embedded space, dash, or parenthesis) before it is recognised.
+ * - A URL runs from the scheme to the first Unicode White_Space character or one of
+ *   `<>"'()`. It is not limited to ASCII: raw non-ASCII characters, including in the
+ *   host, are part of the match. A field holding raw format or control characters
+ *   yields no links at all (see the field-level check below). This defends against
+ *   the bidi spoofing class — e.g. `https://attacker.example/‮gpj.elgoog//:sptth`
+ *   rendering visually as a Google asset URL while `Uri.parse` resolves to
+ *   `attacker.example`. Tested in `FieldLinkScannerTest`.
+ * - A phone number requires at least seven ASCII digits AND at least one formatting
+ *   hint (a leading `+`, an ASCII space, dash, or parenthesis) before it is recognised.
+ *   Digit groups may be separated by U+0020, U+00A0, U+2007, U+2009 or U+202F. A run
+ *   (decimal digits plus those separators and `+-()`) holding any non-ASCII decimal
+ *   digit yields no link rather than a truncated one; since a run joins across a
+ *   space, a non-ASCII digit one space away drops the whole phone number.
  *   Bare digit runs — ticket numbers, order IDs, member numbers, barcode payloads —
  *   are left as plain text. This mirrors Apple's data-detector behavior in iOS Wallet
  *   and prevents two failure modes: (a) accidental "Call this number?" prompts on
@@ -32,11 +36,25 @@ package `is`.walt.passes.ui
  *   premium-rate dial string in a value that the user reads as a reference number.
  * - An email requires an `@` with non-empty ASCII local and domain parts.
  *
- * Belt-and-suspenders: every match is post-filtered through [containsRenderingHazard],
- * which discards any match containing a Unicode formatting (Cf) or control (Cc)
- * codepoint. This is redundant for phone and email under the current regexes but
- * locks the property so a future regex relaxation does not silently re-open a
- * spoofing path.
+ * Rendering hazards are checked at two levels:
+ *
+ * - Field level ([containsFieldHazard]): a field containing any Unicode formatting
+ *   (Cf) or control (Cc) codepoint, or U+2028 / U+2029, surfaces no links at all.
+ *   Only line feed, tab, and carriage return directly followed by line feed are
+ *   allowed, since they separate lines and columns in real back fields. A lone
+ *   carriage return is rejected because it may render with no width. A clean link
+ *   beside a bidi control is dropped too: an author who plants one has shown intent
+ *   to deceive, and the context the user reads is no longer trustworthy. This gate
+ *   is what keeps Cf and Cc codepoints out of every match.
+ * - Match level ([containsRenderingHazard]): every match is also rejected if it
+ *   contains ANY Cf or Cc codepoint (line feed, carriage return and tab included) or
+ *   U+2028 / U+2029. No pattern can match the line feed, tab or CRLF the field gate
+ *   admits, so this is defence in depth; it becomes load-bearing only if a gate or
+ *   pattern is relaxed.
+ *
+ * Every pattern spells out its character classes instead of `\s` / `\d`, which are
+ * Unicode-aware on Android (ICU) but ASCII-only on the JVM, so unit tests describe
+ * device behaviour.
  *
  * Public so consumers that render their own back-field layouts (e.g. walt-android's
  * flat-row PKPASS detail screen) can invoke the canonical scanner instead of
@@ -48,44 +66,22 @@ package `is`.walt.passes.ui
  */
 public object FieldLinkScanner {
 
-    // Permissive on the boundary chars (whitespace + brackets + quotes), then the
-    // post-filter (`containsRenderingHazard`) rejects matches containing Cf/Cc
-    // characters. The two-stage approach matters: a hostile URL containing
-    // U+202E (Right-to-Left Override) would partial-match under a tighter regex
-    // (stopping at the override and accepting the safe prefix), leaving a partial
-    // URL detected. Capturing the full string here lets the filter discard the
-    // entire match, so the back-field surfaces no link at all rather than a
-    // truncated one whose display is no longer the hostile reorder yet still
-    // differs from what the field text shows.
-    private val urlRegex = Regex("""https?://[^\s<>"'()]+""")
+    // Stops at any Unicode White_Space character (what `\s` means on Android) or `<>"'()`.
+    private val urlRegex = Regex(
+        """https?://[^\t\n\u000B\f\r \u0085\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000<>"'()]+""",
+    )
     private val emailRegex = Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""")
 
-    // Phone: starts with + or with a digit; digits, spaces, dashes, parentheses; total
-    // digit count >= 7. Anchored on word boundaries so a serial number like "12345678"
-    // adjacent to other text does not accidentally match.
+    // ASCII digits only, so the dialled digits are exactly the ones displayed, on any engine.
+    // The only whitespace admitted is U+0020, U+00A0, U+2007, U+2009 and U+202F.
     private val phoneRegex =
-        Regex("""(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)""")
+        Regex("""(?<!\p{Nd})(\+?[0-9][0-9 \u00A0\u2007\u2009\u202F\-()]{6,}[0-9])(?!\p{Nd})""")
 
     public fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
-        // Field-level rejection: if ANY part of this field contains a Unicode
-        // formatting (Cf) or control (Cc) codepoint, surface NO tappable links from
-        // it. Even a clean URL adjacent to a hostile one becomes non-tappable; the
-        // user must copy by hand.
-        //
-        // This is broader than per-match rejection but the right posture for the
-        // trust model: an untrusted pass author who can plant ANY rendering hazard
-        // in a field has demonstrated intent to deceive, and any other "link" in
-        // that field is suspect by association — even if its match substring is
-        // ASCII-clean, the visible context the user reads in the back-field surface
-        // is not. Cutting the entire field off the auto-link path forces a manual
-        // intent (long-press to copy, paste into a browser) where the user has to
-        // see the verbatim string outside any directional reordering.
-        if (containsRenderingHazard(fieldValue)) return emptyList()
+        if (containsFieldHazard(fieldValue)) return emptyList()
 
-        val spans = mutableListOf<LinkSpan>()
-
-        for (match in urlRegex.findAll(fieldValue)) {
-            spans += LinkSpan(
+        val urls = cleanMatches(urlRegex, fieldValue).map { match ->
+            LinkSpan(
                 start = match.range.first,
                 endExclusive = match.range.last + 1,
                 intent = B3UrlIntent(
@@ -94,70 +90,120 @@ public object FieldLinkScanner {
                     registrableDomain = registrableDomainOf(match.value),
                 ),
             )
-        }
+        }.toList()
 
-        for (match in emailRegex.findAll(fieldValue)) {
-            // Skip emails inside an already-claimed URL span (avoid double-marking
-            // "http://x@y.com").
-            if (overlapsExisting(match.range.first, match.range.last + 1, spans)) continue
-            spans += LinkSpan(
-                start = match.range.first,
-                endExclusive = match.range.last + 1,
-                intent = EmailIntent(emailAddress = match.value, sourceField = source),
-            )
-        }
+        // Skip emails inside an already-claimed URL span (avoid double-marking "http://x@y.com").
+        val urlClaims = ClaimedRanges(urls)
+        val emails = cleanMatches(emailRegex, fieldValue)
+            .filterNot { urlClaims.overlaps(it.range.first, it.range.last + 1) }
+            .map { match ->
+                LinkSpan(
+                    start = match.range.first,
+                    endExclusive = match.range.last + 1,
+                    intent = EmailIntent(emailAddress = match.value, sourceField = source),
+                )
+            }.toList()
 
-        for (match in phoneRegex.findAll(fieldValue)) {
-            val digitCount = match.value.count { it.isDigit() }
-            if (digitCount < 7) continue
-            if (!hasPhoneFormattingHint(match, fieldValue)) continue
-            if (overlapsExisting(match.range.first, match.range.last + 1, spans)) continue
-            spans += LinkSpan(
-                start = match.range.first,
-                endExclusive = match.range.last + 1,
-                intent = PhoneIntent(phoneNumber = match.value.trim(), sourceField = source),
-            )
-        }
+        val claims = ClaimedRanges((urls + emails).sortedBy { it.start })
+        val mixedRuns by lazy(LazyThreadSafetyMode.NONE) { mixedDigitRuns(fieldValue) }
+        val phones = cleanMatches(phoneRegex, fieldValue)
+            .filter { isLinkablePhone(it, fieldValue) }
+            .filterNot { mixedRuns?.get(it.range.first) == true }
+            .filterNot { claims.overlaps(it.range.first, it.range.last + 1) }
+            .map { match ->
+                LinkSpan(
+                    start = match.range.first,
+                    endExclusive = match.range.last + 1,
+                    intent = PhoneIntent(phoneNumber = match.value.trim(), sourceField = source),
+                )
+            }.toList()
 
-        return spans.sortedBy { it.start }
+        return (urls + emails + phones).sortedBy { it.start }
     }
 
-    /**
-     * True if [s] contains any Unicode Cf (Format) or Cc (Control) codepoint. These
-     * include bidi controls (U+202A-U+202E, U+2066-U+2069, U+200E/U+200F, U+061C),
-     * zero-width characters (U+200B-U+200D, U+FEFF), and raw control bytes (U+0000-U+001F,
-     * U+007F-U+009F). All of them can change the rendered glyph order or visibility of
-     * a string without changing its byte content, breaking the "displayed string equals
-     * actionable string" trust claim.
-     *
-     * The check is character-by-character, O(n), and runs only against already-matched
-     * link substrings so the cost is bounded by the number of links per pass.
-     */
-    internal fun containsRenderingHazard(s: String): Boolean = s.any { c ->
-        c.category == CharCategory.FORMAT || c.isISOControl()
+    /** Overlap queries for ascending, disjoint ranges against sorted, disjoint [claimed] spans; linear overall. */
+    private class ClaimedRanges(private val claimed: List<LinkSpan>) {
+        private var next = 0
+
+        fun overlaps(start: Int, endExclusive: Int): Boolean {
+            while (next < claimed.size && claimed[next].endExclusive <= start) next++
+            return next < claimed.size && claimed[next].start < endExclusive
+        }
     }
 
+    private fun cleanMatches(regex: Regex, fieldValue: String): Sequence<MatchResult> =
+        regex.findAll(fieldValue).filterNot { containsRenderingHazard(it.value) }
+
     /**
-     * True if the matched phone candidate carries at least one visible formatting hint:
-     * an internal `+`, dash, space, or parenthesis, OR an immediately adjacent `+` /
-     * `(` before the match or `)` after it. A bare digit run with no formatting and no
-     * adjacent paren or `+` is rejected.
+     * True if [s] contains any Unicode Cf (Format) or Cc (Control) codepoint, or a line
+     * or paragraph separator (U+2028 / U+2029). Cf and Cc include bidi controls
+     * (U+202A-U+202E, U+2066-U+2069, U+200E/U+200F, U+061C), zero-width characters
+     * (U+200B-U+200D, U+FEFF), supplementary-plane format characters such as TAG
+     * characters (U+E0001, U+E0020-U+E007F), and raw control bytes (U+0000-U+001F,
+     * U+007F-U+009F). All of them can change the rendered glyph order, visibility or
+     * line layout of a string without changing what it resolves to, breaking the
+     * "displayed string equals actionable string" trust claim.
      *
-     * The two-stage check (internal + adjacent) handles the regex quirk that the inner
-     * pattern starts with `\+?\d`, so a phone written as `(5551234567)` matches only
-     * the digits — the parens stay outside the match. Without an adjacency check those
-     * inputs would lose their hints and be rejected. The space character is *not*
-     * accepted as an adjacency hint: surrounding spaces are the default text rhythm and
-     * would re-admit every numeric reference value (the wpass-536 regression).
-     *
-     * The check matches Apple's data-detector posture: numeric strings without
-     * formatting hints (ticket numbers, order IDs, barcodes, member numbers) are left
-     * non-tappable. This is the wpass-536 regression guard — the prior implementation
-     * fired on any 7+-digit run and turned every reference-number field into an
-     * accidental "Call this number?" prompt. It is also a meaningful narrowing of the
-     * attack surface: a malicious pass author can no longer plant a premium-rate dial
-     * string in a field labeled `ticketNumber` and rely on auto-detection to surface it.
+     * Iterates code points, not UTF-16 chars, so a surrogate pair is classified as the
+     * character it encodes. Applied to every matched link substring as defence in depth.
      */
+    internal fun containsRenderingHazard(s: String): Boolean = s.codePoints().anyMatch(::isHazard)
+
+    /**
+     * Whole-field gate: [containsRenderingHazard] minus line feed, tab, and carriage
+     * return directly followed by line feed. A lone carriage return is a hazard.
+     */
+    internal fun containsFieldHazard(s: String): Boolean = s.replace("\r\n", "\n").codePoints().anyMatch { cp ->
+        cp != '\n'.code && cp != '\t'.code && isHazard(cp)
+    }
+
+    private fun isHazard(cp: Int): Boolean {
+        val type = Character.getType(cp)
+        return type == Character.FORMAT.toInt() || Character.isISOControl(cp) || type in SEPARATOR_TYPES
+    }
+
+    private val SEPARATOR_TYPES = setOf(
+        Character.LINE_SEPARATOR.toInt(),
+        Character.PARAGRAPH_SEPARATOR.toInt(),
+    )
+
+    private fun isLinkablePhone(match: MatchResult, text: String): Boolean =
+        match.value.count { it.isDigit() } >= 7 && hasPhoneFormattingHint(match, text)
+
+    // Flags, in one linear pass, every index of a run holding a non-ASCII decimal digit;
+    // null when no run does. A phone inside such a run is a truncated slice, so it is dropped.
+    private fun mixedDigitRuns(text: String): BooleanArray? {
+        var flags: BooleanArray? = null
+        var runStart = 0
+        var mixed = false
+        var i = 0
+        while (i <= text.length) {
+            // Index text.length acts as a terminating non-run character.
+            val cp = if (i < text.length) text.codePointAt(i) else -1
+            val next = i + if (cp >= 0) Character.charCount(cp) else 1
+            val inRun = cp >= 0 && isPhoneRunChar(cp)
+            if (inRun) mixed = mixed || isNonAsciiDigit(cp)
+            if (!inRun && mixed) flags = (flags ?: BooleanArray(text.length)).apply { fill(true, runStart, i) }
+            if (!inRun) {
+                mixed = false
+                runStart = next
+            }
+            i = next
+        }
+        return flags
+    }
+
+    private fun isNonAsciiDigit(cp: Int): Boolean = isDecimalDigit(cp) && cp !in '0'.code..'9'.code
+
+    private fun isPhoneRunChar(cp: Int): Boolean = isDecimalDigit(cp) || cp in PHONE_RUN_PUNCTUATION
+
+    private fun isDecimalDigit(cp: Int): Boolean = Character.getType(cp) == Character.DECIMAL_DIGIT_NUMBER.toInt()
+
+    private val PHONE_RUN_PUNCTUATION =
+        setOf(' ', '\u00A0', '\u2007', '\u2009', '\u202F', '-', '(', ')', '+').map { it.code }.toSet()
+
+    // Hint: an internal `+`, dash or ASCII space, or an adjacent `+` / `(` before or `)` after.
+    // Surrounding spaces are not hints, or every spaced reference number would dial.
     private fun hasPhoneFormattingHint(match: MatchResult, fullText: String): Boolean {
         if (match.value.any { it in INTERNAL_PHONE_HINTS }) return true
         val before = fullText.getOrNull(match.range.first - 1)
@@ -165,18 +211,8 @@ public object FieldLinkScanner {
         return before in PHONE_PREFIX_HINTS || after == ')'
     }
 
-    private fun overlapsExisting(
-        start: Int,
-        endExclusive: Int,
-        existing: List<LinkSpan>,
-    ): Boolean = existing.any { it.start < endExclusive && start < it.endExclusive }
-
-    // The phone regex `(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)` cannot start with `(` or
-    // end with `)` (its outer anchors require digits at both edges), so any paren
-    // surrounding a phone number lands *adjacent to* the match, not inside it. The
-    // internal-hint set therefore lists only the characters that can actually appear
-    // inside `match.value` — `+`, `-`, and space. Adjacent parens are picked up via
-    // [PHONE_PREFIX_HINTS] / the trailing-`)` check in [hasPhoneFormattingHint].
+    // A phone match starts on `+` or a digit and ends on a digit, so parens are found by
+    // adjacency. No-break spaces are not hints: such a number without `+` stays unlinked.
     private val INTERNAL_PHONE_HINTS = setOf('+', '-', ' ')
 
     /** `+` and `(` immediately before a digit run signal an unmatched-paren or international form. */
