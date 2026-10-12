@@ -2,6 +2,8 @@ package `is`.walt.passes.barcode.android
 
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.BarcodeDecodeResult
@@ -11,6 +13,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.annotation.Config
+import java.io.File
 
 /**
  * Behavioural coverage for [doDecode], the service-side orchestration that composes the
@@ -23,7 +26,8 @@ import org.robolectric.annotation.Config
  *  - the bitmap is recycled inside the sandbox on every decoded path (it never crosses back);
  *  - a Throwable from either the bounded decode or the symbol decode is contained as
  *    `DecodeFailed(ImageDecodeFailed)` rather than escaping;
- *  - the source descriptor is closed on every outcome.
+ *  - the source descriptor is closed on every outcome;
+ *  - the real fd read ignores the descriptor's inherited offset and leaves it unchanged.
  *
  * Also covers [warmDecodePath], the `onCreate` warm-up that keeps cold start out of the
  * watchdog budget (wpass-qw3).
@@ -105,10 +109,8 @@ class BarcodeDecodeServiceTest {
 
     @Test
     fun decodeBoundedFromPfdRejectsOverSizeWithoutClosingSourcePfd() {
-        // Drives the real fd glue (dup + AutoCloseInputStream) the orchestration tests stub
-        // out. A tiny size cap trips ImageTooLarge before any ImageDecoder work, and the
-        // source PFD must survive — the read closes only its dup, leaving the single close to
-        // doDecode. Regresses the double-close footgun the dup idiom prevents.
+        // Drives the real fd read the orchestration tests stub out. A tiny size cap trips
+        // ImageTooLarge before any ImageDecoder work, and the source PFD survives for doDecode.
         val pipe = ParcelFileDescriptor.createPipe()
         val readEnd = pipe[0]
         ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { it.write(ByteArray(64)) }
@@ -118,6 +120,22 @@ class BarcodeDecodeServiceTest {
         assertThat(result).isEqualTo(BoundedDecodeResult.Rejected(DecodeFailureReason.ImageTooLarge))
         assertThat(readEnd.fileDescriptor.valid()).isTrue()
         readEnd.close()
+    }
+
+    @Test
+    fun decodeBoundedFromPfdReadsFromOffsetZeroWhateverTheInheritedOffset() {
+        // A shared fd can arrive at EOF after another consumer read it. The read must still see
+        // every byte, so the tiny cap trips ImageTooLarge rather than decoding an empty source.
+        val file = File.createTempFile("barcode-offset", ".bin").apply { writeBytes(ByteArray(64)) }
+        val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
+        Os.lseek(pfd.fileDescriptor, 64, OsConstants.SEEK_SET)
+
+        val result = decodeBoundedFromPfd(pfd, BarcodeDecodeConfig(maxBytes = 4))
+
+        assertThat(result).isEqualTo(BoundedDecodeResult.Rejected(DecodeFailureReason.ImageTooLarge))
+        assertThat(Os.lseek(pfd.fileDescriptor, 0, OsConstants.SEEK_CUR)).isEqualTo(64L)
+        pfd.close()
+        file.delete()
     }
 
     @Test

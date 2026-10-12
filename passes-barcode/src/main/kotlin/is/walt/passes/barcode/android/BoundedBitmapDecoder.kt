@@ -6,8 +6,7 @@ import `is`.walt.passes.core.DecodeFailureReason
 import `is`.walt.passes.image.decode.BoundedBitmap
 import `is`.walt.passes.image.decode.BoundedDecodePolicy
 import `is`.walt.passes.image.decode.decodeBounded
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
+import `is`.walt.passes.isolation.readBoundedBytes
 
 /**
  * Decodes a candidate image to a [Bitmap] *inside* the `:barcodeDecoder` sandbox with the
@@ -21,48 +20,27 @@ import java.io.InputStream
  * bitmap stays inside the sandbox; the ZXing symbol decode (wpass-zrt.4) consumes it here and
  * only `{payload, format}` ever crosses back over the binder.
  *
- * Read [pfd] into a bounded byte array and decode it under [config]. The read goes through a
- * `dup()` so the stream's `close()` releases only the duplicate and [pfd] survives for its
- * single owner ([doDecode]) to close — the same idiom as the PDF importer, avoiding a
- * double-close of the source fd. Pulling the compressed bytes into the sandbox heap is fine:
- * isolation keeps them off the *caller's* heap; the file-size cap bounds how many can be read.
+ * Read [pfd] into a bounded byte array and decode it under [config]. The shared
+ * [readBoundedBytes] reads from offset 0 without touching the descriptor's shared offset, so a
+ * second consumer of the same fd never sees a truncated source, and leaves [pfd] open for its
+ * single owner ([doDecode]) to close. Pulling the compressed bytes into the sandbox heap is
+ * fine: isolation keeps them off the *caller's* heap; the file-size cap bounds how many can be
+ * read.
  *
- * Stays a top-level function (not a class) so its two phases are unit-testable without a live
- * service: [readBoundedBytes] against a pipe, and [headerRejection] against the cap table.
+ * Stays a top-level function (not a class) so the cap decision is unit-testable without a live
+ * service: [headerRejection] against the cap table.
  */
 internal fun decodeBoundedFromPfd(
     pfd: ParcelFileDescriptor,
     config: BarcodeDecodeConfig,
 ): BoundedDecodeResult {
-    val read =
-        runCatching {
-            ParcelFileDescriptor.AutoCloseInputStream(pfd.dup()).use { readBoundedBytes(it, config.maxBytes) }
-        }
+    val read = runCatching { readBoundedBytes(pfd, config.maxBytes) }
     val bytes = read.getOrNull()
     return when {
         read.isFailure -> BoundedDecodeResult.Rejected(DecodeFailureReason.SourceUnreadable)
         bytes == null -> BoundedDecodeResult.Rejected(DecodeFailureReason.ImageTooLarge)
         else -> decodeBoundedBitmap(bytes, config)
     }
-}
-
-/**
- * Read at most [maxBytes] from [input], returning null the moment the source exceeds the cap
- * (a large-file decompression bomb) so no oversized buffer is ever fully read. Reads stop
- * early on the first over-cap byte rather than draining the whole stream.
- */
-internal fun readBoundedBytes(input: InputStream, maxBytes: Long): ByteArray? {
-    val out = ByteArrayOutputStream()
-    val buffer = ByteArray(DEFAULT_READ_CHUNK)
-    var total = 0L
-    while (true) {
-        val n = input.read(buffer)
-        if (n < 0) break
-        total += n
-        if (total > maxBytes) return null
-        out.write(buffer, 0, n)
-    }
-    return out.toByteArray()
 }
 
 /**
@@ -120,5 +98,3 @@ internal fun decodeBoundedBitmap(
         is BoundedBitmap.Decoded -> BoundedDecodeResult.Decoded(decoded.bitmap)
         is BoundedBitmap.Rejected -> BoundedDecodeResult.Rejected(decoded.reason)
     }
-
-private const val DEFAULT_READ_CHUNK = 64 * 1024

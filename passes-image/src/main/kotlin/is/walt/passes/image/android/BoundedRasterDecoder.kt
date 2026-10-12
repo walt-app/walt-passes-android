@@ -4,14 +4,11 @@ import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
-import android.system.ErrnoException
-import android.system.Os
 import android.system.OsConstants
 import `is`.walt.passes.image.decode.BoundedBitmap
 import `is`.walt.passes.image.decode.BoundedDecodePolicy
 import `is`.walt.passes.image.decode.decodeBounded
-import java.io.ByteArrayOutputStream
-import java.io.InputStream
+import `is`.walt.passes.isolation.readBoundedBytes
 import kotlin.math.roundToInt
 
 /**
@@ -27,15 +24,14 @@ import kotlin.math.roundToInt
  * bounded output and copied into [SharedMemory]; the source bytes and the full-size bitmap
  * never leave the sandbox. Only the rescaled pixel buffer crosses back over the binder.
  *
- * Read [image] into a bounded byte array through a `dup()` so the stream's `close()` releases
- * only the duplicate and [image] survives for its single owner ([doDecode]) to close — the
- * same idiom as the barcode decoder and the PDF importer, avoiding a double-close of the
- * source fd. Pulling the compressed bytes into the sandbox heap is fine: isolation keeps them
- * off the *caller's* heap; the file-size cap bounds how many can be read.
+ * Read [image] into a bounded byte array with the shared [readBoundedBytes], which reads from
+ * offset 0 without touching the descriptor's shared offset (so overlapping decodes of one fd
+ * stay independent) and leaves [image] open for its single owner ([doDecode]) to close. Pulling
+ * the compressed bytes into the sandbox heap is fine: isolation keeps them off the *caller's*
+ * heap; the file-size cap bounds how many can be read.
  *
  * Stays a top-level function (not a class) so its phases are unit-testable without a live
- * service: [readBoundedBytes] against a pipe, [headerRejection] against the cap table, and
- * [outputDims] against the scaling math.
+ * service: [headerRejection] against the cap table and [outputDims] against the scaling math.
  */
 internal fun decodeRasterFromPfd(
     image: ParcelFileDescriptor,
@@ -49,11 +45,7 @@ internal fun decodeRasterFromPfd(
     if (!isOutputSizeValid(maxWidthPx, maxHeightPx, config.maxOutputPixels)) {
         return ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
     }
-    val read =
-        runCatching {
-            rewindToStart(image)
-            ParcelFileDescriptor.AutoCloseInputStream(image.dup()).use { readBoundedBytes(it, config.maxBytes) }
-        }
+    val read = runCatching { readBoundedBytes(image, config.maxBytes) }
     val bytes = read.getOrNull()
     return when {
         read.isFailure -> ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
@@ -64,40 +56,6 @@ internal fun decodeRasterFromPfd(
 
 internal fun isOutputSizeValid(maxWidthPx: Int, maxHeightPx: Int, maxOutputPixels: Long): Boolean =
     maxWidthPx > 0 && maxHeightPx > 0 && maxWidthPx.toLong() * maxHeightPx.toLong() <= maxOutputPixels
-
-/**
- * Seek [image] back to offset 0 so a decode never depends on the offset a shared open file
- * description arrived with, making decode idempotent for a given PFD. `ESPIPE` (non-seekable
- * source: pipes here and in the tests, some `ContentResolver` fds) is swallowed — such an fd
- * has no offset to rewind. Any other errno propagates to the caller's containment.
- */
-internal fun rewindToStart(image: ParcelFileDescriptor) {
-    try {
-        Os.lseek(image.fileDescriptor, 0, OsConstants.SEEK_SET)
-    } catch (e: ErrnoException) {
-        if (e.errno != OsConstants.ESPIPE) throw e
-    }
-}
-
-/**
- * Read at most [maxBytes] from [input], returning null the moment the source exceeds the cap
- * (a large-file decompression bomb) so no oversized buffer is ever fully read. Reads stop
- * early on the first over-cap byte rather than draining the whole stream. Identical shape to
- * `passes-barcode`'s `readBoundedBytes`.
- */
-internal fun readBoundedBytes(input: InputStream, maxBytes: Long): ByteArray? {
-    val out = ByteArrayOutputStream()
-    val buffer = ByteArray(DEFAULT_READ_CHUNK)
-    var total = 0L
-    while (true) {
-        val n = input.read(buffer)
-        if (n < 0) break
-        total += n
-        if (total > maxBytes) return null
-        out.write(buffer, 0, n)
-    }
-    return out.toByteArray()
-}
 
 /**
  * The pure header-cap decision: given the container [mimeType] and decoded-but-not-allocated
@@ -215,5 +173,4 @@ private fun packIntoSharedMemory(bitmap: Bitmap, widthPx: Int, heightPx: Int): S
     return sm
 }
 
-private const val DEFAULT_READ_CHUNK = 64 * 1024
 private const val BYTES_PER_PIXEL = 4

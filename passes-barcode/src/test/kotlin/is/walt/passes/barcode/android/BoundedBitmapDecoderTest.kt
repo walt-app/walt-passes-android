@@ -3,56 +3,15 @@ package `is`.walt.passes.barcode.android
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.DecodeFailureReason
 import org.junit.Test
-import java.io.ByteArrayInputStream
 
 /**
- * Pins the two pure halves of the bounded decode (wpass-zrt.3): the file-size cap
- * ([readBoundedBytes]) and the header-cap decision table ([headerRejection]). The platform
+ * Pins the pure half of the bounded decode: the header-cap decision table ([headerRejection]).
+ * The file-size cap is the shared `readBoundedBytes` in passes-isolation. The platform
  * `ImageDecoder` integration these feed — that the header listener fires before allocation and
  * that OOM is contained — is the instrumented half (wpass-zrt.5); the policy that decides
  * accept-vs-reject is exercised here on the JVM where it can be enumerated exhaustively.
  */
 class BoundedBitmapDecoderTest {
-    // ------------------------------------------------------------------ size cap
-
-    @Test
-    fun readBoundedBytesReturnsAllBytesWhenUnderCap() {
-        val bytes = ByteArray(1000) { (it % 251).toByte() }
-
-        val read = readBoundedBytes(ByteArrayInputStream(bytes), maxBytes = 4096)
-
-        assertThat(read).isNotNull()
-        assertThat(read!!.toList()).isEqualTo(bytes.toList())
-    }
-
-    @Test
-    fun readBoundedBytesReturnsExactlyAtCapBoundary() {
-        val bytes = ByteArray(4096) { 1 }
-
-        val read = readBoundedBytes(ByteArrayInputStream(bytes), maxBytes = 4096)
-
-        assertThat(read).isNotNull()
-        assertThat(read!!.size).isEqualTo(4096)
-    }
-
-    @Test
-    fun readBoundedBytesRejectsOneByteOverCap() {
-        // A large-file decompression bomb: one byte past the cap fails the whole read.
-        val bytes = ByteArray(4097) { 1 }
-
-        val read = readBoundedBytes(ByteArrayInputStream(bytes), maxBytes = 4096)
-
-        assertThat(read).isNull()
-    }
-
-    @Test
-    fun readBoundedBytesHandlesEmptyStream() {
-        val read = readBoundedBytes(ByteArrayInputStream(ByteArray(0)), maxBytes = 4096)
-
-        assertThat(read).isNotNull()
-        assertThat(read!!.size).isEqualTo(0)
-    }
-
     // ------------------------------------------------------------- header cap table
 
     @Test

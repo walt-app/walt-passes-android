@@ -2,6 +2,8 @@ package `is`.walt.passes.image.android
 
 import android.os.ParcelFileDescriptor
 import android.os.SharedMemory
+import android.system.Os
+import android.system.OsConstants
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import kotlinx.coroutines.test.runTest
@@ -23,8 +25,8 @@ import java.io.File
  *  - the source descriptor is closed on every outcome;
  *  - the real fd glue ([decodeRasterFromPfd]) rejects an over-cap source and an out-of-bounds
  *    output request without closing the source PFD (the dup idiom prevents a double-close);
- *  - the read rewinds a seekable fd to offset 0 and tolerates a non-seekable pipe, so a decode
- *    never inherits another consumer's EOF offset (wpass-07h).
+ *  - the read starts at offset 0 whatever offset the shared fd arrives with, and leaves that
+ *    offset unchanged.
  */
 @RunWith(AndroidJUnit4::class)
 @Config(sdk = [34])
@@ -75,10 +77,8 @@ class ImageDecodeServiceTest {
 
     @Test
     fun decodeRasterFromPfdRejectsOverSizeWithoutClosingSourcePfd() {
-        // Drives the real fd glue (dup + AutoCloseInputStream) the orchestration tests stub
-        // out. A tiny size cap trips OversizedAtImport before any ImageDecoder work, and the
-        // source PFD must survive — the read closes only its dup, leaving the single close to
-        // doDecode.
+        // Drives the real fd read the orchestration tests stub out. A tiny size cap trips
+        // OversizedAtImport before any ImageDecoder work, and the source PFD survives for doDecode.
         val pipe = ParcelFileDescriptor.createPipe()
         val readEnd = pipe[0]
         ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { it.write(ByteArray(64)) }
@@ -91,28 +91,19 @@ class ImageDecodeServiceTest {
     }
 
     @Test
-    fun decodeRasterFromPfdRereadsFromOffsetZeroAfterAPriorFullConsume() {
-        // wpass-07h regression pin: dup() shares the open file description, so a shared fd
-        // arrives at EOF after another consumer read it. The decode must rewind rather than
-        // silently read zero bytes; with the tiny cap the re-read trips OversizedAtImport,
-        // which proves the bytes were read again from offset 0.
-        val file = File.createTempFile("wpass-07h", ".bin").apply { writeBytes(ByteArray(64)) }
+    fun decodeRasterFromPfdReadsFromOffsetZeroAndLeavesTheSharedOffsetAlone() {
+        // A shared fd can arrive mid-file or at EOF after another consumer read it. The decode
+        // must still see every byte (the cap trips OversizedAtImport) without moving that offset.
+        val file = File.createTempFile("image-offset", ".bin").apply { writeBytes(ByteArray(64)) }
         val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
-        ParcelFileDescriptor.AutoCloseInputStream(pfd.dup()).use { it.readBytes() }
+        Os.lseek(pfd.fileDescriptor, 60, OsConstants.SEEK_SET)
 
-        val result = decodeRasterFromPfd(pfd, MAX_W, MAX_H, ImageDecodeConfig(maxBytes = 4))
+        val result = decodeRasterFromPfd(pfd, MAX_W, MAX_H, ImageDecodeConfig(maxBytes = 8))
 
         assertThat(result).isEqualTo(ImageDecodeResult.Rejected(ImageDecodeRejectedKind.OversizedAtImport))
+        assertThat(Os.lseek(pfd.fileDescriptor, 0, OsConstants.SEEK_CUR)).isEqualTo(60L)
         pfd.close()
         file.delete()
-    }
-
-    @Test
-    fun rewindToStartToleratesANonSeekablePipe() {
-        // Pipes have no offset to rewind; ESPIPE is swallowed rather than failing the decode.
-        val readEnd = pipeReadEnd()
-        rewindToStart(readEnd)
-        readEnd.close()
     }
 
     @Test
