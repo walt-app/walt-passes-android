@@ -326,8 +326,9 @@ class SignatureVerifierTest {
     }
 
     @Test
-    fun realAppleSignedPkpassVerifiesWhenEnvelopeOmitsTheG4Intermediate() {
-        // An issuer may ship only the leaf; the bundled WWDR G4 must complete the chain.
+    fun realAppleSignedPkpassVerifiesWhenEnvelopeOmitsItsWwdrIntermediate() {
+        // An issuer may ship only the leaf; the bundled copy of the fixture's WWDR
+        // intermediate must complete the chain.
         val fixture = loadAppleSignedFixture()
         val signature = withoutWwdrIntermediates(fixture.signature)
 
@@ -431,7 +432,7 @@ class SignatureVerifierTest {
     fun knownIntermediateLetsBlobOmitItAndStillReachAnchor() {
         // The signature blob includes only the leaf, not the intermediate. The
         // bundled `knownIntermediates` set fills the gap so the chain still
-        // resolves to the trust anchor. This exercises the WWDR-G6-bundled path.
+        // resolves to the trust anchor, as a bundled WWDR intermediate does in production.
         val rootKey = newRsaKeyPair()
         val root = selfSignedCertificate(rootKey, "CN=Test Apple Root")
         val intermediateKey = newRsaKeyPair()

@@ -3,7 +3,7 @@
 Real Apple-signed pkpass artifacts pulled from a Tixly Chroniques ticket. Used by
 `SignatureVerifierTest.realAppleSignedPkpassFixtureVerifies`,
 `SignatureVerifierTest.realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider` and
-`SignatureVerifierTest.realAppleSignedPkpassVerifiesWhenEnvelopeOmitsTheG4Intermediate`
+`SignatureVerifierTest.realAppleSignedPkpassVerifiesWhenEnvelopeOmitsItsWwdrIntermediate`
 to exercise the full production verifier path against a wire-shape Apple ships, on top
 of the bundled Apple Root CA anchor set.
 
@@ -44,7 +44,9 @@ in `SignatureVerifier`'s "No date-shift override" docblock.
      | awk '/subject:.*Pass Type ID/{found=1} found && /notAfter:/{print; exit}'
    ```
 4. Rerun `:passes-core:test --tests "*.SignatureVerifierTest.realAppleSignedPkpass*"`
-   to confirm both tests turn green again.
+   to confirm all three tests turn green again. The stripped-envelope test removes every
+   WWDR certificate from `signature`, so it assumes the replacement pass's intermediate
+   is one of those bundled in `AppleTrustAnchors`.
 
 A deferred follow-up (noted in `SignatureVerifier.kt`'s docblock) would snapshot the
 PKIX path-build date to the CMS signing time, eliminating this maintenance loop. That

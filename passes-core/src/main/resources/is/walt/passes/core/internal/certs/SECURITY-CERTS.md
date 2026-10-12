@@ -39,15 +39,15 @@ without reaching a root above is `CertChainIncomplete`, not `AppleVerified`.
 The legacy WWDR CA (G1, expired 2023-02-07) is intentionally **not** bundled.
 Reissuing pkpass signatures under that CA was no longer possible after expiry,
 so any signature chaining to it would have to be older than 2023, and the
-upstream issuer (Apple Root CA) covers re-signing under G3/G6 anyway. Bundling
+upstream issuer (Apple Root CA) covers re-signing under G3/G4/G6 anyway. Bundling
 an expired anchor would muddy the trust posture without buying coverage.
 
 ## Sources
 
-The root CAs and the G3 and G6 intermediates were exported from the macOS system
-keychain on 2026-05-05 from a fully-updated host (and cross-checked against the
-copies distributed inside `Xcode.app`'s `DVTFoundation.framework`). Their
-fingerprints matched the values Apple published at the time at
+The five certificates above were exported from the macOS system keychain on
+2026-05-05 from a fully-updated host (and cross-checked against the copies
+distributed inside `Xcode.app`'s `DVTFoundation.framework`). The fingerprints
+above match the values Apple publishes at
 <https://www.apple.com/certificateauthority/>.
 
 `apple-wwdr-g4.cer` was downloaded on 2026-10-13 from
@@ -55,7 +55,8 @@ fingerprints matched the values Apple published at the time at
 page. Apple's page lists no fingerprints as of that date, so it was checked by
 `openssl verify -x509_strict` against the bundled `apple-root-ca.cer`, and its
 SHA-256 matches both the G4 copy embedded in a real Apple-signed pass and the
-public Certificate Transparency record at <https://crt.sh/>.
+public Certificate Transparency record at
+<https://crt.sh/?q=EA4757885538DD8CB59FF4556F676087D83C85E70902C122E42C0808B5BCE14C>.
 
 A reviewer can re-derive any of these locally with:
 
