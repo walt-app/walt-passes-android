@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
@@ -47,8 +48,8 @@ public sealed interface ConnectResult<out C> {
     public data class Connected<C>(public val session: IsolatedWorkerSession<C>) : ConnectResult<C>
 
     /**
-     * `bindService` returned false (the service is missing from the manifest or the system
-     * refused the bind). No connection was established, so there is nothing to unbind.
+     * No connection was established: `bindService` returned false, or the bind was accepted
+     * but did not connect within the bind deadline. Either way the bind is already released.
      */
     public data object BindFailed : ConnectResult<Nothing>
 }
@@ -64,7 +65,22 @@ public class AndroidIsolatedWorkerSessionFactory<out C>(
     private val serviceClass: Class<out Service>,
     private val wrapBinder: (IBinder) -> C,
 ) : IsolatedWorkerSessionFactory<C> {
-    override suspend fun connect(): ConnectResult<C> =
+    /**
+     * Bounded by [BIND_TIMEOUT_MS]: a bind that is accepted but never reaches
+     * `onServiceConnected` folds to [ConnectResult.BindFailed] instead of hanging the caller.
+     */
+    override suspend fun connect(): ConnectResult<C> {
+        // withTimeoutOrNull can expire after the block has returned; close what it discards.
+        var arrived: ConnectResult<C>? = null
+        val result = withTimeoutOrNull(BIND_TIMEOUT_MS) { bind().also { arrived = it } }
+        if (result == null) {
+            (arrived as? ConnectResult.Connected)?.session?.close()
+            return ConnectResult.BindFailed
+        }
+        return result
+    }
+
+    private suspend fun bind(): ConnectResult<C> =
         suspendCancellableCoroutine { cont ->
             val intent = Intent(context, serviceClass)
             lateinit var conn: ServiceConnection
@@ -78,7 +94,9 @@ public class AndroidIsolatedWorkerSessionFactory<out C>(
                         // the sandbox. Skip the rebind: the in-flight transact already surfaced
                         // the death as a RemoteException on the consumer's client.
                         if (!cont.isActive) return
-                        cont.resume(ConnectResult.Connected(AndroidSession(context, conn, wrapBinder(binder))))
+                        val session = AndroidSession(context, conn, wrapBinder(binder))
+                        // A session resumed into an already-cancelled caller is dropped; unbind it.
+                        cont.resume(ConnectResult.Connected(session)) { _, _, _ -> session.close() }
                     }
 
                     // onServiceDisconnected fires after a successful connect — the binder
@@ -98,6 +116,12 @@ public class AndroidIsolatedWorkerSessionFactory<out C>(
             }
         }
 }
+
+/**
+ * Liveness backstop on the bind, not a performance bound. Deliberately loose, several times
+ * the worst cold start seen on a loaded CI emulator, so a slow sandbox is never taken for a dead one.
+ */
+internal const val BIND_TIMEOUT_MS: Long = 20_000L
 
 private class AndroidSession<out C>(
     private val context: Context,
