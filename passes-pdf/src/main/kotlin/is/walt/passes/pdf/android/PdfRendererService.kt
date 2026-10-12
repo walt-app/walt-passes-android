@@ -52,10 +52,10 @@ public class PdfRendererService : Service() {
         }
 
     public companion object {
-        /** Mirrors [PdfImportConfig.DEFAULT_MAX_BYTES] and storage's `DocumentBounds.MAX_BYTES`. */
+        /** Alias of [PdfImportConfig.DEFAULT_MAX_BYTES] and storage's `DocumentBounds.MAX_BYTES`. */
         public const val MAX_BYTES: Long = PdfImportConfig.DEFAULT_MAX_BYTES
 
-        /** Mirrors [PdfImportConfig.DEFAULT_MAX_PAGES] and storage's `DocumentBounds.MAX_PAGES`. */
+        /** Alias of [PdfImportConfig.DEFAULT_MAX_PAGES] and storage's `DocumentBounds.MAX_PAGES`. */
         public const val MAX_PAGES: Int = PdfImportConfig.DEFAULT_MAX_PAGES
 
         /**

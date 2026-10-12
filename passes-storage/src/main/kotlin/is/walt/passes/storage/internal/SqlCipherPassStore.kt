@@ -138,8 +138,7 @@ internal class SqlCipherPassStore(
 
     override fun delete(id: PassRecordId): DeleteOutcome? {
         val summary = summaryById(id) ?: return null
-        // ON DELETE CASCADE on pass_images, pass_locales, and pass_archives drops the children
-        // within this one statement, so no explicit transaction is needed.
+        // ON DELETE CASCADE drops the image, locale and archive rows within this one statement.
         db.delete(Schema.Tables.PASSES, "id = ?", arrayOf(id.value.toString()))
         return DeleteOutcome(summary)
     }
