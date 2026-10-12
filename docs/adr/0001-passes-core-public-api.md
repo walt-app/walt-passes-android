@@ -211,7 +211,9 @@ unaffected; a consumer with an exhaustive `when` over either enum gains one arm.
 ## Addendum 2026-10-12: a bad `.strings` file drops its locale, not the pass
 
 Context: #252, a pass other wallets open that this parser refused as
-`Malformed(InvalidStrings)`. Two changes.
+`Malformed(InvalidStrings)`. Two changes. Root cause unconfirmed (no sample);
+the locale drop is the fix, the grammar widening is best-effort and may be
+narrowed.
 
 **Per-locale drop.** A `<locale>.lproj/pass.strings` that fails to decode or
 parse is left out of `Pass.locales`; the pass still parses, and the renderer
@@ -228,26 +230,34 @@ on the surface so consumers' exhaustive `when`s compile, but the default
 parser no longer returns them.
 
 **Amendment to D3.** `ParseSucceededEvent` gains `droppedLocaleCount: Int = 0`,
-appended with a default so named-argument callers are unaffected. It is a
-count, like `localeCount`, and carries no locale tag or file content.
+appended with a default. Source-compatible; not binary-compatible
+(constructor/copy signatures change). It is a count, like `localeCount`, and
+carries no locale tag or file content.
 
-**Wider grammar.** The `.strings` parser now reads the old-style property-list
-strings grammar Apple's own parser reads, not only the `"key" = "value";`
-subset: `'`-quoted and unquoted tokens (`[A-Za-z0-9_$/:.-]`), the `"key";`
-shorthand, an optional enclosing `{ }`, ASCII-range octal escapes,
+**Wider grammar.** The `.strings` parser now reads a subset of Apple's
+old-style property-list strings grammar, wider than the `"key" = "value";`
+form alone: `'`-quoted and unquoted tokens (`[A-Za-z0-9_$/:.-]`), the
+`"key";` shorthand, an optional enclosing `{ }`, ASCII-range octal escapes,
 `\a \b \f \v \'`, a backslash before a line break, UTF-32 BOMs, and BOM-less
 UTF-16 recognised by its NUL-byte pattern. The value cap now also applies to
-a shorthand key that becomes its value and to unquoted values. Still rejected,
-and so dropped: invalid UTF-8 with no BOM (no single-byte fallback, which
-would bring back the silent mis-rendering the strict decoder exists to
-prevent), unknown escapes, octal above `\177`, lone surrogates, unterminated
-strings and comments, non-string values and trailing junk. `PassEncoder` now
+a shorthand key that becomes its value and to unquoted values.
+
+Deliberate divergences, where Apple's parser accepts input this one rejects
+(the locale is dropped): unknown escapes such as `\x` (Apple reads the
+literal character), `\U` with fewer than four hex digits, octal `\200` to
+`\377` (Apple maps these through the NeXTSTEP Latin table), an unterminated
+block comment (Apple treats it as end of file), trailing text after the last
+entry (Apple stops and keeps what it read), XML and binary-plist `.strings`
+files, and BOM-less files that are not UTF-8 or UTF-16 (no single-byte
+fallback, which would bring back the silent mis-rendering the strict decoder
+exists to prevent). Also rejected: lone surrogates, unterminated strings,
+and non-string values. `PassEncoder` now
 writes control characters as `\Uxxxx`, so its output never holds a NUL byte
 the UTF-16 sniff could misread.
 
 | Decision | Test |
 |----------|------|
-| Per-locale drop | `PassParserTest.unparseableLocaleIsDroppedAndTheOthersKept`, `undecodableLocaleIsDroppedToo`, `oversizedStringsValueStillFailsThePass` |
+| Per-locale drop | `PassParserTest.unparseableLocaleIsDroppedAndTheOthersKept`, `undecodableLocaleIsDroppedToo`, `passWithEveryLocaleBadStillParsesWithNoLocales`, `oversizedStringsValueStillFailsThePass`, `oversizedValueFailsThePassEvenAlongsideADroppedLocale` |
 | Integrity unchanged | `PassParserTest.tamperedStringsFileStillFailsIntegrity` |
 | Grammar | `StringsParserTest` (one test per accepted form, plus the still-rejected forms) |
 | Encoder | `PassEncoderTest.controlCharactersRoundTripAndNeverWriteANulByte` |

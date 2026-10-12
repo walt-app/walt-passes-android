@@ -70,10 +70,8 @@ public sealed interface MalformedReason {
     public data object InvalidManifest : MalformedReason
 
     /**
-     * A `<locale>.lproj/pass.strings` file is structurally invalid. The default parser
-     * no longer returns this: since #252 a bad `.strings` file drops that one locale
-     * and is counted in [ParseSucceededEvent.droppedLocaleCount]. Kept so consumers'
-     * exhaustive `when`s still compile.
+     * Not returned by the default parser; a bad `.strings` file drops its locale.
+     * Kept for exhaustive `when`s.
      */
     public data object InvalidStrings : MalformedReason
 

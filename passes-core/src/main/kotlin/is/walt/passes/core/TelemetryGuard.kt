@@ -28,8 +28,8 @@ public interface TelemetryGuard {
 }
 
 /**
- * [droppedLocaleCount] counts locales whose `.strings` file did not parse and was left out
- * of the pass (#252); [localeCount] counts only the ones kept.
+ * [droppedLocaleCount] counts locales left out because their `.strings` did not parse;
+ * [localeCount] counts only the ones kept.
  */
 public data class ParseSucceededEvent(
     public val passType: PassType,

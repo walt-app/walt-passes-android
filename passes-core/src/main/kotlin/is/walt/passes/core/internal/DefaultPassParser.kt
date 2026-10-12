@@ -155,8 +155,8 @@ internal class DefaultPassParser(private val config: ParserConfig) : PassParser 
     }
 
     /**
-     * A locale whose `.strings` does not parse is dropped, not fatal (#252): its bytes
-     * already passed the manifest and signature checks, so only its text is lost.
+     * A locale whose `.strings` does not parse is dropped, not fatal: its bytes already
+     * passed the manifest and signature checks, so only its text is lost.
      */
     private fun parseStringsEntries(stringsEntries: List<Pair<String, ByteArray>>): Phase<ParsedLocales> {
         val map = LinkedHashMap<PassLocale, LocalizedStrings>(stringsEntries.size)

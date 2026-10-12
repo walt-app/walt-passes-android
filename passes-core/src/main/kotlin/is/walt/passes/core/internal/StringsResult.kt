@@ -7,7 +7,7 @@ import `is`.walt.passes.core.LocalizedStrings
  * Internal only: [DefaultPassParser] decides what a [Failed] means for the pass.
  *
  * Every arm except [StringsFailure.ValueTooLong] drops that one locale and the pass
- * still parses (#252); the integrity checks over the file's bytes ran before this
+ * still parses; the integrity checks over the file's bytes ran before this
  * parse and are unaffected. [StringsFailure.ValueTooLong] is a resource-limit trip
  * and fails the pass as [`is`.walt.passes.core.MalformedReason.ResourceLimitExceeded].
  */

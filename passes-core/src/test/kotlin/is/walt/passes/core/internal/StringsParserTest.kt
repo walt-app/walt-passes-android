@@ -295,7 +295,7 @@ class StringsParserTest {
         assertThat(ok.strings.entries).containsExactly("k", "v")
     }
 
-    // Forms Apple's old-style parser accepts, widened for #252.
+    // Old-style grammar forms beyond the "key" = "value"; subset.
 
     @Test
     fun unquotedKeysAndValuesParse() {
@@ -426,6 +426,19 @@ class StringsParserTest {
         assertThat(bytes.size % 2).isEqualTo(0)
         val ok = parseStrings(bytes, ParserConfig()).asOk()
         assertThat(ok.strings.entries).containsExactly("\u0000ab", "v")
+    }
+
+    @Test
+    fun sniffedUtf16ThatFailsStrictDecodeFallsBackToUtf8() {
+        // Half the sampled odd bytes are NUL, so the sniff picks UTF-16LE; "a" + 0xDC is then
+        // a lone low surrogate, while as UTF-8 the bytes are valid (0xDC 0x80 = U+0700).
+        val key = "\u0000a".repeat(16) + "\u0700b"
+        val bytes =
+            "\"".toByteArray() + "\u0000a".repeat(16).toByteArray() + byteArrayOf(0xDC.toByte(), 0x80.toByte()) +
+                "b\" = \"v\";".toByteArray()
+        assertThat(bytes.size % 2).isEqualTo(0)
+        val ok = parseStrings(bytes, ParserConfig()).asOk()
+        assertThat(ok.strings.entries).containsExactly(key, "v")
     }
 
     @Test

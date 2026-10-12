@@ -244,6 +244,7 @@ class PublicApiSurfaceTest {
                 durationMillis = 42L,
                 imageCount = 4,
                 localeCount = 2,
+                droppedLocaleCount = 1,
             ),
         )
         guard.onParseFailed(

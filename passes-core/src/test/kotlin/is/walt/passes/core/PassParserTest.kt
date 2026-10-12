@@ -239,7 +239,7 @@ class PassParserTest {
 
     @Test
     fun unparseableLocaleIsDroppedAndTheOthersKept() {
-        // #252: one bad .strings file must not take the pass down with it.
+        // One bad .strings file must not take the pass down with it.
         val good = "\"destination\" = \"Destination\";".toByteArray(Charsets.UTF_8)
         val bad = "\"destination\" = \"Ziel".toByteArray(Charsets.UTF_8)
         val recorder = RecordingTelemetryGuard()
@@ -284,6 +284,42 @@ class PassParserTest {
         val result = PassParser.create(ParserConfig(maxJsonStringBytes = 8)).parse(PassSource.Bytes(zip))
         assertThat(result)
             .isEqualTo(ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonStringSize)))
+    }
+
+    @Test
+    fun oversizedValueFailsThePassEvenAlongsideADroppedLocale() {
+        val bad = "\"k\" = \"unterminated".toByteArray(Charsets.UTF_8)
+        val oversized = ("\"k\" = \"" + "x".repeat(16) + "\";").toByteArray(Charsets.UTF_8)
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries = mapOf("de.lproj/pass.strings" to bad, "en.lproj/pass.strings" to oversized),
+            )
+        val result = PassParser.create(ParserConfig(maxJsonStringBytes = 8)).parse(PassSource.Bytes(zip))
+        assertThat(result)
+            .isEqualTo(ParseResult.Malformed(MalformedReason.ResourceLimitExceeded(ResourceLimit.JsonStringSize)))
+    }
+
+    @Test
+    fun passWithEveryLocaleBadStillParsesWithNoLocales() {
+        val bad = "\"k\" = \"v\"".toByteArray(Charsets.UTF_8)
+        val recorder = RecordingTelemetryGuard()
+        val zip =
+            SyntheticPkpass.unsigned(
+                passJson = SyntheticPkpass.minimalPassJson("generic"),
+                extraEntries =
+                    mapOf(
+                        "en.lproj/pass.strings" to bad,
+                        "de.lproj/pass.strings" to bad,
+                        "fr.lproj/pass.strings" to bad,
+                    ),
+            )
+        val result = PassParser.create(ParserConfig(telemetryGuard = recorder)).parse(PassSource.Bytes(zip))
+
+        assertThat((result as ParseResult.Success).pass.locales).isEmpty()
+        val event = (recorder.events[1] as RecordedEvent.Succeeded).event
+        assertThat(event.localeCount).isEqualTo(0)
+        assertThat(event.droppedLocaleCount).isEqualTo(3)
     }
 
     @Test

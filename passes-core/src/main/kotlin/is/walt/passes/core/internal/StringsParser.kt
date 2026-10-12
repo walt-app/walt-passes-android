@@ -13,14 +13,8 @@ import java.nio.charset.StandardCharsets
  * iteration order matches source order via [LinkedHashMap], duplicate keys are
  * resolved last-write-wins (matching Apple's parser).
  *
- * **Grammar.** The old-style property-list strings grammar Apple's own parser reads
- * (CoreFoundation `CFOldStylePList.c`), not just the `"key" = "value";` subset Xcode
- * writes. Accepted since #252: `'`-quoted tokens, unquoted tokens drawn from
- * `[A-Za-z0-9_$/:.-]`, the `"key";` shorthand (value = key), an optional enclosing
- * `{ ... }`, octal escapes in the ASCII range, and `\a \b \f \v \' \<newline>`.
- * Still rejected: unknown escapes (`\x`), octal above `\177` (Apple maps those through
- * the NeXTSTEP Latin table, which this parser does not carry), lone surrogates,
- * unterminated strings and comments, values that are not strings, and trailing junk.
+ * **Grammar.** Old-style plist strings grammar (subset; see ADR 0001 addendum
+ * 2026-10-12 for what is accepted and the deliberate divergences from Apple's parser).
  *
  * **Defense-in-depth ordering.** The function runs three layers, in order, and the
  * earliest-firing arm wins:
