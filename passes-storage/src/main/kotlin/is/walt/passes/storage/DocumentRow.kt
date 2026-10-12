@@ -4,8 +4,9 @@ import `is`.walt.passes.core.ScannableFormat
 
 /**
  * Defensive caps `passes-storage` re-checks before inserting a document row. The
- * authoritative source for size and page count is ADR 0005 D7; the renderer-service in
- * `passes-document-core` enforces the same numbers at import time. Storage carries them a
+ * authoritative source for size and page count is ADR 0005 D7; `PdfImportConfig` in
+ * `passes-document-core` holds the same numbers, which the import path and the renderer
+ * service in `passes-pdf` enforce at import time. Storage carries them a
  * second time so a future caller bug, a misconfigured renderer, or a new entry path
  * cannot land an oversized blob in the encrypted database.
  *
@@ -15,10 +16,8 @@ import `is`.walt.passes.core.ScannableFormat
  *
  * Hardcoded here (rather than imported from `passes-document-core`) because `passes-storage`
  * does not depend on `passes-document-core`: the `PdfDocument <-> documents-table` mapping is
- * a consumer-defined seam. `PublicApiSurfaceTest` locks the storage-side values only;
- * a cross-module parity test asserting `RendererService.MAX_BYTES == DocumentBounds.MAX_BYTES`
- * is tracked separately (`wpass-kej`) so a future cap change in `passes-document-core` cannot
- * silently diverge from this module.
+ * a consumer-defined seam. `DocumentBoundsParityTest` (test-only dependency) asserts the
+ * size and page caps match `PdfImportConfig`, so a cap change on either side fails the build.
  */
 public object DocumentBounds {
     public const val MAX_BYTES: Long = 25L * 1024 * 1024
