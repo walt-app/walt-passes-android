@@ -32,11 +32,18 @@ package `is`.walt.passes.ui
  *   premium-rate dial string in a value that the user reads as a reference number.
  * - An email requires an `@` with non-empty ASCII local and domain parts.
  *
- * Belt-and-suspenders: every match is post-filtered through [containsRenderingHazard],
- * which discards any match containing a Unicode formatting (Cf) or control (Cc)
- * codepoint. This is redundant for phone and email under the current regexes but
- * locks the property so a future regex relaxation does not silently re-open a
- * spoofing path.
+ * Rendering hazards are checked at two levels:
+ *
+ * - Field level ([containsFieldHazard]): a field containing any Unicode formatting
+ *   (Cf) or control (Cc) codepoint surfaces no links at all, except that line feed,
+ *   carriage return and tab are allowed, since multi-paragraph back fields use them
+ *   and they cannot reorder glyphs. A clean link beside a bidi control is dropped too:
+ *   an author who plants one has shown intent to deceive, and the context the user
+ *   reads is no longer trustworthy.
+ * - Match level ([containsRenderingHazard]): every match is also rejected if it
+ *   contains ANY Cf or Cc codepoint, line breaks and tabs included, so no link target
+ *   can carry one. Redundant under the current regexes, but it locks the property so
+ *   a future regex relaxation cannot re-open a spoofing path.
  *
  * Public so consumers that render their own back-field layouts (e.g. walt-android's
  * flat-row PKPASS detail screen) can invoke the canonical scanner instead of
@@ -48,15 +55,8 @@ package `is`.walt.passes.ui
  */
 public object FieldLinkScanner {
 
-    // Permissive on the boundary chars (whitespace + brackets + quotes), then the
-    // post-filter (`containsRenderingHazard`) rejects matches containing Cf/Cc
-    // characters. The two-stage approach matters: a hostile URL containing
-    // U+202E (Right-to-Left Override) would partial-match under a tighter regex
-    // (stopping at the override and accepting the safe prefix), leaving a partial
-    // URL detected. Capturing the full string here lets the filter discard the
-    // entire match, so the back-field surfaces no link at all rather than a
-    // truncated one whose display is no longer the hostile reorder yet still
-    // differs from what the field text shows.
+    // Deliberately permissive so a URL with an embedded bidi control matches whole and
+    // is rejected, rather than matching a truncated safe-looking prefix.
     private val urlRegex = Regex("""https?://[^\s<>"'()]+""")
     private val emailRegex = Regex("""[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}""")
 
@@ -67,24 +67,11 @@ public object FieldLinkScanner {
         Regex("""(?<!\d)(\+?\d[\d\s\-()]{6,}\d)(?!\d)""")
 
     public fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
-        // Field-level rejection: if ANY part of this field contains a Unicode
-        // formatting (Cf) or control (Cc) codepoint, surface NO tappable links from
-        // it. Even a clean URL adjacent to a hostile one becomes non-tappable; the
-        // user must copy by hand.
-        //
-        // This is broader than per-match rejection but the right posture for the
-        // trust model: an untrusted pass author who can plant ANY rendering hazard
-        // in a field has demonstrated intent to deceive, and any other "link" in
-        // that field is suspect by association — even if its match substring is
-        // ASCII-clean, the visible context the user reads in the back-field surface
-        // is not. Cutting the entire field off the auto-link path forces a manual
-        // intent (long-press to copy, paste into a browser) where the user has to
-        // see the verbatim string outside any directional reordering.
-        if (containsRenderingHazard(fieldValue)) return emptyList()
+        if (containsFieldHazard(fieldValue)) return emptyList()
 
         val spans = mutableListOf<LinkSpan>()
 
-        for (match in urlRegex.findAll(fieldValue)) {
+        for (match in cleanMatches(urlRegex, fieldValue)) {
             spans += LinkSpan(
                 start = match.range.first,
                 endExclusive = match.range.last + 1,
@@ -96,7 +83,7 @@ public object FieldLinkScanner {
             )
         }
 
-        for (match in emailRegex.findAll(fieldValue)) {
+        for (match in cleanMatches(emailRegex, fieldValue)) {
             // Skip emails inside an already-claimed URL span (avoid double-marking
             // "http://x@y.com").
             if (overlapsExisting(match.range.first, match.range.last + 1, spans)) continue
@@ -107,7 +94,7 @@ public object FieldLinkScanner {
             )
         }
 
-        for (match in phoneRegex.findAll(fieldValue)) {
+        for (match in cleanMatches(phoneRegex, fieldValue)) {
             val digitCount = match.value.count { it.isDigit() }
             if (digitCount < 7) continue
             if (!hasPhoneFormattingHint(match, fieldValue)) continue
@@ -122,6 +109,9 @@ public object FieldLinkScanner {
         return spans.sortedBy { it.start }
     }
 
+    private fun cleanMatches(regex: Regex, fieldValue: String): Sequence<MatchResult> =
+        regex.findAll(fieldValue).filterNot { containsRenderingHazard(it.value) }
+
     /**
      * True if [s] contains any Unicode Cf (Format) or Cc (Control) codepoint. These
      * include bidi controls (U+202A-U+202E, U+2066-U+2069, U+200E/U+200F, U+061C),
@@ -130,12 +120,22 @@ public object FieldLinkScanner {
      * a string without changing its byte content, breaking the "displayed string equals
      * actionable string" trust claim.
      *
-     * The check is character-by-character, O(n), and runs only against already-matched
-     * link substrings so the cost is bounded by the number of links per pass.
+     * Applied to every matched link substring, so no link target carries one.
      */
     internal fun containsRenderingHazard(s: String): Boolean = s.any { c ->
         c.category == CharCategory.FORMAT || c.isISOControl()
     }
+
+    /**
+     * The whole-field gate: [containsRenderingHazard] minus line feed, carriage return
+     * and tab, which separate paragraphs in real back fields (#251). Every other Cf or
+     * Cc codepoint, including vertical tab and form feed, still rejects the field.
+     */
+    internal fun containsFieldHazard(s: String): Boolean = s.any { c ->
+        c !in FIELD_WHITESPACE && (c.category == CharCategory.FORMAT || c.isISOControl())
+    }
+
+    private val FIELD_WHITESPACE = setOf('\n', '\r', '\t')
 
     /**
      * True if the matched phone candidate carries at least one visible formatting hint:

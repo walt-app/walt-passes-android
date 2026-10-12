@@ -331,6 +331,142 @@ class FieldLinkScannerTest {
         }
     }
 
+    // -- Multi-line fields (#251) -------------------------------------------------
+    //
+    // Line breaks and tabs separate paragraphs in real back fields. They must not
+    // suppress links, but no link target may contain one.
+
+    @Test
+    fun multiLineFieldYieldsEveryLinkWithExactRanges() {
+        val text = "Terms apply.\nHelp: https://acme.example/help\nMail support@acme.example\n" +
+            "Phone +1 555 123 4567\nThanks"
+        assertExactSpans(
+            text,
+            "https://acme.example/help" to B3UrlIntent::class.java,
+            "support@acme.example" to EmailIntent::class.java,
+            "+1 555 123 4567" to PhoneIntent::class.java,
+        )
+    }
+
+    @Test
+    fun crlfFieldYieldsEveryLinkWithExactRanges() {
+        val text = "Terms apply.\r\nhttps://acme.example/help\r\nsupport@acme.example\r\n" +
+            "+1 555 123 4567\r\n"
+        assertExactSpans(
+            text,
+            "https://acme.example/help" to B3UrlIntent::class.java,
+            "support@acme.example" to EmailIntent::class.java,
+            "+1 555 123 4567" to PhoneIntent::class.java,
+        )
+    }
+
+    @Test
+    fun tabSeparatedFieldYieldsEveryLinkWithExactRanges() {
+        val text = "Web:\thttps://acme.example/help\tMail:\tsupport@acme.example\tTel:\t+1 555 123 4567"
+        assertExactSpans(
+            text,
+            "https://acme.example/help" to B3UrlIntent::class.java,
+            "support@acme.example" to EmailIntent::class.java,
+            "+1 555 123 4567" to PhoneIntent::class.java,
+        )
+    }
+
+    @Test
+    fun urlStopsAtLineBreak() {
+        val spans = FieldLinkScanner.scan("https://acme.example/a\nnext line", source)
+        assertThat((spans.single().intent as B3UrlIntent).url).isEqualTo("https://acme.example/a")
+    }
+
+    @Test
+    fun phoneSpanningLineBreakIsRejected() {
+        // Digits continue onto the next line, so the match would carry the break.
+        val spans = FieldLinkScanner.scan("Tel +1 555 123 4567\n10203040", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun multiLineUrlContainingBidiOverrideIsRejected() {
+        val spans = FieldLinkScanner.scan(
+            "Line one\nhttps://attacker.example/\u202Egpj.elgoog//:sptth\nLine three",
+            source,
+        )
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun multiLineUrlContainingZeroWidthSpaceIsRejected() {
+        val spans = FieldLinkScanner.scan("Help:\nhttps://goog\u200Ble.com/path\n", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun bidiControlAdjacentToMatchOnMultiLineFieldRejectsTheField() {
+        val spans = FieldLinkScanner.scan("Help:\n\u202Ehttps://acme.example/help\n", source)
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun bidiControlOnAnotherLineStillRejectsTheWholeField() {
+        // Line breaks do not split the field into independent trust units.
+        val spans = FieldLinkScanner.scan(
+            "Note \u202Ereversed\nhttps://acme.example/help\nsupport@acme.example",
+            source,
+        )
+        assertThat(spans).isEmpty()
+    }
+
+    @Test
+    fun otherControlCharsStillRejectTheWholeField() {
+        listOf('\u000B', '\u000C', '\u0000', '\u0085').forEach { control ->
+            val codepoint = "U+%04X".format(control.code)
+            assertWithMessage("$codepoint must still reject the field")
+                .that(FieldLinkScanner.scan("Help:${control}https://acme.example/help", source))
+                .isEmpty()
+        }
+    }
+
+    @Test
+    fun fieldHazardAllowsOnlyLineBreaksAndTab() {
+        listOf("\n", "\r", "\t", "\r\n").forEach { whitespace ->
+            assertThat(FieldLinkScanner.containsFieldHazard("a${whitespace}b")).isFalse()
+        }
+        HAZARDS.forEach { hazard ->
+            val codepoint = "U+%04X".format(hazard.code)
+            assertWithMessage("$codepoint must be a field hazard")
+                .that(FieldLinkScanner.containsFieldHazard("safe\n$hazard"))
+                .isTrue()
+        }
+    }
+
+    @Test
+    fun renderingHazardStillFlagsLineBreaksAndTab() {
+        listOf('\n', '\r', '\t').forEach { whitespace ->
+            val codepoint = "U+%04X".format(whitespace.code)
+            assertWithMessage("$codepoint must be a match-level hazard")
+                .that(FieldLinkScanner.containsRenderingHazard("a${whitespace}b"))
+                .isTrue()
+        }
+    }
+
+    private fun assertExactSpans(text: String, vararg expected: Pair<String, Class<out SecurityIntent>>) {
+        val spans = FieldLinkScanner.scan(text, source)
+        assertThat(spans).hasSize(expected.size)
+        spans.zip(expected).forEach { (span, want) ->
+            val (target, type) = want
+            val start = text.indexOf(target)
+            assertThat(span.start).isEqualTo(start)
+            assertThat(span.endExclusive).isEqualTo(start + target.length)
+            assertThat(text.substring(span.start, span.endExclusive)).isEqualTo(target)
+            assertThat(span.intent).isInstanceOf(type)
+            val actionable = when (val intent = span.intent) {
+                is B3UrlIntent -> intent.url
+                is EmailIntent -> intent.emailAddress
+                is PhoneIntent -> intent.phoneNumber
+            }
+            assertThat(actionable).isEqualTo(target)
+        }
+    }
+
     @Test
     fun containsRenderingHazardAcceptsPlainAscii() {
         assertThat(FieldLinkScanner.containsRenderingHazard("https://example.com/path"))
@@ -338,6 +474,13 @@ class FieldLinkScannerTest {
     }
 
     private companion object {
+        // Cf and non-whitespace Cc codepoints that must reject a field.
+        val HAZARDS = listOf(
+            '\u202E', '\u202D', '\u2066', '\u2067', '\u2068', '\u2069', '\u200B',
+            '\u200E', '\u200F', '\u061C', '\uFEFF', '\u0000', '\u0007', '\u001B',
+            '\u000B', '\u000C', '\u007F', '\u0085',
+        )
+
         // ReDoS tripwire timing knobs (warm-up runs, timed runs, budget); see [fastestScanMillis].
         const val REDOS_WARMUP_RUNS = 3
         const val REDOS_TIMED_RUNS = 5

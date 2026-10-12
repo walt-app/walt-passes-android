@@ -71,11 +71,15 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
    (Right-to-Left Override), zero-width marks, or other formatting/control
    characters in a URL so the visual rendering of the string differs from the
    bytes that resolve via `Uri.parse`. Two layers:
-   - **Detection-stage rejection.** `FieldLinkScanner.containsRenderingHazard`
+   - **Detection-stage rejection.** `FieldLinkScanner.containsFieldHazard`
      rejects any field whose value contains a Unicode Cf (format) or Cc (control)
-     codepoint. The rejection is field-level: a clean URL adjacent to a hostile
-     one in the same field becomes non-tappable too, since the surrounding
-     context is untrustworthy.
+     codepoint other than line feed, carriage return or tab, which separate
+     paragraphs in real back fields and cannot reorder glyphs. The rejection is
+     field-level: a clean URL adjacent to a hostile one in the same field becomes
+     non-tappable too, since the surrounding context is untrustworthy. Every
+     match is then checked again with `containsRenderingHazard`, which allows no
+     Cf or Cc codepoint at all, line breaks and tabs included, so no link target
+     carries one.
    - **Rendering-stage isolation.** The sheet wraps every user-controlled string —
      the URL, the issuer's organization name, and the source field's label — in
      U+2068 / U+2069 (FSI / PDI) bidi isolates. Within the isolate, the Unicode
@@ -86,11 +90,14 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
 **How tested.**
 
 - `PublicApiSurfaceTest` pins the three arms of `SecurityIntent`.
-- `FieldLinkScannerTest` includes 11 bidi-spoofing cases: U+202E,
+- `FieldLinkScannerTest` includes bidi-spoofing cases: U+202E,
   U+200B (zero-width space), U+200E (LTR mark), U+061C (Arabic Letter Mark),
   ASCII control bytes, the same hazards in phone and email positions, and a
   "clean URL adjacent to hostile URL" case that asserts the entire field
-  surfaces no links. Plus `urlBytesAreVerbatimNoCfStripping` (a clean URL passes
+  surfaces no links, including when the hazard sits on another line. Multi-line
+  cases (LF, CRLF, tab) pin that links in paragraph-separated fields stay
+  tappable with exact ranges, and that a match spanning a line break is
+  rejected. Plus `urlBytesAreVerbatimNoCfStripping` (a clean URL passes
   through byte-equal — no silent sanitization) and the categorization helper
   test covering Cf and Cc enumerable points.
 - `TrustClaimSurfaceTest.securitySheetUrlIsBidiIsolated` and

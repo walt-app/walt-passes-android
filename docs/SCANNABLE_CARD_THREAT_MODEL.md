@@ -330,7 +330,7 @@ alphanumeric, Code128 the printable ASCII subset; QR, PDF417 and Aztec are
 byte-capable and admit any character), and Unicode Cf (Format) / Cc (Control)
 codepoint rejection in both `payload` and `label`. The Cf/Cc rejection runs
 before the per-format rules, so it covers the byte-capable formats too, and
-mirrors the discipline that `FieldLinkScanner.kt:67` and the PDF document-label
+mirrors the discipline that `FieldLinkScanner` and the PDF document-label
 path already enforce.
 
 The PDF417 and Aztec caps (`wpass-pl7.1`) were set to hold at any plausible
