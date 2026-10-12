@@ -45,6 +45,74 @@ class FieldLinkScannerTest {
     }
 
     @Test
+    fun emailsBesidePunctuationAndInProseKeepExactRanges() {
+        listOf(
+            "(support@acme.example)",
+            "<support@acme.example>",
+            "\"support@acme.example\"",
+            "Mail: support@acme.example.",
+            "Mail support@acme.example, or call.",
+            "Write to support@acme.example!",
+            "Mail support@acme.example\nThanks",
+        ).forEach { text ->
+            assertExactSpans(text, "support@acme.example" to EmailIntent::class.java)
+        }
+    }
+
+    @Test
+    fun emailLocalPartTakesTheWholeRun() {
+        listOf(
+            "first.last+tag@mail.acme.example",
+            "a_b%c-d@acme-1.example",
+            "Ops.Team@Acme.EXAMPLE",
+            "x@acme.example",
+        ).forEach { email ->
+            assertExactSpans("Contact $email today", email to EmailIntent::class.java)
+        }
+    }
+
+    @Test
+    fun emailDomainEndsAtTheLastValidTld() {
+        assertExactSpans("a@b.example..", "a@b.example" to EmailIntent::class.java)
+        assertExactSpans("a@b.example.c", "a@b.example" to EmailIntent::class.java)
+        assertExactSpans("a@b.example-1", "a@b.example" to EmailIntent::class.java)
+        assertExactSpans("a@b.c.de.f1", "a@b.c.de" to EmailIntent::class.java)
+    }
+
+    @Test
+    fun emailWithoutUsableDomainDoesNotLink() {
+        listOf("a@", "@acme.example", "a@acme", "a@acme.e", "a@@acme.example", "a@.").forEach { text ->
+            assertThat(FieldLinkScanner.scan(text, source)).isEmpty()
+        }
+    }
+
+    @Test
+    fun separatedEmailsAllLink() {
+        assertExactSpans(
+            "a@b.example, c@d.example;e@f.example g@h.example",
+            "a@b.example" to EmailIntent::class.java,
+            "c@d.example" to EmailIntent::class.java,
+            "e@f.example" to EmailIntent::class.java,
+            "g@h.example" to EmailIntent::class.java,
+        )
+    }
+
+    @Test
+    fun emailNeverStartsInsideAPreviousAddress() {
+        // A match may not start mid-run or right after an `@`, so only the first address links.
+        mapOf(
+            "a@b.example-c@d.example" to "a@b.example",
+            "a@b.example.c@d.example" to "a@b.example",
+            "a@b.ex1@d.example" to "a@b.ex",
+            "a@b.co1x@y.co2z@w.co" to "a@b.co",
+            "a@b.example-c@d.example@e.example" to "a@b.example",
+        ).forEach { (text, first) ->
+            assertExactSpans(text, first to EmailIntent::class.java)
+        }
+        assertThat(FieldLinkScanner.scan("a@b@c.example", source)).isEmpty()
+    }
+
+    @Test
     fun detectsInternationalPhone() {
         val spans = FieldLinkScanner.scan("Call us at +1 (555) 123-4567 anytime.", source)
         assertThat(spans.single().intent).isInstanceOf(PhoneIntent::class.java)
@@ -195,6 +263,23 @@ class FieldLinkScannerTest {
     fun mixedDigitRunScansInLinearTime() {
         // One run spanning the field, mixed by U+0663, holding 30k rejected phone matches.
         assertThat(fastestScanMillis("1234-5678 \u0663 ".repeat(30_000))).isLessThan(REDOS_BUDGET_MS)
+    }
+
+    @Test
+    fun emailLocalPartRunWithoutAtScansInLinearTime() {
+        assertThat(fastestScanMillis("a".repeat(200_000))).isLessThan(REDOS_BUDGET_MS)
+    }
+
+    @Test
+    fun emailDomainWithoutTldScansInLinearTime() {
+        // The domain never ends in a TLD, and is itself one long local-part run.
+        assertThat(fastestScanMillis("a@" + "a.".repeat(100_000))).isLessThan(REDOS_BUDGET_MS)
+    }
+
+    @Test
+    fun phoneShapedLocalPartRunScansInLinearTime() {
+        // One unbroken local-part run without `@`, holding 22k phone matches.
+        assertThat(fastestScanMillis("+12345678".repeat(22_000))).isLessThan(REDOS_BUDGET_MS)
     }
 
     /**

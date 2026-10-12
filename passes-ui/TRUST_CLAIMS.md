@@ -94,9 +94,12 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
      those separators and `+-()`) holding any non-ASCII decimal digit yields no
      link rather than a truncated one; a run joins across a space, so a non-ASCII
      digit one space away drops the whole phone number. Run detection is one
-     linear pass per field. The patterns spell out explicit character classes
-     rather than `\s` / `\d`, so the JVM unit tests describe the behaviour on
-     Android.
+     linear pass per field. An email match starts only where a run of
+     local-part characters starts, and never right after an `@`, so a long run
+     without a usable `@` is read once rather than once per position. The
+     patterns spell out explicit character classes rather than `\s` / `\d`, so
+     the JVM unit tests describe which strings match on Android; the timing
+     tripwires run on the JVM engine only, not ICU.
    - **Rendering-stage isolation.** The sheet wraps every user-controlled string —
      the URL, the issuer's organization name, and the source field's label — in
      U+2068 / U+2069 (FSI / PDI) bidi isolates. Within the isolate, the Unicode
@@ -120,8 +123,8 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
   supplementary-plane TAG character is rejected. Engine-independence cases pin
   phone numbers spaced with U+00A0 / U+202F as one span, and Arabic-Indic,
   fullwidth or mixed ASCII and non-ASCII digit runs as unlinked. Timing
-  tripwires catch quadratic regressions in phone matching and mixed-digit run
-  detection. Plus `urlBytesAreVerbatimNoCfStripping`
+  tripwires catch quadratic regressions in phone and email matching and
+  mixed-digit run detection. Plus `urlBytesAreVerbatimNoCfStripping`
   (a clean URL passes through byte-equal — no silent sanitization) and the
   categorization helper test covering Cf and Cc enumerable points.
 - `TrustClaimSurfaceTest.securitySheetUrlIsBidiIsolated` and
