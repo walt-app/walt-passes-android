@@ -185,6 +185,18 @@ class FieldLinkScannerTest {
         assertThat(fastestScanMillis(pathological)).isLessThan(REDOS_BUDGET_MS)
     }
 
+    @Test
+    fun phoneDenseFieldScansInLinearTime() {
+        // Every `+` is a hint and starts a new 8-digit match inside one long run.
+        assertThat(fastestScanMillis("+12345678 ".repeat(30_000))).isLessThan(REDOS_BUDGET_MS)
+    }
+
+    @Test
+    fun mixedDigitRunScansInLinearTime() {
+        // One run spanning the field, mixed by U+0663, holding 30k rejected phone matches.
+        assertThat(fastestScanMillis("1234-5678 \u0663 ".repeat(30_000))).isLessThan(REDOS_BUDGET_MS)
+    }
+
     /**
      * Scans [input] several times and returns the FASTEST run in milliseconds — the timing
      * method the ReDoS tripwires assert on. The untimed warm-up absorbs the cold-JIT compile
@@ -509,6 +521,7 @@ class FieldLinkScannerTest {
         listOf(
             "Call 0800 555 010\uD835\uDFD7 now", // trailing U+1D7D7 MATHEMATICAL BOLD DIGIT NINE
             "Call \uFF11800-555-0100 now", // leading fullwidth one
+            "Call \uD835\uDFD7800-555-0100 now", // leading U+1D7D7 MATHEMATICAL BOLD DIGIT NINE
             "Call 555-123-4567\u0663 now", // trailing Arabic-Indic three
         ).forEach { text ->
             assertWithMessage(text).that(FieldLinkScanner.scan(text, source)).isEmpty()
@@ -536,6 +549,7 @@ class FieldLinkScannerTest {
                 .that(FieldLinkScanner.containsFieldHazard("safe\n$hazard"))
                 .isTrue()
         }
+        assertThat(FieldLinkScanner.containsFieldHazard("a\r\r\nb")).isTrue()
     }
 
     @Test

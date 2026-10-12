@@ -82,18 +82,21 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
      untrustworthy. This gate is what keeps Cf and Cc codepoints out of every
      match. Every match is then checked again with `containsRenderingHazard`,
      which rejects any Cf or Cc codepoint (line feed, carriage return and tab
-     included) and U+2028 / U+2029; no pattern can match what the field gate
-     admits, so this is defence in depth that becomes load-bearing only if a gate
-     or pattern is relaxed. Both checks classify code points, not UTF-16 units, so
-     supplementary-plane format characters (e.g. TAG characters U+E0001,
-     U+E0020-U+E007F) are caught. URLs end at any Unicode White_Space character.
-     Phone numbers use ASCII digits only, so the dialled digits are exactly the
-     ones displayed, on any engine; the only whitespace admitted between digit
-     groups is U+0020, U+00A0, U+2007, U+2009 or U+202F, so a match never crosses
-     a tab or line break, and a digit run that mixes in non-ASCII digits yields no
-     link rather than a truncated one. The patterns spell out explicit character
-     classes rather than `\s` / `\d`, so the JVM unit tests describe the
-     behaviour on Android.
+     included) and U+2028 / U+2029; no pattern can match the line feed, tab or
+     CRLF the field gate admits, so this is defence in depth that becomes
+     load-bearing only if a gate or pattern is relaxed. Both checks classify code
+     points, not UTF-16 units, so supplementary-plane format characters (e.g. TAG
+     characters U+E0001, U+E0020-U+E007F) are caught. URLs end at any Unicode
+     White_Space character. Phone numbers use ASCII digits only, so the dialled
+     digits are exactly the ones displayed, on any engine; the only whitespace
+     admitted between digit groups is U+0020, U+00A0, U+2007, U+2009 or U+202F,
+     so a match never crosses a tab or line break. A run (decimal digits plus
+     those separators and `+-()`) holding any non-ASCII decimal digit yields no
+     link rather than a truncated one; a run joins across a space, so a non-ASCII
+     digit one space away drops the whole phone number. Run detection is one
+     linear pass per field. The patterns spell out explicit character classes
+     rather than `\s` / `\d`, so the JVM unit tests describe the behaviour on
+     Android.
    - **Rendering-stage isolation.** The sheet wraps every user-controlled string —
      the URL, the issuer's organization name, and the source field's label — in
      U+2068 / U+2069 (FSI / PDI) bidi isolates. Within the isolate, the Unicode
@@ -116,9 +119,11 @@ the verbatim URL the host is about to open, and a "Confirm" / "Cancel" pair.
   U+2028 or U+2029 leaves the field with no links, and that a URL containing a
   supplementary-plane TAG character is rejected. Engine-independence cases pin
   phone numbers spaced with U+00A0 / U+202F as one span, and Arabic-Indic,
-  fullwidth or mixed ASCII and non-ASCII digit runs as unlinked. Plus
-  `urlBytesAreVerbatimNoCfStripping` (a clean URL passes through byte-equal — no silent sanitization) and the categorization helper
-  test covering Cf and Cc enumerable points.
+  fullwidth or mixed ASCII and non-ASCII digit runs as unlinked. Timing
+  tripwires pin that phone matching and mixed-digit run detection stay linear
+  in field length. Plus `urlBytesAreVerbatimNoCfStripping`
+  (a clean URL passes through byte-equal — no silent sanitization) and the
+  categorization helper test covering Cf and Cc enumerable points.
 - `TrustClaimSurfaceTest.securitySheetUrlIsBidiIsolated` and
   `securitySheetIsolatesOrganizationName` verify the sheet's rendered text is
   bracketed by FSI / PDI.

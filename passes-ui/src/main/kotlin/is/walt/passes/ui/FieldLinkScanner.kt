@@ -26,7 +26,9 @@ package `is`.walt.passes.ui
  * - A phone number requires at least seven ASCII digits AND at least one formatting
  *   hint (a leading `+`, an ASCII space, dash, or parenthesis) before it is recognised.
  *   Digit groups may be separated by U+0020, U+00A0, U+2007, U+2009 or U+202F. A run
- *   that mixes in non-ASCII digits yields no link rather than a truncated one.
+ *   (decimal digits plus those separators and `+-()`) holding any non-ASCII decimal
+ *   digit yields no link rather than a truncated one; since a run joins across a
+ *   space, a non-ASCII digit one space away drops the whole phone number.
  *   Bare digit runs — ticket numbers, order IDs, member numbers, barcode payloads —
  *   are left as plain text. This mirrors Apple's data-detector behavior in iOS Wallet
  *   and prevents two failure modes: (a) accidental "Call this number?" prompts on
@@ -46,8 +48,9 @@ package `is`.walt.passes.ui
  *   is what keeps Cf and Cc codepoints out of every match.
  * - Match level ([containsRenderingHazard]): every match is also rejected if it
  *   contains ANY Cf or Cc codepoint (line feed, carriage return and tab included) or
- *   U+2028 / U+2029. No pattern can match what the field gate admits, so this is
- *   defence in depth; it becomes load-bearing only if a gate or pattern is relaxed.
+ *   U+2028 / U+2029. No pattern can match the line feed, tab or CRLF the field gate
+ *   admits, so this is defence in depth; it becomes load-bearing only if a gate or
+ *   pattern is relaxed.
  *
  * Every pattern spells out its character classes instead of `\s` / `\d`, which are
  * Unicode-aware on Android (ICU) but ASCII-only on the JVM, so unit tests describe
@@ -77,10 +80,8 @@ public object FieldLinkScanner {
     public fun scan(fieldValue: String, source: SourceField): List<LinkSpan> {
         if (containsFieldHazard(fieldValue)) return emptyList()
 
-        val spans = mutableListOf<LinkSpan>()
-
-        for (match in cleanMatches(urlRegex, fieldValue)) {
-            spans += LinkSpan(
+        val urls = cleanMatches(urlRegex, fieldValue).map { match ->
+            LinkSpan(
                 start = match.range.first,
                 endExclusive = match.range.last + 1,
                 intent = B3UrlIntent(
@@ -89,30 +90,45 @@ public object FieldLinkScanner {
                     registrableDomain = registrableDomainOf(match.value),
                 ),
             )
-        }
+        }.toList()
 
-        for (match in cleanMatches(emailRegex, fieldValue)) {
-            // Skip emails inside an already-claimed URL span (avoid double-marking
-            // "http://x@y.com").
-            if (overlapsExisting(match.range.first, match.range.last + 1, spans)) continue
-            spans += LinkSpan(
-                start = match.range.first,
-                endExclusive = match.range.last + 1,
-                intent = EmailIntent(emailAddress = match.value, sourceField = source),
-            )
-        }
+        // Skip emails inside an already-claimed URL span (avoid double-marking "http://x@y.com").
+        val urlClaims = ClaimedRanges(urls)
+        val emails = cleanMatches(emailRegex, fieldValue)
+            .filterNot { urlClaims.overlaps(it.range.first, it.range.last + 1) }
+            .map { match ->
+                LinkSpan(
+                    start = match.range.first,
+                    endExclusive = match.range.last + 1,
+                    intent = EmailIntent(emailAddress = match.value, sourceField = source),
+                )
+            }.toList()
 
-        for (match in cleanMatches(phoneRegex, fieldValue)) {
-            if (!isLinkablePhone(match, fieldValue)) continue
-            if (overlapsExisting(match.range.first, match.range.last + 1, spans)) continue
-            spans += LinkSpan(
-                start = match.range.first,
-                endExclusive = match.range.last + 1,
-                intent = PhoneIntent(phoneNumber = match.value.trim(), sourceField = source),
-            )
-        }
+        val claims = ClaimedRanges((urls + emails).sortedBy { it.start })
+        val mixedRuns by lazy(LazyThreadSafetyMode.NONE) { mixedDigitRuns(fieldValue) }
+        val phones = cleanMatches(phoneRegex, fieldValue)
+            .filter { isLinkablePhone(it, fieldValue) }
+            .filterNot { mixedRuns?.get(it.range.first) == true }
+            .filterNot { claims.overlaps(it.range.first, it.range.last + 1) }
+            .map { match ->
+                LinkSpan(
+                    start = match.range.first,
+                    endExclusive = match.range.last + 1,
+                    intent = PhoneIntent(phoneNumber = match.value.trim(), sourceField = source),
+                )
+            }.toList()
 
-        return spans.sortedBy { it.start }
+        return (urls + emails + phones).sortedBy { it.start }
+    }
+
+    /** Overlap queries for ascending, disjoint ranges against sorted, disjoint [claimed] spans; linear overall. */
+    private class ClaimedRanges(private val claimed: List<LinkSpan>) {
+        private var next = 0
+
+        fun overlaps(start: Int, endExclusive: Int): Boolean {
+            while (next < claimed.size && claimed[next].endExclusive <= start) next++
+            return next < claimed.size && claimed[next].start < endExclusive
+        }
     }
 
     private fun cleanMatches(regex: Regex, fieldValue: String): Sequence<MatchResult> =
@@ -152,23 +168,37 @@ public object FieldLinkScanner {
     )
 
     private fun isLinkablePhone(match: MatchResult, text: String): Boolean =
-        match.value.count { it.isDigit() } >= 7 &&
-            hasPhoneFormattingHint(match, text) &&
-            !inMixedDigitRun(match, text)
+        match.value.count { it.isDigit() } >= 7 && hasPhoneFormattingHint(match, text)
 
-    // A phone match inside a digit run that mixes in non-ASCII digits is a truncated slice
-    // of what the user reads as one number, so it is dropped.
-    private fun inMixedDigitRun(match: MatchResult, text: String): Boolean {
-        var start = match.range.first
-        while (start > 0 && isPhoneRunChar(text.codePointBefore(start))) {
-            start -= Character.charCount(text.codePointBefore(start))
+    /**
+     * Flags, in one linear pass, every index inside a run (decimal digits plus the phone
+     * separators and `+-()`) that holds a non-ASCII decimal digit; null when none does.
+     * A phone match in such a run is a truncated slice of what the user reads as one
+     * number, so it is dropped. Runs join across a space, so a non-ASCII digit one space
+     * away from a phone number drops the whole phone.
+     */
+    private fun mixedDigitRuns(text: String): BooleanArray? {
+        var flags: BooleanArray? = null
+        var runStart = 0
+        var mixed = false
+        var i = 0
+        while (i <= text.length) {
+            // Index text.length acts as a terminating non-run character.
+            val cp = if (i < text.length) text.codePointAt(i) else -1
+            val next = i + if (cp >= 0) Character.charCount(cp) else 1
+            val inRun = cp >= 0 && isPhoneRunChar(cp)
+            if (inRun) mixed = mixed || isNonAsciiDigit(cp)
+            if (!inRun && mixed) flags = (flags ?: BooleanArray(text.length)).apply { fill(true, runStart, i) }
+            if (!inRun) {
+                mixed = false
+                runStart = next
+            }
+            i = next
         }
-        var end = match.range.last + 1
-        while (end < text.length && isPhoneRunChar(text.codePointAt(end))) {
-            end += Character.charCount(text.codePointAt(end))
-        }
-        return text.substring(start, end).codePoints().anyMatch { isDecimalDigit(it) && it !in '0'.code..'9'.code }
+        return flags
     }
+
+    private fun isNonAsciiDigit(cp: Int): Boolean = isDecimalDigit(cp) && cp !in '0'.code..'9'.code
 
     private fun isPhoneRunChar(cp: Int): Boolean = isDecimalDigit(cp) || cp in PHONE_RUN_PUNCTUATION
 
@@ -177,39 +207,14 @@ public object FieldLinkScanner {
     private val PHONE_RUN_PUNCTUATION =
         setOf(' ', '\u00A0', '\u2007', '\u2009', '\u202F', '-', '(', ')', '+').map { it.code }.toSet()
 
-    /**
-     * True if the matched phone candidate carries at least one visible formatting hint:
-     * an internal `+`, dash, or ASCII space, OR an immediately adjacent `+` /
-     * `(` before the match or `)` after it. A bare digit run with no formatting and no
-     * adjacent paren or `+` is rejected.
-     *
-     * The two-stage check (internal + adjacent) handles the regex quirk that the inner
-     * pattern starts with `\+?[0-9]`, so a phone written as `(5551234567)` matches only
-     * the digits — the parens stay outside the match. Without an adjacency check those
-     * inputs would lose their hints and be rejected. The space character is *not*
-     * accepted as an adjacency hint: surrounding spaces are the default text rhythm and
-     * would re-admit every numeric reference value (the wpass-536 regression).
-     *
-     * The check matches Apple's data-detector posture: numeric strings without
-     * formatting hints (ticket numbers, order IDs, barcodes, member numbers) are left
-     * non-tappable. This is the wpass-536 regression guard — the prior implementation
-     * fired on any 7+-digit run and turned every reference-number field into an
-     * accidental "Call this number?" prompt. It is also a meaningful narrowing of the
-     * attack surface: a malicious pass author can no longer plant a premium-rate dial
-     * string in a field labeled `ticketNumber` and rely on auto-detection to surface it.
-     */
+    // Hint: an internal `+`, dash or ASCII space, or an adjacent `+` / `(` before or `)` after.
+    // Surrounding spaces are not hints, or every spaced reference number would dial.
     private fun hasPhoneFormattingHint(match: MatchResult, fullText: String): Boolean {
         if (match.value.any { it in INTERNAL_PHONE_HINTS }) return true
         val before = fullText.getOrNull(match.range.first - 1)
         val after = fullText.getOrNull(match.range.last + 1)
         return before in PHONE_PREFIX_HINTS || after == ')'
     }
-
-    private fun overlapsExisting(
-        start: Int,
-        endExclusive: Int,
-        existing: List<LinkSpan>,
-    ): Boolean = existing.any { it.start < endExclusive && start < it.endExclusive }
 
     // A phone match starts and ends on an ASCII digit, so surrounding parens are found by
     // adjacency. No-break spaces are not hints: such a number without `+` stays unlinked.
