@@ -19,8 +19,8 @@ import kotlin.time.Duration.Companion.milliseconds
  *
  * Every field here is enforced INSIDE the sandbox. [decodeTimeoutMs] is additionally read by the
  * host, which compares elapsed time against it to attribute a dropped binder — see
- * [BarcodeDecodeClient]. The host's own bind bound is not a sandbox cap and lives with the host
- * code, on [DefaultBarcodeImageDecoder].
+ * [BarcodeDecodeClient]. The host's bind deadline is not a sandbox cap; it lives in the shared
+ * `passes-isolation` session factory.
  *
  * Exposed as constants so tests and the service refer to the same numbers and changing a
  * default is a deliberate, test-breaking edit.

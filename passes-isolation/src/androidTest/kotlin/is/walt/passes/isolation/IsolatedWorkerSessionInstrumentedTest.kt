@@ -8,7 +8,8 @@ import org.junit.runner.RunWith
 /**
  * Instrumented coverage for [AndroidIsolatedWorkerSessionFactory]. The real `bindService`
  * round trip — connect, hand the binder to `wrapBinder`, transact, and unbind on `close` —
- * is the part the JVM suite cannot exercise (Robolectric stubs `bindService`). The two
+ * against a real isolated process is what Robolectric cannot reach; the bind dance itself is
+ * unit-tested in [AndroidIsolatedWorkerSessionFactoryTest]. The two
  * concrete consumers (`passes-pdf`'s renderer, `passes-barcode`'s decoder) prove the
  * end-to-end path through their own instrumented tests; this module-level test pins the
  * shared facade's contract directly so a regression in the bind dance surfaces here rather
@@ -16,9 +17,8 @@ import org.junit.runner.RunWith
  *
  * @Ignore'd at check-in (no emulator on a workstation). CI's connected-tests matrix currently
  * covers only `:passes-storage` (see `.github/workflows/ci.yml`), so a `:passes-isolation`
- * device matrix has to be added before these run; that wiring rides with wpass-zrt.5's
- * on-device suite. The double-resume-on-rebind guard in [AndroidIsolatedWorkerSessionFactory]
- * is the unit-untestable behaviour these would pin (see `connectSurvivesServiceRestart`).
+ * device matrix has to be added before these run. The rebind guard is unit-tested against a
+ * simulated callback; `connectSurvivesServiceRestart` would prove it against a real restart.
  */
 @RunWith(AndroidJUnit4::class)
 class IsolatedWorkerSessionInstrumentedTest {

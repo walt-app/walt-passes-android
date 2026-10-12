@@ -10,10 +10,15 @@ import android.os.Looper
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Shadows.shadowOf
@@ -61,7 +66,7 @@ class AndroidIsolatedWorkerSessionFactoryTest {
         runCurrent()
         assertThat(shadowOf(app).boundServiceConnections).hasSize(1)
 
-        advanceTimeBy(BIND_TIMEOUT_MS - 1)
+        advanceTimeBy(AndroidIsolatedWorkerSessionFactory.BIND_TIMEOUT_MS - 1)
         runCurrent()
         assertThat(pending.isCompleted).isFalse()
 
@@ -100,7 +105,74 @@ class AndroidIsolatedWorkerSessionFactoryTest {
         session.close()
     }
 
+    @Test
+    fun callerCancelledAfterTheBindResumesLeavesNothingBound() = runTest {
+        shadowOf(app).setComponentNameAndServiceForBindService(component, binder)
+        val pending = async { factory.connect() }
+        runCurrent()
+        shadowOf(Looper.getMainLooper()).idle()
+
+        pending.cancel()
+        runCurrent()
+
+        assertThat(shadowOf(app).boundServiceConnections).isEmpty()
+    }
+
+    @Test
+    fun sessionArrivingAfterTheDeadlineIsClosedNotStranded() = runTest {
+        // NonCancellable lets bind() return after the deadline has already fired.
+        val session = RecordingSession()
+        val result =
+            AndroidIsolatedWorkerSessionFactory.connectWithin(TIMEOUT_MS) {
+                withContext(NonCancellable) { delay(TIMEOUT_MS + 1) }
+                ConnectResult.Connected(session)
+            }
+
+        assertThat(result).isEqualTo(ConnectResult.BindFailed)
+        assertThat(session.closeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun sessionReturnedToACancelledCallerIsClosed() = runTest {
+        val session = RecordingSession()
+        val caller =
+            launch {
+                val self = coroutineContext.job
+                AndroidIsolatedWorkerSessionFactory.connectWithin(TIMEOUT_MS) {
+                    self.cancel()
+                    ConnectResult.Connected(session)
+                }
+            }
+        caller.join()
+
+        assertThat(caller.isCancelled).isTrue()
+        assertThat(session.closeCount).isEqualTo(1)
+    }
+
+    @Test
+    fun sessionReturnedInTimeIsHandedOverOpen() = runTest {
+        val session = RecordingSession()
+        val result = AndroidIsolatedWorkerSessionFactory.connectWithin(TIMEOUT_MS) { ConnectResult.Connected(session) }
+
+        assertThat((result as ConnectResult.Connected).session).isSameInstanceAs(session)
+        assertThat(session.closeCount).isEqualTo(0)
+    }
+
+    private class RecordingSession : IsolatedWorkerSession<Unit> {
+        override val client: Unit = Unit
+        var closeCount: Int = 0
+            private set
+
+        override fun close() {
+            closeCount++
+        }
+    }
+
     private class FakeService : Service() {
         override fun onBind(intent: Intent?): IBinder? = null
+    }
+
+    private companion object {
+        const val TIMEOUT_MS = 1_000L
     }
 }
