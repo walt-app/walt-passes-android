@@ -72,7 +72,7 @@ jobs:
       fail-fast: false
       matrix:
         api: [28, 31, 34, 36]
-    # Five emulator cycles per leg, seven on API 34; replace with observed wall-clock.
+    # Measured: 4.5 to 8.5min for the five-cycle legs, 9.5min for API 34's seven cycles.
     timeout-minutes: ${{ matrix.api == 34 && 90 || 70 }}
     steps:
       - name: Checkout
