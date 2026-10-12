@@ -37,7 +37,7 @@ class SignatureVerifierNeverThrowsTest {
         val faults = listOf(IllegalStateException("cert missing"), CertificateException("corrupt cert"))
         for (fault in faults) {
             val result =
-                verifySignatureWithTrustLoader(chain.signature, chain.manifest, ParserConfig()) {
+                verifySignatureWithTrustLoaderForTesting(chain.signature, chain.manifest, ParserConfig()) {
                     throw fault
                 }
             assertWithMessage(fault.toString()).that(result).isEqualTo(CRYPTO_FAILURE)
@@ -46,8 +46,8 @@ class SignatureVerifierNeverThrowsTest {
 
     @Test
     fun trustLoaderFaultIsNotStickyOnceTheLoaderRecovers() {
-        // A failing `by lazy` initializer retries on the next call; the verifier must not
-        // remember the earlier fault either.
+        // Locks that the verifier keeps no state between calls: a loader fault on one call
+        // does not change the verdict of the next.
         val chain = signedChain()
         var calls = 0
         val loader = {
@@ -56,78 +56,21 @@ class SignatureVerifierNeverThrowsTest {
             setOf(chain.anchor) to emptySet<X509Certificate>()
         }
 
-        val first = verifySignatureWithTrustLoader(chain.signature, chain.manifest, ParserConfig(), loader)
-        val second = verifySignatureWithTrustLoader(chain.signature, chain.manifest, ParserConfig(), loader)
+        val first = verifySignatureWithTrustLoaderForTesting(chain.signature, chain.manifest, ParserConfig(), loader)
+        val second = verifySignatureWithTrustLoaderForTesting(chain.signature, chain.manifest, ParserConfig(), loader)
 
         assertThat(first).isEqualTo(CRYPTO_FAILURE)
         assertThat(second).isEqualTo(SignatureVerifyResult.Ok(SignatureStatus.AppleVerified))
     }
 
     @Test
-    fun malformedEnvelopesAreRejected() {
+    fun malformedEnvelopesFailWithTheirPinnedReason() {
         val valid = selfSignedEnvelope()
-        val contentInfo = ContentInfo.getInstance(valid)
-        val signedData = SignedData.getInstance(contentInfo.content)
-        val signer = SignerInfo.getInstance(signedData.signerInfos.getObjectAt(0))
-        val bogusAlg = AlgorithmIdentifier(ASN1ObjectIdentifier("1.3.6.1.4.1.99999.1"))
-        val corpus =
-            mapOf(
-                "lone SEQUENCE tag" to byteArrayOf(0x30),
-                "indefinite header, no content" to bytes(0x30, 0x80),
-                "indefinite empty SEQUENCE" to bytes(0x30, 0x80, 0x00, 0x00),
-                "outer length near Int.MAX_VALUE" to withOuterLength(valid, bytes(0x84, 0x7F, 0xFF, 0xFF, 0xFF)),
-                "nine-byte length field" to bytes(0x30, 0x89) + ByteArray(9) { 0xFF.toByte() },
-                "encapsulated content of unknown type" to
-                    withSignedData(
-                        contentInfo,
-                        SignedData(
-                            signedData.digestAlgorithms,
-                            ContentInfo(bogusAlg.algorithm, null),
-                            signedData.certificates,
-                            null,
-                            signedData.signerInfos,
-                        ),
-                    ),
-                "empty SignedData SEQUENCE" to der(ContentInfo(CMSObjectIdentifiers.signedData, DERSequence())),
-                "SignedData is an OCTET STRING of noise" to
-                    der(ContentInfo(CMSObjectIdentifiers.signedData, DEROctetString(noise(256)))),
-                "SignedData holds nested noise" to
-                    der(
-                        ContentInfo(
-                            CMSObjectIdentifiers.signedData,
-                            DERSequence(arrayOf(DERSequence(DEROctetString(noise(64))), ASN1Integer(7))),
-                        ),
-                    ),
-                "deeply nested indefinite SEQUENCEs" to nestedIndefinite(depth = 4096),
-                "unknown digest algorithm" to
-                    withSigner(contentInfo, signedData, signer.copy(digestAlg = bogusAlg)),
-                "unknown signature algorithm" to
-                    withSigner(contentInfo, signedData, signer.copy(sigAlg = bogusAlg)),
-                "signed attributes hold a non-attribute" to
-                    withSigner(contentInfo, signedData, signer.copy(signedAttrs = DERSet(ASN1Integer(1)))),
-                "empty signature value" to
-                    withSigner(contentInfo, signedData, signer.copy(sig = DEROctetString(ByteArray(0)))),
-            )
-        for ((label, blob) in corpus) {
-            assertRejected(label, blob)
-        }
-    }
+        val corpus = byteLevelCorpus(valid) + structuralCorpus(ContentInfo.getInstance(valid))
 
-    @Test
-    fun envelopesWithNoSignerOrNoCertificatesReportTheMissingCert() {
-        val contentInfo = ContentInfo.getInstance(selfSignedEnvelope())
-        val signedData = SignedData.getInstance(contentInfo.content)
-        val noSigners =
-            SignedData(signedData.digestAlgorithms, signedData.encapContentInfo, DERSet(), null, DERSet())
-        val noCerts =
-            SignedData(signedData.digestAlgorithms, signedData.encapContentInfo, null, null, signedData.signerInfos)
-
-        for ((label, sd) in mapOf("no signers, no certs" to noSigners, "signer without certs" to noCerts)) {
-            val result = verify(withSignedData(contentInfo, sd))
-            assertWithMessage(label)
-                .that(result)
-                .isEqualTo(SignatureVerifyResult.Failed(TamperReason.SignerCertificateMissing))
-        }
+        val actual = corpus.mapValues { (_, case) -> verify(case.first) }
+        val expected = corpus.mapValues { (_, case) -> SignatureVerifyResult.Failed(case.second) }
+        assertThat(actual).containsExactlyEntriesIn(expected)
     }
 
     @Test
@@ -187,33 +130,55 @@ class SignatureVerifierNeverThrowsTest {
         }
     }
 
+    private fun byteLevelCorpus(valid: ByteArray): Map<String, Pair<ByteArray, TamperReason>> =
+        mapOf(
+            "lone SEQUENCE tag" to (byteArrayOf(0x30) to CRYPTO),
+            "indefinite header, no content" to (bytes(0x30, 0x80) to CRYPTO),
+            "indefinite empty SEQUENCE" to (bytes(0x30, 0x80, 0x00, 0x00) to CRYPTO),
+            "outer length near Int.MAX_VALUE" to
+                (withOuterLength(valid, bytes(0x84, 0x7F, 0xFF, 0xFF, 0xFF)) to CRYPTO),
+            "nine-byte length field" to (bytes(0x30, 0x89) + ByteArray(9) { 0xFF.toByte() } to CRYPTO),
+            "nesting past BouncyCastle's 32-level limit" to (nestedIndefinite(depth = 64) to CRYPTO),
+            "empty SignedData SEQUENCE" to (cmsOf(DERSequence()) to CRYPTO),
+            "SignedData is an OCTET STRING of noise" to (cmsOf(DEROctetString(noise(256))) to CRYPTO),
+            "SignedData holds nested noise" to
+                (cmsOf(DERSequence(arrayOf(DERSequence(DEROctetString(noise(64))), ASN1Integer(7)))) to CRYPTO),
+        )
+
+    private fun structuralCorpus(contentInfo: ContentInfo): Map<String, Pair<ByteArray, TamperReason>> {
+        val sd = SignedData.getInstance(contentInfo.content)
+        val signer = SignerInfo.getInstance(sd.signerInfos.getObjectAt(0))
+
+        fun envelope(
+            encap: ContentInfo = sd.encapContentInfo,
+            certs: ASN1Set? = sd.certificates,
+            signers: ASN1Set = sd.signerInfos,
+        ): ByteArray = cmsOf(SignedData(sd.digestAlgorithms, encap, certs, null, signers))
+
+        fun withSigner(changed: SignerInfo): ByteArray = envelope(signers = DERSet(changed))
+
+        return mapOf(
+            "encapsulated content of unknown type" to
+                (envelope(encap = ContentInfo(BOGUS_ALG.algorithm, null)) to CRYPTO),
+            "no signers, no certs" to (envelope(certs = DERSet(), signers = DERSet()) to MISSING_CERT),
+            "signer without certs" to (envelope(certs = null) to MISSING_CERT),
+            "unknown digest algorithm" to (withSigner(signer.copy(digestAlg = BOGUS_ALG)) to CRYPTO),
+            "unknown signature algorithm" to (withSigner(signer.copy(sigAlg = BOGUS_ALG)) to CRYPTO),
+            "signed attributes hold a non-attribute" to
+                (withSigner(signer.copy(signedAttrs = DERSet(ASN1Integer(1)))) to CRYPTO),
+            "empty signature value" to
+                (withSigner(signer.copy(sig = DEROctetString(ByteArray(0)))) to TamperReason.ManifestSignatureMismatch),
+        )
+    }
+
+    private fun cmsOf(content: ASN1Encodable): ByteArray = der(ContentInfo(CMSObjectIdentifiers.signedData, content))
+
     private fun SignerInfo.copy(
         digestAlg: AlgorithmIdentifier = digestAlgorithm,
         signedAttrs: ASN1Set? = authenticatedAttributes,
         sigAlg: AlgorithmIdentifier = digestEncryptionAlgorithm,
         sig: DEROctetString = DEROctetString(encryptedDigest.octets),
     ): SignerInfo = SignerInfo(sid, digestAlg, signedAttrs, sigAlg, sig, unauthenticatedAttributes)
-
-    private fun withSigner(
-        contentInfo: ContentInfo,
-        signedData: SignedData,
-        signer: SignerInfo,
-    ): ByteArray =
-        withSignedData(
-            contentInfo,
-            SignedData(
-                signedData.digestAlgorithms,
-                signedData.encapContentInfo,
-                signedData.certificates,
-                signedData.crLs,
-                DERSet(signer),
-            ),
-        )
-
-    private fun withSignedData(
-        contentInfo: ContentInfo,
-        signedData: SignedData,
-    ): ByteArray = der(ContentInfo(contentInfo.contentType, signedData))
 
     private fun withOuterLength(
         valid: ByteArray,
@@ -235,7 +200,10 @@ class SignatureVerifierNeverThrowsTest {
 
     companion object {
         private val MANIFEST = "{\"pass.json\":\"abcd\"}".toByteArray()
-        private val CRYPTO_FAILURE = SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure)
+        private val CRYPTO = TamperReason.SignatureCryptoFailure
+        private val MISSING_CERT = TamperReason.SignerCertificateMissing
+        private val CRYPTO_FAILURE = SignatureVerifyResult.Failed(CRYPTO)
+        private val BOGUS_ALG = AlgorithmIdentifier(ASN1ObjectIdentifier("1.3.6.1.4.1.99999.1"))
 
         @BeforeClass
         @JvmStatic

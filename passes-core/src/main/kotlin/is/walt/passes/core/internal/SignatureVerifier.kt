@@ -100,16 +100,23 @@ internal fun verifySignature(
     manifestBytes: ByteArray,
     config: ParserConfig,
 ): SignatureVerifyResult =
-    verifySignatureWithTrustLoader(signatureBytes, manifestBytes, config) {
+    verifyWithTrustLoader(signatureBytes, manifestBytes, config) {
         AppleTrustAnchors.trustAnchors() to AppleTrustAnchors.knownIntermediates()
     }
 
 /**
- * The one `runCatching` both entrypoints share. `internal` so a test can inject a
- * faulting [loadTrust], which returns trust anchors and known intermediates.
- * Production callers go through [verifySignature].
+ * **Test seam, DO NOT call from production code.** Lets a test inject a faulting
+ * [loadTrust], which returns the trust anchors and known intermediates.
  */
-internal fun verifySignatureWithTrustLoader(
+internal fun verifySignatureWithTrustLoaderForTesting(
+    signatureBytes: ByteArray,
+    manifestBytes: ByteArray,
+    config: ParserConfig,
+    loadTrust: () -> Pair<Set<TrustAnchor>, Set<X509Certificate>>,
+): SignatureVerifyResult = verifyWithTrustLoader(signatureBytes, manifestBytes, config, loadTrust)
+
+/** The one `runCatching` every entrypoint shares. */
+private fun verifyWithTrustLoader(
     signatureBytes: ByteArray,
     manifestBytes: ByteArray,
     config: ParserConfig,
@@ -145,7 +152,7 @@ internal fun verifySignatureAgainstAnchorsForTesting(
     trustAnchors: Set<TrustAnchor>,
     knownIntermediates: Set<X509Certificate>,
 ): SignatureVerifyResult =
-    verifySignatureWithTrustLoader(signatureBytes, manifestBytes, config) {
+    verifyWithTrustLoader(signatureBytes, manifestBytes, config) {
         trustAnchors to knownIntermediates
     }
 
@@ -222,8 +229,8 @@ private val BC_PROVIDER: BouncyCastleProvider by lazy { BouncyCastleProvider() }
 private fun firstSignerWithCert(signedData: CMSSignedData): SignerWithHolder? {
     val signer = signedData.signerInfos.signers.firstOrNull() ?: return null
     val store = signedData.holderStore()
-    // Issuer+serial can collide in a crafted envelope, making this pick arbitrary. Safe:
-    // verifyMath must pass under the picked cert's key, so a wrong pick only fails.
+    // The signer ID can match several certs in a crafted envelope. Safe: the picked cert
+    // must verify the signature and chain on its own, so a wrong pick cannot raise trust.
     val holder = store.getMatches(signer.sid.asHolderSelector()).firstOrNull()
     return holder?.let { SignerWithHolder(signer, it) }
 }
@@ -443,8 +450,8 @@ private fun isLeafOnlyAndSelfSigned(
 }
 
 private fun isSelfSigned(cert: X509Certificate): Boolean {
-    // X500Principal.equals normalizes names, so this is only a fast reject; the
-    // signature check below is what proves the cert is self-issued.
+    // Name equality is a cheap pre-filter; the signature check is what proves the cert
+    // is self-signed.
     if (cert.subjectX500Principal != cert.issuerX500Principal) return false
     return runCatching { cert.verify(cert.publicKey) }.isSuccess
 }
