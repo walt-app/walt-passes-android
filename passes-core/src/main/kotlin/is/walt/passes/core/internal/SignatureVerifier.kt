@@ -107,6 +107,7 @@ internal fun verifySignature(
 /**
  * The one `runCatching` both entrypoints share. `internal` so a test can inject a
  * faulting [loadTrust], which returns trust anchors and known intermediates.
+ * Production callers go through [verifySignature].
  */
 internal fun verifySignatureWithTrustLoader(
     signatureBytes: ByteArray,

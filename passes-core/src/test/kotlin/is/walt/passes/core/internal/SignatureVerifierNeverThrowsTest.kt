@@ -139,9 +139,9 @@ class SignatureVerifierNeverThrowsTest {
     }
 
     @Test
-    fun everySingleByteCorruptionIsRejectedUnderStrict() {
-        // Strict, because a flip inside the embedded cert only breaks its chain, which the
-        // lenient default reports as Ok(CertChainIncomplete).
+    fun everySingleByteCorruptionFailsWithoutThrowingUnderStrict() {
+        // Strict fails any chain short of Apple, so this proves only that nothing escapes;
+        // lenient would report a flip inside the cert as Ok(CertChainIncomplete).
         val valid = selfSignedEnvelope()
         for (index in valid.indices) {
             val mutated = valid.copyOf().also { it[index] = (it[index].toInt() xor 0xFF).toByte() }
