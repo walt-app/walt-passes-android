@@ -4,7 +4,6 @@ import android.graphics.Bitmap
 import android.graphics.ImageDecoder
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.io.ByteArrayOutputStream
@@ -18,13 +17,9 @@ import java.io.ByteArrayOutputStream
  * over-cap image is rejected by the gate without a full-size allocation, and the software
  * allocator yields a readable (non-hardware) bitmap.
  *
- * @Ignore'd at check-in: there is no emulator on a workstation, and CI's connected-tests
- * matrix currently covers only `:passes-storage` (see `.github/workflows/ci.yml`), so a
- * `:passes-image-decode` device matrix has to be added before these run. This mirrors
- * `passes-isolation`'s instrumented placeholder and rides with the same on-device CI wiring
- * (wpass-zrt.5). The OOM propagate-vs-contain split is covered deterministically off-device by
- * [BoundedBitmapDecodeTest.containOutOfMemoryPropagatesWhenNoFold] and its siblings, since a
- * real [OutOfMemoryError] cannot be forced reliably.
+ * Runs in CI's connected-tests job. The OOM propagate-vs-contain split is covered off-device by
+ * [BoundedBitmapDecodeTest.containOutOfMemoryPropagatesWhenNoFold], since a real
+ * [OutOfMemoryError] cannot be forced reliably.
  */
 @RunWith(AndroidJUnit4::class)
 class BoundedBitmapDecodeInstrumentedTest {
@@ -41,7 +36,6 @@ class BoundedBitmapDecodeInstrumentedTest {
         )
 
     @Test
-    @Ignore("Pending on-device CI wiring")
     fun decodesValidImageWithinCaps() {
         val result = decodeBounded(rawBytes = pngOf(width = 16, height = 16), policy = policy(maxSide = 64))
         assertThat(result).isInstanceOf(BoundedBitmap.Decoded::class.java)
@@ -53,7 +47,6 @@ class BoundedBitmapDecodeInstrumentedTest {
     }
 
     @Test
-    @Ignore("Pending on-device CI wiring")
     fun rejectsOverCapImageByGateWithoutFullAllocation() {
         // A 16x16 image under a 1px cap trips the gate; the listener forces a 1x1 decode so the
         // rejected path allocates nothing of size.
@@ -62,7 +55,6 @@ class BoundedBitmapDecodeInstrumentedTest {
     }
 
     @Test
-    @Ignore("Pending on-device CI wiring")
     fun foldsMalformedContainerToOnMalformed() {
         // Random bytes are not a decodable container; with no gate rejection in flight the
         // thrown failure folds to the caller's onMalformed value.

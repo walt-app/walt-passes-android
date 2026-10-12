@@ -6,6 +6,34 @@ plugins {
 
 android {
     namespace = "is.walt.passes.document.ui"
+
+    // Same managed-device span as passes-ui; CI runs the api34googleDebugAndroidTest task.
+    testOptions {
+        managedDevices {
+            localDevices {
+                create("api28google") {
+                    device = "Pixel 2"
+                    apiLevel = 28
+                    systemImageSource = "google"
+                }
+                create("api31google") {
+                    device = "Pixel 2"
+                    apiLevel = 31
+                    systemImageSource = "google"
+                }
+                create("api34google") {
+                    device = "Pixel 2"
+                    apiLevel = 34
+                    systemImageSource = "google"
+                }
+                create("api36google") {
+                    device = "Pixel 2"
+                    apiLevel = 36
+                    systemImageSource = "google"
+                }
+            }
+        }
+    }
 }
 
 // Document-rendering UI surfaces. Carved out of passes-ui (wpass-r4z) so that the
@@ -52,6 +80,8 @@ dependencies {
 
     androidTestImplementation(composeBom)
     androidTestImplementation(libs.androidx.test.junit)
+    // Declared so the runner version is the catalog's, not a ui-test-junit4 transitive.
+    androidTestImplementation(libs.androidx.test.runner)
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.truth)
 }
