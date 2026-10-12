@@ -99,21 +99,14 @@ class DocumentSurfaceLockTest {
     }
 
     @Test
-    fun fullScreenDocumentViewHasExactlyNineUserVisibleParameters() {
-        // (doc, pdfFile, renderer, imageFile, imageDecoder, onClose, modifier,
-        // telemetry, closeButton). D5: trust caption is composed inside the surface,
-        // docked outside the zoom transform; no parameter omits it. Required onClose
-        // forces the host to provide a back path — there is no "stuck in full-screen"
-        // state. `closeButton` is a host-supplied close-button composable (icon vs.
-        // text, host chrome) that does not touch the trust caption or any other surface
-        // affordance. Bumping from 7 to 9 is the deliberate wpass-pl7.4 generalization:
-        // `doc` widened to the sealed Document, and the image / composite arms take the
-        // `imageFile` / `imageDecoder` backend pair exactly as DocumentView does —
-        // neither new slot can suppress the caption or add an extraction affordance.
+    fun fullScreenDocumentViewHasExactlyTenUserVisibleParameters() {
+        // (doc, pdfFile, renderer, imageFile, imageDecoder, onClose, modifier, telemetry,
+        // initialPage, closeButton). D5: the caption is composed inside the surface, docked
+        // outside the zoom transform, and no parameter can omit it or add an extraction affordance.
         assertUserVisibleParamCount(
             "FullScreenDocumentViewKt",
             "FullScreenDocumentView",
-            expected = 9,
+            expected = 10,
         )
     }
 
@@ -187,20 +180,12 @@ class DocumentSurfaceLockTest {
         }
 
     private fun userVisibleParameterCount(method: Method): Int {
-        // Compose appends `Composer $composer` and `int $changed` (and `int $changed1`
-        // for high-arity functions). Strip them by their JVM type names.
-        val params = method.parameterTypes
-        var count = params.size
-        var i = params.lastIndex
-        while (i >= 0) {
-            val t = params[i]
-            val isComposer = t.name == "androidx.compose.runtime.Composer"
-            val isInt = t.name == "int"
-            if (!isComposer && !isInt) break
-            count--
-            i--
-        }
-        return count
+        // Compose appends `Composer $composer`, then `int $changed` / `$default` masks.
+        // Everything before the Composer is user-visible, including a trailing Int param.
+        val composerIndex = method.parameterTypes
+            .indexOfFirst { it.name == "androidx.compose.runtime.Composer" }
+        check(composerIndex >= 0) { "No Composer parameter on $method" }
+        return composerIndex
     }
 
     private fun assertUserVisibleParamCount(

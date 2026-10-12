@@ -85,6 +85,9 @@ import `is`.walt.passes.ui.core.toComposeColor
  * not (cache-keying them would explode the key space and stale entries surface as a
  * sharper-but-wrong region after a pan).
  *
+ * @param initialPage Zero-based page the PDF pager opens on, clamped into the document's
+ *   page range. Read on first composition only. Ignored by the image and composite arms,
+ *   which have a single page.
  * @param closeButton Host-supplied close affordance, rendered at [Alignment.TopStart].
  *   The surface owns placement and [onClose] wiring; the host owns chrome, sizing, and
  *   any inset / padding handling (the default applies its own padding, host overrides
@@ -102,6 +105,7 @@ public fun FullScreenDocumentView(
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     telemetry: DocumentTelemetryGuard = DocumentTelemetryGuard.NoOp,
+    initialPage: Int = 0,
     closeButton: @Composable (onClose: () -> Unit) -> Unit = { handler ->
         CloseFullScreenButton(onClick = handler)
     },
@@ -132,6 +136,7 @@ public fun FullScreenDocumentView(
                         "FullScreenDocumentView(PdfDocument) requires a non-null renderer"
                     },
                     telemetry = telemetry,
+                    initialPage = initialPage,
                 )
                 // wpass-8lu / wpass-pl7.4: a composite's retained photo zooms through the same
                 // isolated image-decode surface as a plain image; the barcode half stays with
@@ -178,13 +183,17 @@ private fun FullScreenPdfPager(
     pdfFile: ParcelFileDescriptor,
     renderer: PdfRendererBinder,
     telemetry: DocumentTelemetryGuard,
+    initialPage: Int,
 ) {
     val cache = remember(doc.id) { PdfThumbnailCache() }
     DisposableEffect(doc.id) {
         onDispose { cache.clear() }
     }
 
-    val pagerState = rememberPagerState(pageCount = { doc.pageCount })
+    val pagerState = rememberPagerState(
+        initialPage = initialPage.coerceIn(0, (doc.pageCount - 1).coerceAtLeast(0)),
+        pageCount = { doc.pageCount },
+    )
 
     // Deliberately no beyondViewportPageCount here (unlike DocumentView's inline
     // pager): full-screen rasters are far larger and the peek redesign does not
