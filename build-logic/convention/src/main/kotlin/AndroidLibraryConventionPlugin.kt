@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.LibraryExtension
+import com.android.build.api.variant.LibraryAndroidComponentsExtension
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -48,6 +49,15 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     unitTests {
                         isIncludeAndroidResources = true
                         isReturnDefaultValues = true
+                    }
+                }
+            }
+
+            // Dependency jars duplicate META-INF/LICENSE.md; exclude it from test APKs only.
+            extensions.configure<LibraryAndroidComponentsExtension> {
+                onVariants { variant ->
+                    variant.deviceTests.values.forEach { test ->
+                        test.packaging.resources.excludes.add("META-INF/LICENSE.md")
                     }
                 }
             }
