@@ -7,14 +7,8 @@ import android.system.OsConstants
 import java.io.ByteArrayOutputStream
 
 /**
- * Reads [pfd] from offset 0 into a byte array, or returns null once the source exceeds
- * [maxBytes] so an oversized source is never read to the end.
- *
- * Seekable sources are read with positioned reads (`pread`), which neither depend on nor move
- * the offset shared by every `dup()` of the descriptor. Concurrent decodes of one fd therefore
- * each see the whole file, and the caller's offset is left where it was. A non-seekable source
- * (`ESPIPE`: pipes, some `ContentResolver` fds) has no offset to share and is streamed from a
- * `dup()` instead, so [pfd] stays open for its owner either way. Any other errno propagates.
+ * Reads [pfd] from offset 0 with `pread`, never moving its shared offset; null once over [maxBytes].
+ * On `ESPIPE` it streams a `dup()` from the current position instead; other errnos propagate.
  */
 public fun readBoundedBytes(pfd: ParcelFileDescriptor, maxBytes: Long): ByteArray? =
     readBoundedBytes(pfd, maxBytes, DEFAULT_READ_CHUNK) { buffer, byteCount, position ->

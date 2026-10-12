@@ -59,7 +59,8 @@ class BoundedPfdReadTest {
     @Test
     fun readsASourceSpanningManyChunks() {
         val bytes = pattern(10_000)
-        val read = readBoundedBytes(fileWith(bytes), maxBytes = 10_000, chunkSize = 64, pread = osPread(opened.last()))
+        val pfd = fileWith(bytes)
+        val read = readBoundedBytes(pfd, maxBytes = 10_000, chunkSize = 64, pread = osPread(pfd))
         assertThat(read?.toList()).isEqualTo(bytes.toList())
     }
 

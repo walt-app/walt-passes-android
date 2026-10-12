@@ -20,12 +20,7 @@ import `is`.walt.passes.isolation.readBoundedBytes
  * bitmap stays inside the sandbox; the ZXing symbol decode (wpass-zrt.4) consumes it here and
  * only `{payload, format}` ever crosses back over the binder.
  *
- * Read [pfd] into a bounded byte array and decode it under [config]. The shared
- * [readBoundedBytes] reads from offset 0 without touching the descriptor's shared offset, so a
- * second consumer of the same fd never sees a truncated source, and leaves [pfd] open for its
- * single owner ([doDecode]) to close. Pulling the compressed bytes into the sandbox heap is
- * fine: isolation keeps them off the *caller's* heap; the file-size cap bounds how many can be
- * read.
+ * Reads via the shared [readBoundedBytes]; [pfd] stays open for [doDecode].
  *
  * Stays a top-level function (not a class) so the cap decision is unit-testable without a live
  * service: [headerRejection] against the cap table.

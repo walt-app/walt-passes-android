@@ -24,7 +24,7 @@ import java.io.File
  *    escaping the sandbox;
  *  - the source descriptor is closed on every outcome;
  *  - the real fd glue ([decodeRasterFromPfd]) rejects an over-cap source and an out-of-bounds
- *    output request without closing the source PFD (the dup idiom prevents a double-close);
+ *    output request without closing the source PFD;
  *  - the read starts at offset 0 whatever offset the shared fd arrives with, and leaves that
  *    offset unchanged.
  */

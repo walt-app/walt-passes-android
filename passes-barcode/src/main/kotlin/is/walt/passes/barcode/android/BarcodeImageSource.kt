@@ -19,7 +19,8 @@ import android.os.ParcelFileDescriptor
  *
  * Ownership: the caller retains ownership of the [ContentResolver], the [Uri], and any
  * [ParcelFileDescriptor] passed in. The decoder reads from these but does not close them;
- * closing remains the caller's responsibility once `decode` returns.
+ * closing remains the caller's responsibility once `decode` returns. Reads of a seekable
+ * descriptor start at offset 0, whatever offset it arrives with.
  */
 public sealed interface BarcodeImageSource {
     public class ContentUri(

@@ -24,11 +24,7 @@ import kotlin.math.roundToInt
  * bounded output and copied into [SharedMemory]; the source bytes and the full-size bitmap
  * never leave the sandbox. Only the rescaled pixel buffer crosses back over the binder.
  *
- * Read [image] into a bounded byte array with the shared [readBoundedBytes], which reads from
- * offset 0 without touching the descriptor's shared offset (so overlapping decodes of one fd
- * stay independent) and leaves [image] open for its single owner ([doDecode]) to close. Pulling
- * the compressed bytes into the sandbox heap is fine: isolation keeps them off the *caller's*
- * heap; the file-size cap bounds how many can be read.
+ * Reads via the shared [readBoundedBytes]; [image] stays open for [doDecode].
  *
  * Stays a top-level function (not a class) so its phases are unit-testable without a live
  * service: [headerRejection] against the cap table and [outputDims] against the scaling math.

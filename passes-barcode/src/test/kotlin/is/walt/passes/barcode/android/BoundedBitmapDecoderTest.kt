@@ -8,7 +8,7 @@ import org.junit.Test
  * Pins the pure half of the bounded decode: the header-cap decision table ([headerRejection]).
  * The file-size cap is the shared `readBoundedBytes` in passes-isolation. The platform
  * `ImageDecoder` integration these feed — that the header listener fires before allocation and
- * that OOM is contained — is the instrumented half (wpass-zrt.5); the policy that decides
+ * that OOM is contained — is the instrumented half; the policy that decides
  * accept-vs-reject is exercised here on the JVM where it can be enumerated exhaustively.
  */
 class BoundedBitmapDecoderTest {
