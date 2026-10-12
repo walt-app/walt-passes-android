@@ -394,19 +394,29 @@ class FieldLinkScannerTest {
 
     @Test
     fun urlEndsBeforeUnicodeWhitespace() {
-        // The URL class excludes the whole White_Space set, as `\s` does on Android.
-        listOf("\u2028", "\u2029", "\u00A0", "\u202F", "\u3000").forEach { space ->
-            assertExactSpans("https://acme.example/a${space}b", "https://acme.example/a" to B3UrlIntent::class.java)
+        // The URL class excludes the White_Space set, as `\s` does on Android. The other
+        // six members (VT, FF, lone CR, NEL, U+2028, U+2029) are field hazards.
+        (listOf('\t', '\n', ' ', '\u00A0', '\u1680') + ('\u2000'..'\u200A') + listOf('\u202F', '\u205F', '\u3000'))
+            .forEach { space ->
+                assertExactSpans("https://acme.example/a${space}b", "https://acme.example/a" to B3UrlIntent::class.java)
+            }
+    }
+
+    @Test
+    fun whiteSpaceFieldHazardsYieldNoLinks() {
+        listOf('\u000B', '\u000C', '\r', '\u0085', '\u2028', '\u2029').forEach { space ->
+            val codepoint = "U+%04X".format(space.code)
+            assertWithMessage("$codepoint must reject the field")
+                .that(FieldLinkScanner.scan("Help${space}https://acme.example/help", source))
+                .isEmpty()
         }
     }
 
     @Test
-    fun lineSeparatorBetweenLinesKeepsLinks() {
-        assertExactSpans(
-            "Help\u2028https://acme.example/help\u2029support@acme.example\u2029Thanks",
-            "https://acme.example/help" to B3UrlIntent::class.java,
-            "support@acme.example" to EmailIntent::class.java,
-        )
+    fun loneCarriageReturnRejectsTheField() {
+        // A lone CR may render with no width, hiding where a link ends.
+        assertThat(FieldLinkScanner.scan("support@bank.example\rm", source)).isEmpty()
+        assertThat(FieldLinkScanner.scan("Line\rhttps://acme.example/help", source)).isEmpty()
     }
 
     @Test
@@ -495,6 +505,17 @@ class FieldLinkScannerTest {
     }
 
     @Test
+    fun phoneRunMixingNonAsciiDigitsDoesNotLink() {
+        listOf(
+            "Call 0800 555 010\uD835\uDFD7 now", // trailing U+1D7D7 MATHEMATICAL BOLD DIGIT NINE
+            "Call \uFF11800-555-0100 now", // leading fullwidth one
+            "Call 555-123-4567\u0663 now", // trailing Arabic-Indic three
+        ).forEach { text ->
+            assertWithMessage(text).that(FieldLinkScanner.scan(text, source)).isEmpty()
+        }
+    }
+
+    @Test
     fun nonAsciiDigitRunsDoNotLink() {
         listOf(
             "+\u0669\u0667\u0661 \u0664 \u0663\u0666\u0666 \u0668\u0668\u0668\u0668", // Arabic-Indic
@@ -506,7 +527,7 @@ class FieldLinkScannerTest {
 
     @Test
     fun fieldHazardAllowsOnlyLineBreaksAndTab() {
-        listOf("\n", "\r", "\t", "\r\n", "\u2028", "\u2029").forEach { whitespace ->
+        listOf("\n", "\t", "\r\n", "\r\n\r\n").forEach { whitespace ->
             assertThat(FieldLinkScanner.containsFieldHazard("a${whitespace}b")).isFalse()
         }
         HAZARDS.forEach { hazard ->
@@ -553,8 +574,9 @@ class FieldLinkScannerTest {
     }
 
     private companion object {
-        // Cf and non-whitespace Cc codepoints that must reject a field.
+        // Cf, Cc (bar line feed and tab) and separator codepoints that must reject a field.
         val HAZARDS = listOf(
+            '\r', '\u2028', '\u2029',
             '\u202E', '\u202D', '\u2066', '\u2067', '\u2068', '\u2069', '\u200B',
             '\u200E', '\u200F', '\u061C', '\uFEFF', '\u0000', '\u0007', '\u001B',
             '\u000B', '\u000C', '\u007F', '\u0085',
