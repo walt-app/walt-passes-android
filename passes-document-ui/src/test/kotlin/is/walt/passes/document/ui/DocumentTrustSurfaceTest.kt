@@ -1,7 +1,5 @@
 package `is`.walt.passes.document.ui
 
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -10,17 +8,12 @@ import android.os.ParcelFileDescriptor
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import `is`.walt.passes.core.ScannableFormat
-import `is`.walt.passes.image.android.ImageDecodeBinder
-import `is`.walt.passes.image.android.ImageDecodeRejectedKind
-import `is`.walt.passes.image.android.ImageDecodeResult
 import `is`.walt.passes.document.BarcodedImageDocument
 import `is`.walt.passes.document.BarcodedImageDocumentId
 import `is`.walt.passes.document.ImageDocument
 import `is`.walt.passes.document.ImageDocumentId
 import `is`.walt.passes.document.PdfDocument
 import `is`.walt.passes.document.PdfDocumentId
-import `is`.walt.passes.document.ui.theme.DocumentSemantics
-import `is`.walt.passes.document.ui.theme.DocumentTheme
 import `is`.walt.passes.ui.core.ArgbColor
 import org.junit.Rule
 import org.junit.Test
@@ -44,19 +37,9 @@ class DocumentTrustSurfaceTest {
     @get:Rule
     val composeRule = createComposeRule()
 
-    private val semantics = DocumentSemantics(
-        captionBackground = ArgbColor(0xFF202020.toInt()),
-        captionForeground = ArgbColor(0xFFFFFFFF.toInt()),
-        // Set explicitly (rather than relying on the captionForeground default) so the
-        // restyled icon+text caption is exercised with a distinct, non-default tint.
-        captionIconTint = ArgbColor(0xFFFFAA00.toInt()),
-        tileBackground = ArgbColor(0xFFF5F5F5.toInt()),
-        tileForeground = ArgbColor(0xFF202020.toInt()),
-        tileLabelForeground = ArgbColor(0xFF606060.toInt()),
-        laneBackground = ArgbColor(0xFFEEEEEE.toInt()),
-        documentBadgeBackground = ArgbColor(0xFFD0D0D0.toInt()),
-        documentBadgeForeground = ArgbColor(0xFF202020.toInt()),
-    )
+    // A distinct, non-default icon tint so the icon+text caption is exercised off the
+    // captionForeground default.
+    private val semantics = testDocumentSemantics.copy(captionIconTint = ArgbColor(0xFFFFAA00.toInt()))
 
     @Test
     fun documentTrustCaptionRendersTheVerbatimTrustText() {
@@ -65,7 +48,7 @@ class DocumentTrustSurfaceTest {
         // surface; locking it here means a contributor cannot soften the wording
         // without updating the test.
         composeRule.setContent {
-            ThemedHost {
+            ThemedHost(semantics) {
                 DocumentTrustCaption()
             }
         }
@@ -97,7 +80,7 @@ class DocumentTrustSurfaceTest {
             importedAtEpochMs = 0L,
         )
         composeRule.setContent {
-            ThemedHost {
+            ThemedHost(semantics) {
                 DocumentTile(doc = doc, thumbnail = null, onClick = {})
             }
         }
@@ -119,7 +102,7 @@ class DocumentTrustSurfaceTest {
             ),
         )
         composeRule.setContent {
-            ThemedHost {
+            ThemedHost(semantics) {
                 DocumentsLane(
                     documents = docs,
                     thumbnails = emptyMap(),
@@ -137,7 +120,7 @@ class DocumentTrustSurfaceTest {
     @Test
     fun documentsLaneRendersNothingForEmptyDocuments() {
         composeRule.setContent {
-            ThemedHost {
+            ThemedHost(semantics) {
                 DocumentsLane(
                     documents = emptyList(),
                     thumbnails = emptyMap(),
@@ -171,19 +154,12 @@ class DocumentTrustSurfaceTest {
             heightPx = 1920,
             importedAtEpochMs = 0L,
         )
-        val rejectingDecoder = object : ImageDecodeBinder {
-            override suspend fun decode(
-                image: ParcelFileDescriptor,
-                maxWidthPx: Int,
-                maxHeightPx: Int,
-            ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
-        }
         val file = File.createTempFile("walt-image-doc", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         try {
             composeRule.setContent {
-                ThemedHost {
-                    DocumentView(doc = doc, imageFile = pfd, imageDecoder = rejectingDecoder)
+                ThemedHost(semantics) {
+                    DocumentView(doc = doc, imageFile = pfd, imageDecoder = RejectingImageDecoder)
                 }
             }
             composeRule.onNodeWithText(
@@ -210,22 +186,15 @@ class DocumentTrustSurfaceTest {
             heightPx = 1920,
             importedAtEpochMs = 0L,
         )
-        val rejectingDecoder = object : ImageDecodeBinder {
-            override suspend fun decode(
-                image: ParcelFileDescriptor,
-                maxWidthPx: Int,
-                maxHeightPx: Int,
-            ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
-        }
         val file = File.createTempFile("walt-image-doc", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
         try {
             composeRule.setContent {
-                ThemedHost {
+                ThemedHost(semantics) {
                     DocumentView(
                         doc = doc,
                         imageFile = pfd,
-                        imageDecoder = rejectingDecoder,
+                        imageDecoder = RejectingImageDecoder,
                         trustCaption = TrustCaptionPlacement.HostedTypeRow,
                     )
                 }
@@ -257,11 +226,11 @@ class DocumentTrustSurfaceTest {
         )
         withImagePfd { pfd ->
             composeRule.setContent {
-                ThemedHost {
+                ThemedHost(semantics) {
                     FullScreenDocumentView(
                         doc = doc,
                         imageFile = pfd,
-                        imageDecoder = rejectingDecoder(),
+                        imageDecoder = RejectingImageDecoder,
                         onClose = {},
                     )
                 }
@@ -289,11 +258,11 @@ class DocumentTrustSurfaceTest {
         )
         withImagePfd { pfd ->
             composeRule.setContent {
-                ThemedHost {
+                ThemedHost(semantics) {
                     FullScreenDocumentView(
                         doc = doc,
                         imageFile = pfd,
-                        imageDecoder = rejectingDecoder(),
+                        imageDecoder = RejectingImageDecoder,
                         onClose = {},
                     )
                 }
@@ -304,14 +273,6 @@ class DocumentTrustSurfaceTest {
         }
     }
 
-    private fun rejectingDecoder(): ImageDecodeBinder = object : ImageDecodeBinder {
-        override suspend fun decode(
-            image: ParcelFileDescriptor,
-            maxWidthPx: Int,
-            maxHeightPx: Int,
-        ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
-    }
-
     private fun withImagePfd(block: (ParcelFileDescriptor) -> Unit) {
         val file = File.createTempFile("walt-image-doc", ".png").apply { writeBytes(byteArrayOf(1, 2, 3)) }
         val pfd = ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
@@ -320,13 +281,6 @@ class DocumentTrustSurfaceTest {
         } finally {
             pfd.close()
             file.delete()
-        }
-    }
-
-    @Composable
-    private fun ThemedHost(content: @Composable () -> Unit) {
-        MaterialTheme {
-            DocumentTheme(semantics = semantics, content = content)
         }
     }
 }
