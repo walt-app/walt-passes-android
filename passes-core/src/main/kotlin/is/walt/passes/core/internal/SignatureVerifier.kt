@@ -128,7 +128,7 @@ internal fun verifySignature(
  * trust anchor. Production callers MUST go through [verifySignature]; passing
  * [emptySet] anchors here silently downgrades every Apple-signed input to
  * [SignatureStatus.SelfSigned] / [SignatureStatus.CertChainIncomplete] (lenient) or
- * [TamperReason.SignatureUntrusted] (strict) — a trust-degradation footgun no
+ * [TamperReason.SignatureUntrusted] (strict), a trust-degradation footgun no
  * test in this suite would catch, since the suite itself routes through here. The
  * `ForTesting` suffix is the conventional flag.
  *
