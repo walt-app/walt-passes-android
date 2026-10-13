@@ -108,17 +108,14 @@ class ImageDecodeServiceInstrumentedTest {
 
     @Test
     fun sameMemfdDecodesTwiceThroughTheRealService() {
-        // wpass-07h regression guard: decoding one shared PFD from two surfaces (inline card +
-        // full-screen overlay) must both succeed. dup()/binder passing share the open file
-        // description, so without the per-decode rewind the second decode reads from EOF and
-        // silently renders blank. memfd is the production shape (passes-isolation materializes
-        // stored bytes into one); memfd_create needs API 30, so API 28 relies on the
-        // file-backed variant below — the shared-offset semantics are identical.
+        // Two surfaces decoding one shared PFD must both succeed: the read starts at offset 0
+        // whatever offset the shared open file description carries. memfd is the production
+        // shape; memfd_create needs API 30, so API 28 relies on the file-backed variant below.
         assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
         val png = ByteArrayOutputStream()
             .also { solidBitmap(80, 40, Color.YELLOW).compress(Bitmap.CompressFormat.PNG, 100, it) }
             .toByteArray()
-        val pfd = MemfdPfdFactory("wpass-07h-guard").fromBytes(png)
+        val pfd = MemfdPfdFactory("decode-twice-guard").fromBytes(png)
         pfd.use { assertDecodesTwice(it) }
     }
 

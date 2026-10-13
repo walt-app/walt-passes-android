@@ -68,9 +68,8 @@ dependencies {
 
     androidTestImplementation(libs.androidx.test.junit)
     androidTestImplementation(libs.androidx.test.runner)
-    // For the wpass-07h regression guard: materialize a real memfd (MemfdPfdFactory) and
-    // decode it twice through the real service. Compile-time visibility only; the main
-    // dependency above stays implementation.
+    // Materializes a real memfd (MemfdPfdFactory) to decode one fd twice through the real
+    // service. Compile-time visibility only; the main dependency above stays implementation.
     androidTestImplementation(project(":passes-isolation"))
     androidTestImplementation(libs.androidx.test.rules)
     androidTestImplementation(libs.truth)
