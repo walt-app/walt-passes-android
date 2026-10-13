@@ -1,4 +1,5 @@
 import com.android.build.api.dsl.LibraryExtension
+import com.android.build.api.variant.LibraryAndroidComponentsExtension
 import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
@@ -8,7 +9,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
 
 /**
- * Convention for Android library modules (passes-storage, passes-ui).
+ * Convention for Android library modules.
  *
  * minSdk 28: StrongBox-backed Keystore and ImageDecoder.setOnHeaderDecodedListener
  * both land at API 28, so the whole repo aligns there.
@@ -48,6 +49,16 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
                     unitTests {
                         isIncludeAndroidResources = true
                         isReturnDefaultValues = true
+                    }
+                }
+            }
+
+            // BouncyCastle 1.85+ jars each ship META-INF/LICENSE.md;
+            // exclude it from test APKs only.
+            extensions.configure<LibraryAndroidComponentsExtension> {
+                onVariants { variant ->
+                    variant.deviceTests.values.forEach { test ->
+                        test.packaging.resources.excludes.add("META-INF/LICENSE.md")
                     }
                 }
             }
