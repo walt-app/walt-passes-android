@@ -99,25 +99,34 @@ internal fun verifySignature(
     signatureBytes: ByteArray,
     manifestBytes: ByteArray,
     config: ParserConfig,
+): SignatureVerifyResult =
+    verifyWithTrustLoader(signatureBytes, manifestBytes, config) {
+        AppleTrustAnchors.trustAnchors() to AppleTrustAnchors.knownIntermediates()
+    }
+
+/**
+ * **Test seam, DO NOT call from production code.** Lets a test inject a faulting
+ * [loadTrust], which returns the trust anchors and known intermediates.
+ */
+internal fun verifySignatureWithTrustLoaderForTesting(
+    signatureBytes: ByteArray,
+    manifestBytes: ByteArray,
+    config: ParserConfig,
+    loadTrust: () -> Pair<Set<TrustAnchor>, Set<X509Certificate>>,
+): SignatureVerifyResult = verifyWithTrustLoader(signatureBytes, manifestBytes, config, loadTrust)
+
+/** The one `runCatching` every entrypoint shares. */
+private fun verifyWithTrustLoader(
+    signatureBytes: ByteArray,
+    manifestBytes: ByteArray,
+    config: ParserConfig,
+    loadTrust: () -> Pair<Set<TrustAnchor>, Set<X509Certificate>>,
 ): SignatureVerifyResult {
-    // Anchor lookups MUST live inside the runCatching: AppleTrustAnchors.trustAnchors()
-    // calls into resource I/O and CertificateFactory.generateCertificate, both of which
-    // can still throw on a genuinely stripped JAR or a corrupted .cer file. (The loader
-    // resolves the bundled certs by absolute classpath name, so it is itself robust to
-    // an R8/ProGuard consumer build *repackaging* this class — see AppleTrustAnchors.)
-    // Kotlin's default `by lazy` (LazyThreadSafetyMode.SYNCHRONIZED)
-    // does NOT cache the exception: each call retries the initializer and re-throws on
-    // failure. The end-user effect is the same (every parse fails until the JAR is
-    // rebuilt), but the mechanic is "retry and re-throw," not "first call poisons the
-    // cache." Treating the loader as part of the verification operation collapses that
-    // failure mode onto the documented Failed(SignatureCryptoFailure) arm.
+    // loadTrust stays inside: a stripped or corrupt bundled .cer throws there, and `by lazy`
+    // re-throws on every call, so each call must still map to SignatureCryptoFailure.
     return runCatching {
-        val ctx =
-            VerifyContext(
-                config,
-                AppleTrustAnchors.trustAnchors(),
-                AppleTrustAnchors.knownIntermediates(),
-            )
+        val (trustAnchors, knownIntermediates) = loadTrust()
+        val ctx = VerifyContext(config, trustAnchors, knownIntermediates)
         verifyAndClassify(signatureBytes, manifestBytes, ctx)
     }.getOrElse { SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure) }
 }
@@ -142,11 +151,10 @@ internal fun verifySignatureAgainstAnchorsForTesting(
     config: ParserConfig,
     trustAnchors: Set<TrustAnchor>,
     knownIntermediates: Set<X509Certificate>,
-): SignatureVerifyResult {
-    val ctx = VerifyContext(config, trustAnchors, knownIntermediates)
-    return runCatching { verifyAndClassify(signatureBytes, manifestBytes, ctx) }
-        .getOrElse { SignatureVerifyResult.Failed(TamperReason.SignatureCryptoFailure) }
-}
+): SignatureVerifyResult =
+    verifyWithTrustLoader(signatureBytes, manifestBytes, config) {
+        trustAnchors to knownIntermediates
+    }
 
 private fun verifyAndClassify(
     signatureBytes: ByteArray,
@@ -221,6 +229,8 @@ private val BC_PROVIDER: BouncyCastleProvider by lazy { BouncyCastleProvider() }
 private fun firstSignerWithCert(signedData: CMSSignedData): SignerWithHolder? {
     val signer = signedData.signerInfos.signers.firstOrNull() ?: return null
     val store = signedData.holderStore()
+    // The signer ID can match several certs in a crafted envelope. Safe: the picked cert
+    // must verify the signature and chain on its own, so a wrong pick cannot raise trust.
     val holder = store.getMatches(signer.sid.asHolderSelector()).firstOrNull()
     return holder?.let { SignerWithHolder(signer, it) }
 }
@@ -440,6 +450,8 @@ private fun isLeafOnlyAndSelfSigned(
 }
 
 private fun isSelfSigned(cert: X509Certificate): Boolean {
+    // Name equality is a cheap pre-filter; the signature check is what proves the cert
+    // is self-signed.
     if (cert.subjectX500Principal != cert.issuerX500Principal) return false
     return runCatching { cert.verify(cert.publicKey) }.isSuccess
 }
