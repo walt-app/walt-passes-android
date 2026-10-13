@@ -28,10 +28,8 @@ import kotlin.math.roundToInt
  * metadata, annotations, attachments, or form fields; [PublicApiSurfaceTest] asserts
  * the surface is exactly those two by reflection.
  *
- * Caps in [PdfRendererService] mirror `passes-storage`'s `DocumentBounds` (25 MB total /
- * 10 pages). Until `wpass-kej` lands the cross-module parity test, both numbers must be
- * kept in lockstep manually; reviewers should reject any change to one without a
- * matching change to the other.
+ * Caps in [PdfRendererService] alias [PdfImportConfig]'s defaults (25 MB total / 10 pages),
+ * which `passes-storage`'s `DocumentBoundsParityTest` holds in lockstep with `DocumentBounds`.
  */
 public class PdfRendererService : Service() {
     private val config: PdfImportConfig = PdfImportConfig()
@@ -54,10 +52,10 @@ public class PdfRendererService : Service() {
         }
 
     public companion object {
-        /** Mirrors [PdfImportConfig.DEFAULT_MAX_BYTES] and storage's `DocumentBounds.MAX_BYTES`. */
+        /** Alias of [PdfImportConfig.DEFAULT_MAX_BYTES] and storage's `DocumentBounds.MAX_BYTES`. */
         public const val MAX_BYTES: Long = PdfImportConfig.DEFAULT_MAX_BYTES
 
-        /** Mirrors [PdfImportConfig.DEFAULT_MAX_PAGES] and storage's `DocumentBounds.MAX_PAGES`. */
+        /** Alias of [PdfImportConfig.DEFAULT_MAX_PAGES] and storage's `DocumentBounds.MAX_PAGES`. */
         public const val MAX_PAGES: Int = PdfImportConfig.DEFAULT_MAX_PAGES
 
         /**

@@ -57,6 +57,8 @@ dependencies {
     implementation(libs.sqlcipher.android)
     implementation(libs.androidx.sqlite)
 
+    // Test-only: DocumentBoundsParityTest reads the import caps. Production code keeps no edge.
+    testImplementation(project(":passes-document-core"))
     testImplementation(libs.junit)
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)

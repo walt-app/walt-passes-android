@@ -133,14 +133,8 @@ internal class SqlCipherDocumentStore(
             arrayOf(id.value.toString()),
         ).use { c -> if (c.moveToNext()) c.getLong(0) else return null }
 
-        db.beginTransaction()
-        try {
-            // ON DELETE CASCADE drops the thumbnail row.
-            db.delete(Schema.Tables.DOCUMENTS, "id = ?", arrayOf(id.value.toString()))
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
+        // ON DELETE CASCADE drops the thumbnail row within this one statement.
+        db.delete(Schema.Tables.DOCUMENTS, "id = ?", arrayOf(id.value.toString()))
         return DocumentDeleteOutcome(byteCount = byteCount)
     }
 

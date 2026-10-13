@@ -129,11 +129,9 @@ The assertion validates by content, not resource identity. It opens whichever XM
 
 `PassRepository.delete(id)`:
 
-1. Begins a transaction.
-2. Issues `DELETE FROM passes WHERE id = ?` (cascades to `pass_images`, `pass_locales`, and `pass_archives`).
-3. Commits.
-4. Updates the in-memory `StateFlow<List<PassSummary>>` to remove the deleted entry, before returning.
-5. Emits `StorageTelemetryGuard.onPassDeleted(PassType, SignatureStatusKind)` (no PII).
+1. Issues a single `DELETE FROM passes WHERE id = ?`, which SQLite applies atomically with its cascades to `pass_images`, `pass_locales` and `pass_archives`.
+2. Updates the in-memory `StateFlow<List<PassSummary>>` to remove the deleted entry, before returning.
+3. Emits `StorageTelemetryGuard.onPassDeleted(PassType, SignatureStatusKind)` (no PII).
 
 What is intentionally NOT included:
 

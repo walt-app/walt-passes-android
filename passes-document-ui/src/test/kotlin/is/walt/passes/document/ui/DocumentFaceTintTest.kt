@@ -4,7 +4,6 @@ import android.os.ParcelFileDescriptor
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -19,24 +18,12 @@ import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.google.common.truth.Truth.assertThat
 import com.google.common.truth.Truth.assertWithMessage
-import `is`.walt.passes.document.DocumentRejectedKind
 import `is`.walt.passes.document.ImageDocument
 import `is`.walt.passes.document.ImageDocumentId
 import `is`.walt.passes.document.PdfDocument
 import `is`.walt.passes.document.PdfDocumentId
-import `is`.walt.passes.document.ui.theme.DocumentSemantics
-import `is`.walt.passes.document.ui.theme.DocumentTheme
-import `is`.walt.passes.image.android.ImageDecodeBinder
-import `is`.walt.passes.image.android.ImageDecodeRejectedKind
-import `is`.walt.passes.image.android.ImageDecodeResult
-import `is`.walt.passes.pdf.android.PdfRendererBinder
-import `is`.walt.passes.pdf.android.ProbeResult
-import `is`.walt.passes.pdf.android.RenderResult
-import `is`.walt.passes.pdf.android.RenderSourceRect
-import `is`.walt.passes.ui.core.ArgbColor
 import `is`.walt.passes.ui.core.faceIsTinted
 import java.io.File
-import java.util.Collections
 import org.junit.After
 import org.junit.Rule
 import org.junit.Test
@@ -90,17 +77,6 @@ class DocumentFaceTintTest {
         tempFiles.forEach { it.delete() }
     }
 
-    private val semantics = DocumentSemantics(
-        captionBackground = ArgbColor(0xFF202020.toInt()),
-        captionForeground = ArgbColor(0xFFFFFFFF.toInt()),
-        tileBackground = ArgbColor(0xFFF5F5F5.toInt()),
-        tileForeground = ArgbColor(0xFF202020.toInt()),
-        tileLabelForeground = ArgbColor(0xFF606060.toInt()),
-        laneBackground = ArgbColor(0xFFEEEEEE.toInt()),
-        documentBadgeBackground = ArgbColor(0xFFD0D0D0.toInt()),
-        documentBadgeForeground = ArgbColor(0xFF202020.toInt()),
-    )
-
     @Test
     fun faceTintLeavesThePageRenderRequestUnchanged() {
         // Every argument the pager hands the isolated renderer — page index, requested
@@ -109,8 +85,8 @@ class DocumentFaceTintTest {
         // request is supposed to be slot-independent, so differing slots turn the equality
         // below into a check on that too, and the one-setContent-per-rule limit means
         // this is the only shot at composing both.
-        val untinted = RecordingRenderer()
-        val tinted = RecordingRenderer()
+        val untinted = RecordingRenderer(PAGE_COUNT)
+        val tinted = RecordingRenderer(PAGE_COUNT)
         var density: Density? = null
         composeRule.setContent {
             density = LocalDensity.current
@@ -139,7 +115,7 @@ class DocumentFaceTintTest {
         assertWithMessage("the untinted composition must request pages at all")
             .that(untinted.requests())
             .isNotEmpty()
-        assertThat(tinted.requests()).isEqualTo(untinted.requests())
+        assertThat(tinted.requests().toSet()).isEqualTo(untinted.requests().toSet())
 
         // The load-bearing half. While the request is derived from these fixed constants
         // its SIZE cannot vary with a tint by construction, so the equality above only
@@ -169,7 +145,7 @@ class DocumentFaceTintTest {
                         DocumentView(
                             doc = pdfFixture("pdf", PAGE_COUNT),
                             pdfFile = openPdfFd(),
-                            renderer = RecordingRenderer(),
+                            renderer = RecordingRenderer(PAGE_COUNT),
                             faceTint = denim,
                         )
                     }
@@ -177,7 +153,7 @@ class DocumentFaceTintTest {
                         DocumentView(
                             doc = imageFixture(),
                             imageFile = openImageFd(),
-                            imageDecoder = RejectingDecoder,
+                            imageDecoder = RejectingImageDecoder,
                             faceTint = violet,
                         )
                     }
@@ -203,7 +179,7 @@ class DocumentFaceTintTest {
                     DocumentView(
                         doc = pdfFixture("dark", PAGE_COUNT),
                         pdfFile = openPdfFd(),
-                        renderer = RecordingRenderer(),
+                        renderer = RecordingRenderer(PAGE_COUNT),
                         faceTint = Color(0xFF2A75BA),
                     )
                 }
@@ -229,7 +205,7 @@ class DocumentFaceTintTest {
                     DocumentView(
                         doc = pdfFixture("transparent", PAGE_COUNT),
                         pdfFile = openPdfFd(),
-                        renderer = RecordingRenderer(),
+                        renderer = RecordingRenderer(PAGE_COUNT),
                         faceTint = Color.Transparent,
                     )
                 }
@@ -254,44 +230,6 @@ class DocumentFaceTintTest {
         content: @Composable () -> Unit,
     ) {
         Box(modifier = Modifier.size(width, height)) { content() }
-    }
-
-    /** One call into the isolated renderer: everything the tint must not be able to move. */
-    private data class Request(
-        val page: Int,
-        val widthPx: Int,
-        val heightPx: Int,
-        val sourceRect: RenderSourceRect,
-    )
-
-    private class RecordingRenderer : PdfRendererBinder {
-        private val seen = Collections.synchronizedSet(mutableSetOf<Request>())
-
-        override suspend fun probe(pdf: ParcelFileDescriptor): ProbeResult =
-            ProbeResult.Ok(pageCount = PAGE_COUNT)
-
-        override suspend fun render(
-            pdf: ParcelFileDescriptor,
-            page: Int,
-            widthPx: Int,
-            heightPx: Int,
-            sourceRect: RenderSourceRect,
-        ): RenderResult {
-            seen += Request(page, widthPx, heightPx, sourceRect)
-            // Rejected keeps the test free of SharedMemory plumbing, which does not
-            // round-trip under Robolectric; the request itself is what is under test.
-            return RenderResult.Rejected(DocumentRejectedKind.RendererFailed)
-        }
-
-        fun requests(): Set<Request> = seen.toSet()
-    }
-
-    private object RejectingDecoder : ImageDecodeBinder {
-        override suspend fun decode(
-            image: ParcelFileDescriptor,
-            maxWidthPx: Int,
-            maxHeightPx: Int,
-        ): ImageDecodeResult = ImageDecodeResult.Rejected(ImageDecodeRejectedKind.DecodeFailed)
     }
 
     private fun pdfFixture(id: String, pageCount: Int) = PdfDocument(
@@ -320,13 +258,6 @@ class DocumentFaceTintTest {
         tempFiles += backing
         return ParcelFileDescriptor.open(backing, ParcelFileDescriptor.MODE_READ_ONLY)
             .also { openFds += it }
-    }
-
-    @Composable
-    private fun ThemedHost(content: @Composable () -> Unit) {
-        MaterialTheme {
-            DocumentTheme(semantics = semantics, content = content)
-        }
     }
 
     private companion object {

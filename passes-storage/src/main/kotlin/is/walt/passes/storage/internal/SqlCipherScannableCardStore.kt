@@ -53,54 +53,34 @@ internal class SqlCipherScannableCardStore(
     ).use { c -> if (!c.moveToNext()) null else c.toCardOrNull() }
 
     override fun insert(request: ScannableCardInsertRequest): ScannableCardInsertOutcome {
-        val rowId: Long
-        db.beginTransaction()
-        try {
-            val cv = ContentValues().apply {
-                put("payload", request.payload)
-                put("format", request.format.name)
-                put("label", request.label)
-                put("created_at_epoch_ms", request.nowEpochMs)
-            }
-            rowId = db.insertOrThrow(Schema.Tables.SCANNABLE_CARDS, null, cv)
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
+        val cv = ContentValues().apply {
+            put("payload", request.payload)
+            put("format", request.format.name)
+            put("label", request.label)
+            put("created_at_epoch_ms", request.nowEpochMs)
         }
+        val rowId = db.insertOrThrow(Schema.Tables.SCANNABLE_CARDS, null, cv)
         return ScannableCardInsertOutcome(id = ScannableCardRecordId(rowId))
     }
 
     override fun update(id: ScannableCardRecordId, request: ScannableCardUpdateRequest): Boolean {
-        val rows: Int
-        db.beginTransaction()
-        try {
-            val cv = ContentValues().apply {
-                put("payload", request.payload)
-                put("format", request.format.name)
-                put("label", request.label)
-            }
-            rows = db.update(
-                Schema.Tables.SCANNABLE_CARDS,
-                cv,
-                "id = ?",
-                arrayOf(id.value.toString()),
-            )
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
+        val cv = ContentValues().apply {
+            put("payload", request.payload)
+            put("format", request.format.name)
+            put("label", request.label)
         }
+        val rows = db.update(
+            Schema.Tables.SCANNABLE_CARDS,
+            cv,
+            "id = ?",
+            arrayOf(id.value.toString()),
+        )
         return rows > 0
     }
 
     override fun delete(id: ScannableCardRecordId): ScannableCardDeleteOutcome? {
         val card = loadById(id) ?: return null
-        db.beginTransaction()
-        try {
-            db.delete(Schema.Tables.SCANNABLE_CARDS, "id = ?", arrayOf(id.value.toString()))
-            db.setTransactionSuccessful()
-        } finally {
-            db.endTransaction()
-        }
+        db.delete(Schema.Tables.SCANNABLE_CARDS, "id = ?", arrayOf(id.value.toString()))
         return ScannableCardDeleteOutcome(format = card.format)
     }
 
