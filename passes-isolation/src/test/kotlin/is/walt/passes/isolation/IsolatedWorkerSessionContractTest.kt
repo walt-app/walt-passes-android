@@ -4,9 +4,9 @@ import com.google.common.truth.Truth.assertThat
 import org.junit.Test
 
 /**
- * Pure-JVM contract coverage for the shared session types. The Android `bindService` dance
- * in [AndroidIsolatedWorkerSessionFactory] is exercised on-device by
- * [IsolatedWorkerSessionInstrumentedTest]; what runs here is the part that needs no
+ * Pure-JVM contract coverage for the shared session types. The `bindService` dance in
+ * [AndroidIsolatedWorkerSessionFactory] is covered by [AndroidIsolatedWorkerSessionFactoryTest];
+ * what runs here is the part that needs no
  * framework — that [IsolatedWorkerSession] honours `AutoCloseable` (so a consumer's
  * `connect().session.use { ... }` always tears down) and that [ConnectResult] is the closed
  * two-arm shape every consumer folds over.

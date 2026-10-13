@@ -6,7 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.IBinder
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.coroutines.resume
 
@@ -20,7 +22,7 @@ import kotlin.coroutines.resume
  * Before consolidation each had its own copy of this bind dance; the copies had already
  * drifted (one represented connect failure as a rejecting session, another as `null`).
  * Folding them into one type and one connect-failure discipline ([ConnectResult]) is what
- * wpass-zrt.6 / wlt-ygl exist to do.
+ * this module exists to do.
  *
  * [client] is the typed wrapper a caller hands to [AndroidIsolatedWorkerSessionFactory];
  * this module never interprets it, so the per-worker binder contract and its result shape
@@ -47,8 +49,8 @@ public sealed interface ConnectResult<out C> {
     public data class Connected<C>(public val session: IsolatedWorkerSession<C>) : ConnectResult<C>
 
     /**
-     * `bindService` returned false (the service is missing from the manifest or the system
-     * refused the bind). No connection was established, so there is nothing to unbind.
+     * No connection was established: `bindService` returned false, or the bind was accepted
+     * but did not connect within the bind deadline. Either way the bind is already released.
      */
     public data object BindFailed : ConnectResult<Nothing>
 }
@@ -64,7 +66,13 @@ public class AndroidIsolatedWorkerSessionFactory<out C>(
     private val serviceClass: Class<out Service>,
     private val wrapBinder: (IBinder) -> C,
 ) : IsolatedWorkerSessionFactory<C> {
-    override suspend fun connect(): ConnectResult<C> =
+    /**
+     * Bounded by [BIND_TIMEOUT_MS]: a bind that is accepted but never reaches
+     * `onServiceConnected` folds to [ConnectResult.BindFailed] instead of hanging the caller.
+     */
+    override suspend fun connect(): ConnectResult<C> = connectWithin(BIND_TIMEOUT_MS, ::bind)
+
+    private suspend fun bind(): ConnectResult<C> =
         suspendCancellableCoroutine { cont ->
             val intent = Intent(context, serviceClass)
             lateinit var conn: ServiceConnection
@@ -93,10 +101,42 @@ public class AndroidIsolatedWorkerSessionFactory<out C>(
                 runCatching { context.unbindService(conn) }
                 cont.resume(ConnectResult.BindFailed)
             }
+            // Also runs when a resume is cancelled before dispatch, so a dropped session unbinds.
             cont.invokeOnCancellation {
                 runCatching { context.unbindService(conn) }
             }
         }
+
+    internal companion object {
+        /**
+         * Liveness backstop on the bind, not a performance bound. Several times the worst cold
+         * start seen on a loaded CI emulator, so a slow sandbox is not taken for a dead one.
+         */
+        const val BIND_TIMEOUT_MS: Long = 20_000L
+
+        /**
+         * Runs [bind] under [timeoutMs], folding expiry to [ConnectResult.BindFailed]. A session
+         * the caller never receives, through expiry or cancellation, is closed here.
+         */
+        suspend fun <C> connectWithin(
+            timeoutMs: Long,
+            bind: suspend () -> ConnectResult<C>,
+        ): ConnectResult<C> {
+            var arrived: ConnectResult<C>? = null
+            val result =
+                try {
+                    withTimeoutOrNull(timeoutMs) { bind().also { arrived = it } }
+                } catch (e: CancellationException) {
+                    (arrived as? ConnectResult.Connected)?.session?.close()
+                    throw e
+                }
+            if (result == null) {
+                (arrived as? ConnectResult.Connected)?.session?.close()
+                return ConnectResult.BindFailed
+            }
+            return result
+        }
+    }
 }
 
 private class AndroidSession<out C>(
