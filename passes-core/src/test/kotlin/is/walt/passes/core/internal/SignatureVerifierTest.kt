@@ -127,7 +127,7 @@ class SignatureVerifierTest {
 
         val result = runWithFakeAnchor(signature, manifest, ParserConfig.Strict)
 
-        assertFailed(result, TamperReason.SignatureCryptoFailure)
+        assertFailed(result, TamperReason.SignatureUntrusted)
     }
 
     @Test
@@ -150,7 +150,28 @@ class SignatureVerifierTest {
                 knownIntermediates = emptySet(),
             )
 
+        assertFailed(result, TamperReason.SignatureUntrusted)
+    }
+
+    @Test
+    fun strictStillRoutesGarbageBlobToCryptoFailure() {
+        val result = runWithFakeAnchor(ByteArray(64) { it.toByte() }, "{}".toByteArray(), ParserConfig.Strict)
+
         assertFailed(result, TamperReason.SignatureCryptoFailure)
+    }
+
+    @Test
+    fun strictChecksSignatureMathBeforeTrustPolicy() {
+        // A self-signed blob over different bytes is a mismatch, not an untrusted signer.
+        val key = newRsaKeyPair()
+        val leaf = selfSignedCertificate(key, "CN=Self Signed Leaf")
+        val original = "{\"pass.json\":\"abcd\"}".toByteArray()
+        val signature = cmsDetachedSignature(original, leaf, key.private, listOf(leaf))
+        val tampered = original.copyOf().also { it[1] = 0x20 }
+
+        val result = runWithFakeAnchor(signature, tampered, ParserConfig.Strict)
+
+        assertFailed(result, TamperReason.ManifestSignatureMismatch)
     }
 
     @Test

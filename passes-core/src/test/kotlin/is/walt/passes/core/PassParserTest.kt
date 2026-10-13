@@ -79,7 +79,7 @@ class PassParserTest {
         val result = PassParser.create(ParserConfig.Strict).parse(PassSource.Bytes(zip))
         assertThat(result).isInstanceOf(ParseResult.Tampered::class.java)
         assertThat((result as ParseResult.Tampered).reason)
-            .isEqualTo(TamperReason.SignatureCryptoFailure)
+            .isEqualTo(TamperReason.SignatureUntrusted)
     }
 
     @Test
