@@ -12,10 +12,8 @@ import org.junit.runner.RunWith
  *
  * Test fixtures (benign single-page PDF, malformed PDF) are tracked under the same
  * follow-up that hosts [PdfRendererServiceInstrumentedTest]'s fixtures (`wpass-5v9`)
- * and land with the on-device CI configuration. The tests are `@Ignore`d at check-in
- * so `./gradlew check` stays green on workstations without an emulator; CI flips them
- * on by overriding the Ignore via a test filter and runs them on AGP managed devices,
- * the same way `passes-storage` runs its Robolectric-incompatible scenarios.
+ * and land with the on-device CI configuration. The tests are `@Ignore`d stubs until then;
+ * nothing in CI runs them, and this module has no managed-device leg yet.
  */
 @RunWith(AndroidJUnit4::class)
 class PdfImporterInstrumentedTest {

@@ -5,6 +5,34 @@ plugins {
 
 android {
     namespace = "is.walt.passes.document"
+
+    // Same managed-device span as passes-ui; CI runs only the API 34 task.
+    testOptions {
+        managedDevices {
+            localDevices {
+                create("api28google") {
+                    device = "Pixel 2"
+                    apiLevel = 28
+                    systemImageSource = "google"
+                }
+                create("api31google") {
+                    device = "Pixel 2"
+                    apiLevel = 31
+                    systemImageSource = "google"
+                }
+                create("api34google") {
+                    device = "Pixel 2"
+                    apiLevel = 34
+                    systemImageSource = "google"
+                }
+                create("api36google") {
+                    device = "Pixel 2"
+                    apiLevel = 36
+                    systemImageSource = "google"
+                }
+            }
+        }
+    }
 }
 
 // Document-import orchestrator. The single seam that magic-byte-sniffs PDF vs image and
