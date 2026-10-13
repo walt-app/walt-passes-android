@@ -1,8 +1,9 @@
 # `apple-signed/` fixture
 
 Real Apple-signed pkpass artifacts pulled from a Tixly Chroniques ticket. Used by
-`SignatureVerifierTest.realAppleSignedPkpassFixtureVerifies` and
-`SignatureVerifierTest.realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider`
+`SignatureVerifierTest.realAppleSignedPkpassFixtureVerifies`,
+`SignatureVerifierTest.realAppleSignedPkpassVerifiesEvenWhenBcSlotHoldsAStrippedProvider` and
+`SignatureVerifierTest.realAppleSignedPkpassVerifiesWhenEnvelopeOmitsItsWwdrIntermediate`
 to exercise the full production verifier path against a wire-shape Apple ships, on top
 of the bundled Apple Root CA anchor set.
 
@@ -26,7 +27,7 @@ ID certificates are typically issued for 1 year). The verifier sets
 `PKIXBuilderParameters.date` to *now* and `isRevocationEnabled = false`; revocation is
 fine forever, but expiry will trip on the wall clock.
 
-When the leaf expires, both fixture-based tests will downgrade from
+When the leaf expires, the fixture-based tests will downgrade from
 `Ok(AppleVerified)` to `Ok(CertChainIncomplete)` and fail — per the documented behavior
 in `SignatureVerifier`'s "No date-shift override" docblock.
 
@@ -43,7 +44,9 @@ in `SignatureVerifier`'s "No date-shift override" docblock.
      | awk '/subject:.*Pass Type ID/{found=1} found && /notAfter:/{print; exit}'
    ```
 4. Rerun `:passes-core:test --tests "*.SignatureVerifierTest.realAppleSignedPkpass*"`
-   to confirm both tests turn green again.
+   to confirm all three tests turn green again. The stripped-envelope test removes every
+   WWDR certificate from `signature`, so it assumes the replacement pass's intermediate
+   is one of those bundled in `AppleTrustAnchors`.
 
 A deferred follow-up (noted in `SignatureVerifier.kt`'s docblock) would snapshot the
 PKIX path-build date to the CMS signing time, eliminating this maintenance loop. That

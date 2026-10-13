@@ -39,6 +39,7 @@ class AppleTrustAnchorsTest {
         val fingerprints = intermediates.map { sha256(it.encoded) }.toSet()
         assertThat(fingerprints).containsExactly(
             APPLE_WWDR_G3_SHA256,
+            APPLE_WWDR_G4_SHA256,
             APPLE_WWDR_G6_SHA256,
         )
     }
@@ -128,5 +129,7 @@ private const val APPLE_ROOT_CA_G3_SHA256 =
     "63:34:3A:BF:B8:9A:6A:03:EB:B5:7E:9B:3F:5F:A7:BE:7C:4F:5C:75:6F:30:17:B3:A8:C4:88:C3:65:3E:91:79"
 private const val APPLE_WWDR_G3_SHA256 =
     "DC:F2:18:78:C7:7F:41:98:E4:B4:61:4F:03:D6:96:D8:9C:66:C6:60:08:D4:24:4E:1B:99:16:1A:AC:91:60:1F"
+private const val APPLE_WWDR_G4_SHA256 =
+    "EA:47:57:88:55:38:DD:8C:B5:9F:F4:55:6F:67:60:87:D8:3C:85:E7:09:02:C1:22:E4:2C:08:08:B5:BC:E1:4C"
 private const val APPLE_WWDR_G6_SHA256 =
     "BD:D4:ED:6E:74:69:1F:0C:2B:FD:01:BE:02:96:19:7A:F1:37:9E:04:18:E2:D3:00:EF:A9:C3:BE:F6:42:CA:30"

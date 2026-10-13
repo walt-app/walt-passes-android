@@ -10,6 +10,7 @@ import org.bouncycastle.cms.CMSProcessableByteArray
 import org.bouncycastle.cms.CMSSignedData
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder
 import org.bouncycastle.jce.provider.BouncyCastleProvider
+import org.bouncycastle.util.CollectionStore
 import org.junit.BeforeClass
 import org.junit.Test
 import java.security.Provider
@@ -324,6 +325,38 @@ class SignatureVerifierTest {
         assertOk(result, SignatureStatus.AppleVerified)
     }
 
+    @Test
+    fun realAppleSignedPkpassVerifiesWhenEnvelopeOmitsItsWwdrIntermediate() {
+        // An issuer may ship only the leaf; the bundled copy of the fixture's WWDR
+        // intermediate must complete the chain.
+        val fixture = loadAppleSignedFixture()
+        val signature = withoutWwdrIntermediates(fixture.signature)
+
+        val withoutBundledIntermediates =
+            verifySignatureAgainstAnchorsForTesting(
+                signatureBytes = signature,
+                manifestBytes = fixture.manifest,
+                config = ParserConfig(),
+                trustAnchors = AppleTrustAnchors.trustAnchors(),
+                knownIntermediates = emptySet(),
+            )
+        assertOk(withoutBundledIntermediates, SignatureStatus.CertChainIncomplete)
+
+        val result = verifySignature(signature, fixture.manifest, ParserConfig())
+
+        assertOk(result, SignatureStatus.AppleVerified)
+    }
+
+    private fun withoutWwdrIntermediates(signature: ByteArray): ByteArray {
+        val signed = CMSSignedData(signature)
+
+        @Suppress("UNCHECKED_CAST")
+        val holders = signed.certificates.getMatches(null) as Collection<X509CertificateHolder>
+        val leafOnly = holders.filterNot { "Worldwide Developer Relations" in it.subject.toString() }
+        assertThat(leafOnly).hasSize(holders.size - 1)
+        return CMSSignedData.replaceCertificatesAndCRLs(signed, CollectionStore(leafOnly), null, null).encoded
+    }
+
     /**
      * Manifest + detached signature bytes pulled from a real Apple-signed pkpass.
      * Named fields so callers can't transpose the two `ByteArray`s — both arguments
@@ -399,7 +432,7 @@ class SignatureVerifierTest {
     fun knownIntermediateLetsBlobOmitItAndStillReachAnchor() {
         // The signature blob includes only the leaf, not the intermediate. The
         // bundled `knownIntermediates` set fills the gap so the chain still
-        // resolves to the trust anchor. This exercises the WWDR-G6-bundled path.
+        // resolves to the trust anchor, as a bundled WWDR intermediate does in production.
         val rootKey = newRsaKeyPair()
         val root = selfSignedCertificate(rootKey, "CN=Test Apple Root")
         val intermediateKey = newRsaKeyPair()
