@@ -114,3 +114,7 @@ updates:
       - "automated"
     commit-message:
       prefix: "ci"
+    # One weekly PR for all action bumps.
+    groups:
+      actions:
+        patterns: ["*"]
