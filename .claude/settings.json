@@ -1,12 +1,4 @@
 {
-  "hooks": {},
-  "permissions": {
-    "deny": [
-      "Bash(bd remember*)",
-      "Bash(bd memories*)",
-      "Bash(bd forget*)"
-    ]
-  },
   "enabledPlugins": {
     "figma@claude-plugins-official": true
   }
